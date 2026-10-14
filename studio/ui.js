@@ -22,8 +22,9 @@
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
   function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show)); } catch (e) { /* quota or blocked */ } }
-  function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'streets-v12'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
-  function loadShow(sh) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); sh.assets = sh.assets || {}; sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
+  function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
+  function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
+  function loadShow(sh) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); sh.assets = sh.assets || {}; sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
@@ -35,7 +36,7 @@
   function addObject(type, props, o) {
     o = o || {}; const ob = E.newObject(type, props), sc = cur();
     if (o.delay != null) ob.anim.delay = o.delay;
-    if (!o.noGeo && sc.bg.type === 'map') E.setGeo(ob, sc, editT(), true);
+    if (!o.noGeo && isMap(sc.bg)) E.setGeo(ob, sc, editT(), true);
     sc.objects.push(ob); S.oid = ob.id; commit(); renderPanels(); return ob;
   }
   function delObj() { const sc = cur(); if (!S.oid) return; sc.objects = sc.objects.filter(o => o.id !== S.oid); S.oid = null; commit(); renderPanels(); }
@@ -230,7 +231,7 @@
     if (T === 'pop') { B('value', 'text'); B('size', 'range', { min: 20, max: 120 }); }
     p.append(h('div', { className: 'h', text: 'Animation' }));
     B2(p, o.anim, 'in', 'select', { label: 'Entrance', options: E.ANIMS }); B2(p, o.anim, 'delay', 'range', { min: 0, max: 20, step: 0.1, label: 'Delay (s)' }); B2(p, o.anim, 'dur', 'range', { min: 0.1, max: 5, step: 0.1, label: 'Duration (s)' });
-    if (cur().bg.type === 'map') p.append(bind(o, 'geo', 'check', { label: 'Pin to map', after: v => { o.geo = !v; E.setGeo(o, cur(), editT(), v); } }), h('div', { className: 'hint', text: 'Pinned objects move and zoom with the map (position only – sizes stay fixed).' }));
+    if (isMap(cur().bg)) p.append(bind(o, 'geo', 'check', { label: 'Pin to map', after: v => { o.geo = !v; E.setGeo(o, cur(), editT(), v); } }), h('div', { className: 'hint', text: 'Pinned objects move and zoom with the map (position only – sizes stay fixed).' }));
     p.append(h('div', { className: 'h', text: 'Arrange' }), h('div', { className: 'btnrow' }, h('button', { text: 'Bring front', on: { click: () => layer('front') } }), h('button', { text: 'Send back', on: { click: () => layer('back') } }), h('button', { text: 'Duplicate', on: { click: dupObj } }), h('button', { text: 'Delete', className: 'dng', on: { click: delObj } })));
   }
   function B2(p, obj, k, kind, o) { p.append(bind(obj, k, kind, o)); }
@@ -241,12 +242,57 @@
       bind(sc.transition, 'type', 'select', { label: 'Transition in', options: E.TRANSITIONS }), bind(sc.transition, 'dur', 'range', { min: 0.2, max: 3, step: 0.1, label: 'Trans. length' }));
     p.append(h('div', { className: 'h', text: 'Background' }), bind(b, 'type', 'select', { label: 'Type', rerender: true, after: () => { b.view = null; b.view2 = null; S.editEnd = false; if (b.type === 'mapbox') g.MB.init().then(() => { refreshAll(); }).catch(() => { refreshAll(); }); }, options: [['mapbox', 'Mapbox map'], ['map', 'US map (basic, offline)'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] }));
     if (b.type === 'mapbox') {
+      g.MB.ensureConfig(b);
       const mv = (S.editEnd && b.view2) ? b.view2 : (b.view || (b.view = JSON.parse(JSON.stringify(E.viewAt(sc, 0)))));
-      p.append(bind(b, 'mbStyle', 'select', { label: 'Map style', options: g.MB.STYLES }), bind(b, 'proj', 'select', { label: 'Projection', options: g.MB.PROJ }),
-        bind(b, 'region', 'select', { label: 'Region', options: g.MB.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; renderPanels(); } }),
-        bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom' }), bind(mv, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }), bind(mv, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' }),
+      p.append(
+        bind(b, 'mbStyle', 'select', { label: 'Map style', rerender:true, options: g.MB.STYLES, after:()=>g.MB.ensureConfig(b) }),
+        bind(b, 'proj', 'select', { label: 'Projection', options: g.MB.PROJ }),
+        bind(b, 'region', 'select', { label: 'Camera view', options: g.MB.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; renderPanels(); } }),
+        bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom' }),
+        bind(mv, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }),
+        bind(mv, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' })
+      );
+      if(b.mbStyle==='broadcast'){
+        const B=(k,kind,o)=>p.append(bind(b,k,kind,o));
+        p.append(h('div',{className:'h',text:'Weather Director map'}));
+        B('broadcastBase','select',{label:'Base',rerender:true,options:[['satellite','Satellite broadcast'],['terrain','Terrain / cartographic']]});
+        B('atmosphere','select',{label:'Atmosphere',options:[['broadcast','Broadcast blue'],['natural','Natural'],['dark','Dark space'],['none','None']]});
+        B('terrain','check',{label:'3D terrain',rerender:true}); if(b.terrain)B('terrainExaggeration','range',{label:'Terrain strength',min:0,max:3,step:.1});
+
+        p.append(h('div',{className:'h',text:'Land + water'}));
+        B('broadcastWaterColor','color',{label:'Water tint'});B('broadcastWaterTintOpacity','range',{label:'Water opacity',min:0,max:.8,step:.05});
+        B('broadcastLandColor','color',{label:'Land tint'});B('broadcastLandTintOpacity','range',{label:'Land opacity',min:0,max:.6,step:.05});
+        if(b.broadcastBase==='satellite'){B('broadcastSatelliteSaturation','range',{label:'Satellite saturation',min:-1,max:1,step:.05});B('broadcastSatelliteContrast','range',{label:'Satellite contrast',min:-1,max:1,step:.05});}
+
+        p.append(h('div',{className:'h',text:'City + town labels'}));
+        B('broadcastShowCities','check',{label:'Show places'});B('broadcastUppercaseLabels','check',{label:'Uppercase'});
+        B('broadcastPlaceDensity','select',{label:'Place types',options:[['cities','Cities only'],['towns','Cities + towns'],['villages','Cities + towns + villages'],['all','Maximum detail']]});
+        B('broadcastKeepMajorCities','check',{label:'Keep major cities'});B('broadcastMajorCityRank','range',{label:'Major-city rank',min:1,max:16,step:1});
+        B('broadcastLabelFont','select',{label:'Label font',options:[['DIN Pro Bold','DIN Pro Bold'],['DIN Pro Medium','DIN Pro Medium'],['Roboto Bold','Roboto Bold'],['Roboto Medium','Roboto Medium'],['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold']]});
+        B('broadcastLabelDensity','select',{label:'Label density',options:[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['maximum','Maximum']]});
+        B('broadcastLabelOpacity','range',{label:'Label opacity',min:0,max:1,step:.05});B('broadcastLabelSpacing','range',{label:'Label spacing',min:.5,max:3,step:.05});
+        B('broadcastLabelColor','color',{label:'Label color'});B('broadcastLabelHaloColor','color',{label:'Label halo'});B('broadcastLabelHaloWidth','range',{label:'Halo width',min:0,max:5,step:.25});
+        B('broadcastCitySize','range',{label:'City size',min:8,max:36,step:1});B('broadcastCityMinZoom','range',{label:'City min zoom',min:0,max:12,step:.5});
+        B('broadcastTownSize','range',{label:'Town size',min:8,max:30,step:1});B('broadcastTownMinZoom','range',{label:'Town min zoom',min:0,max:14,step:.5});
+        B('broadcastVillageSize','range',{label:'Village size',min:7,max:26,step:1});B('broadcastVillageMinZoom','range',{label:'Village min zoom',min:0,max:16,step:.5});
+
+        p.append(h('div',{className:'h',text:'Boundaries'}));
+        B('broadcastShowCoastline','check',{label:'Coastline'});B('broadcastCoastlineColor','color',{label:'Coastline color'});B('broadcastCoastlineWidth','range',{label:'Coastline width',min:.5,max:5,step:.25});
+        B('broadcastShowCountryBorders','check',{label:'Country borders'});B('broadcastCountryColor','color',{label:'Country color'});B('broadcastCountryWidth','range',{label:'Country width',min:.5,max:5,step:.25});
+        B('broadcastShowStateBorders','check',{label:'State borders'});B('broadcastStateColor','color',{label:'State color'});B('broadcastStateWidth','range',{label:'State width',min:.5,max:5,step:.25});
+        B('broadcastShowCountyBorders','check',{label:'County borders',rerender:true});if(b.broadcastShowCountyBorders){B('broadcastCountyColor','color',{label:'County color'});B('broadcastCountyWidth','range',{label:'County width',min:.5,max:4,step:.25});}
+
+        p.append(h('div',{className:'h',text:'Roads'}));
+        B('broadcastShowRoads','check',{label:'Show roads'});B('broadcastRoadColor','color',{label:'Road color'});B('broadcastRoadOpacity','range',{label:'Road opacity',min:0,max:1,step:.05});B('broadcastRoadWidth','range',{label:'Road width',min:.25,max:3,step:.05});
+        B('broadcastMainRoadMinZoom','range',{label:'Major road min',min:0,max:16,step:.5});B('broadcastMainRoadMaxZoom','range',{label:'Major road max',min:.5,max:22,step:.5});
+        B('broadcastStateRoadMinZoom','range',{label:'State/primary min',min:0,max:18,step:.5});B('broadcastOtherRoadMinZoom','range',{label:'Other road min',min:0,max:20,step:.5});
+        B('broadcastShowRoadShields','check',{label:'Road shields',rerender:true});if(b.broadcastShowRoadShields){B('broadcastRoadShieldDensity','range',{label:'Shield density',min:1,max:5,step:1});B('broadcastRoadShieldSize','range',{label:'Shield size',min:.6,max:2,step:.1});B('broadcastRoadShieldMinZoom','range',{label:'Shield min zoom',min:0,max:18,step:.5});}
+        B('broadcastShowRoadLabels','check',{label:'Road names'});B('broadcastShowPOI','check',{label:'POI labels'});B('broadcastShowNaturalLabels','check',{label:'Natural labels'});
+      }
+      p.append(
         h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } })),
-        h('div', { className: 'hint', text: 'Cities, towns, roads and road signs appear and fade by zoom exactly like Mapbox. Drag the empty map to pan, scroll to zoom. Pinned objects follow the map.' }));
+        h('div', { className: 'hint', text: b.mbStyle==='broadcast'?'WXfusion Weather Director broadcast cartography is active. Drag the map to pan and scroll to zoom; map settings are stored with this scene.':'Mapbox stock style. Drag the map to pan and scroll to zoom.' })
+      );
     }
     if (b.type === 'map' || b.type === 'mapbox') p.append(h('div', { className: 'h', text: 'Camera move (zoom in during the scene)' }), h('div', { className: 'btnrow' },
         h('button', { text: 'Edit START view', className: S.editEnd ? '' : 'on', on: { click: () => { S.editEnd = false; renderPanels(); } } }),
@@ -362,7 +408,7 @@
   /* ---------- boot ---------- */
   function boot() {
     buildTools(); let sh = null; try { const raw = localStorage.getItem(KEY); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
-    if (sh) migrateMB(sh); S.show = sh || E.newShow(); S.show.assets = S.show.assets || {}; S.hist = []; S.hp = -1; commit(); refreshAll(); if (sh) { toast('Restored your last session'); E.preload(S.show).then(() => thumbSoon(true)); }
+    if (sh) { migrateMB(sh); migrateWDBroadcast(sh); } S.show = sh || E.newShow(); S.show.assets = S.show.assets || {}; S.hist = []; S.hp = -1; commit(); refreshAll(); if (sh) { toast('Restored your last session'); E.preload(S.show).then(() => thumbSoon(true)); }
     g.MB.onUpdate = () => thumbSoon(true); if (!g.MB.hasToken() && S.show.scenes.some(x => x.bg.type === 'mapbox')) setTimeout(mapboxSettings, 600); if (S.show.scenes.some(x => x.bg.type === 'mapbox') && g.MB.hasToken()) g.MB.init().then(() => thumbSoon(true)).catch(() => { }); g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
     if (document.fonts) { ['800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
     requestAnimationFrame(loop);

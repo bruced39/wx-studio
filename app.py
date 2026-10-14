@@ -14,7 +14,7 @@ st.markdown(
 with st.sidebar:
     st.header("WX Studio")
     height = st.slider("Studio height (px)", 700, 1400, 940, 20)
-    st.caption("Mapbox: paste your public token (pk.…) inside the studio (Scene panel), or set MAPBOX_TOKEN in this app's Streamlit secrets.")
+    st.caption("Mapbox: uses MAPBOX_PUBLIC_TOKEN (WXfusion) or MAPBOX_TOKEN from Streamlit secrets; you can also paste a public token inside the studio.")
     st.caption("Tip: use Chrome or Edge. MP4 export uses your browser's H.264 encoder.")
 
 
@@ -25,7 +25,11 @@ def _html() -> str:
 
 def _token() -> str:
     try:
-        return str(st.secrets.get("MAPBOX_TOKEN", "")).strip()
+        for key in ("MAPBOX_PUBLIC_TOKEN", "MAPBOX_TOKEN"):
+            value = str(st.secrets.get(key, "")).strip()
+            if value.startswith("pk."):
+                return value
+        return ""
     except Exception:
         return ""
 

@@ -23,7 +23,7 @@
     o = o || {};
     return {
       id: nid('s'), name: o.name || 'Scene', duration: o.duration || 6, transition: o.transition || { type: 'dissolve', dur: 0.8 },
-      bg: Object.assign({ type: 'mapbox', mbStyle: 'streets-v12', proj: 'mercator', theme: 'dark', region: 'newengland', view: null, view2: null, grad: 'sky', color: '#101820', asset: null, dim: 0, kenburns: false }, o.bg || {}),
+      bg: Object.assign({ type: 'mapbox', mbStyle: 'broadcast', proj: 'mercator', theme: 'dark', region: 'eastma', view: null, view2: null, grad: 'sky', color: '#101820', asset: null, dim: 0, kenburns: false }, o.bg || {}),
       title: Object.assign({ show: true, text: '', sub: '', pos: 'top-left' }, o.title || {}), objects: o.objects || []
     };
   };
