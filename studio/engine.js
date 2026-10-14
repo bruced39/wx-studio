@@ -326,8 +326,8 @@
   };
   E.sample7 = function () {
     const names = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], d0 = new Date(); d0.setDate(d0.getDate() + 1);
-    const S = [['sunny', 'Sunny', 62, 44, 0, ''], ['partly-cloudy', 'Partly Sunny', 65, 47, 10, 'BREEZY'], ['cloudy', 'Increasing Clouds', 61, 49, 20, ''], ['showers-day', 'Showers Likely', 58, 46, 60, ''], ['rain', 'Rain', 55, 44, 80, 'WINDY'], ['mostly-sunny', 'Clearing, Cooler', 52, 38, 10, 'COOL'], ['sunny', 'Sunny', 54, 36, 0, '']];
-    return S.map((s, i) => { const d = new Date(d0); d.setDate(d.getDate() + i); return { day: names[d.getDay()], date: `${d.getMonth() + 1}/${d.getDate()}`, icon: s[0], phrase: s[1], hi: s[2], lo: s[3], pop: s[4], tag: s[5] }; });
+    const S = [['sunny', 'Sunny', 62, 44, 0, 'MILD'], ['partly-cloudy', 'Partly Sunny', 65, 47, 10, 'BREEZY'], ['cloudy', 'Increasing Clouds', 61, 49, 20, ''], ['showers-day', 'Showers Likely', 58, 46, 60, ''], ['rain', 'Rain', 55, 44, 80, 'WINDY'], ['mostly-sunny', 'Clearing, Cooler', 52, 38, 10, 'COOL'], ['sunny', 'Sunny', 54, 36, 0, '']];
+    return S.map((s, i) => { const d = new Date(d0); d.setDate(d.getDate() + i); return { day: names[d.getDay()], date: `${d.getMonth() + 1}/${d.getDate()}`, icon: s[0], phrase: s[1], hi: s[2], lo: s[3], pop: s[4], tag: s[5], tag2: s[6] || '' }; });
   };
   function wrapText(txt, size, maxW) {
     txt = String(txt || ''); if (!mctx || txt.indexOf('\n') >= 0) return txt; mctx.font = `600 ${size}px ${FONT()}`;
@@ -356,6 +356,41 @@
       if (Number(d.pop) > 0) add('pop', { x: cx - 50, y: y0 + 672, size: 38, value: d.pop + '%' }, 0.3);
     });
     return objs;
+  };
+
+  /* ---------- Billerica Weather 7-day layout (fits the supplied template background) ---------- */
+  E.build7DayBW = function (days) {
+    const f = 1920 / 1672, S = v => v * f, objs = [];
+    const COLS = [[25, 281], [298, 553], [573, 828], [846, 1102], [1119, 1375]], RC = [1394, 1650], LOWS = [[206, 370], [480, 643], [754, 917], [1029, 1192]];
+    const NAVY = 'rgba(8,36,92,0.97)', ORANGE = '#f28a1c', GREEN = '#25d450', LOWC = '#7fcfff';
+    const mk = (d, i, x0, x1, y0, y1, delay) => {
+      const add = (type, props, ex) => { const ob = E.newObject(type, props); ob.anim = { in: 'slide-up', delay: delay + (ex || 0), dur: 0.5 }; objs.push(ob); return ob; };
+      const wk = /^(SAT|SUN)/i.test(d.day), x = S(x0), w = S(x1 - x0), cx = x + w / 2;
+      add('shape', { shape: 'rect', x, y: S(y0), w, h: S(72), fill: wk ? ORANGE : NAVY, stroke: 'rgba(255,255,255,0.8)', lw: 2 });
+      add('shape', { shape: 'rect', x, y: S(y0), w, h: S(36), fill: 'rgba(255,255,255,0.12)', stroke: 'none', lw: 0 });
+      add('text', { x: cx, y: S(y0 + 36) - 34, text: d.day, size: 76, align: 'center', color: '#fff', weight: 800 }, 0.04);
+      return { add, cx, w, x };
+    };
+    days.slice(0, 5).forEach((d, i) => {
+      const [x0, x1] = COLS[i], c = mk(d, i, x0, x1, 168, 240, i * 0.14), add = c.add, cx = c.cx;
+      add('icon', { x: cx, y: S(370), size: c.w * 0.86, icon: d.icon }, 0.1);
+      if (d.tag2) add('text', { x: cx, y: S(468) - 26, text: String(d.tag2).toUpperCase(), size: 48, align: 'center', color: '#bfe6ff', weight: 800 }, 0.25);
+      add('text', { x: cx, y: S(500), text: wrapText(String(d.phrase || '').toUpperCase(), 30, c.w - 30), size: 30, align: 'center', color: '#ffffff', weight: 700, font: 'display' }, 0.15);
+      if (d.tag) add('text', { x: cx, y: S(677) - 44, text: String(d.tag).toUpperCase(), size: 52, align: 'center', color: '#ffd23f', weight: 800 }, 0.3);
+      add('text', { x: cx, y: S(727) - 36, text: (Number(d.pop) || 0) + '%', size: 36, align: 'center', color: GREEN, weight: 800 }, 0.3);
+      add('text', { x: cx, y: S(782) - 60, text: String(d.hi) + '°', size: 112, align: 'center', color: '#eef3fb', weight: 800 }, 0.2);
+      if (i < 4 && days[i].lo != null && days[i].lo !== '') { const lx = S(LOWS[i][0] + LOWS[i][1]) / 2; const o = E.newObject('text', { x: lx, y: S(879) - 43, text: String(days[i].lo) + '°', size: 74, align: 'center', color: LOWC, weight: 800 }); o.anim = { in: 'slide-up', delay: i * 0.14 + 0.35, dur: 0.5 }; objs.push(o); }
+    });
+    [[5, 168, 243], [6, 556, 630]].forEach(([i, hy, by], n) => {
+      const d = days[i]; if (!d) return; const c = mk(d, i, RC[0], RC[1], hy, hy + 72, 0.7 + n * 0.14), add = c.add, cx = c.cx;
+      add('icon', { x: cx, y: S(by + 120), size: c.w * 0.8, icon: d.icon }, 0.1);
+      add('text', { x: cx, y: S(by + 226) - 34, text: (Number(d.pop) || 0) + '%', size: 36, align: 'center', color: GREEN, weight: 800 }, 0.25);
+      add('text', { x: cx, y: S(by + 276) - 44, text: String(d.hi) + '°', size: 84, align: 'center', color: '#eef3fb', weight: 800 }, 0.2);
+    });
+    return objs;
+  };
+  E.sceneFromBW = function (days, assetId) {
+    return E.newScene({ name: '7-Day Forecast', duration: 10, bg: { type: 'image', asset: assetId, kenburns: false }, title: { show: false, text: '', sub: '' }, objects: E.build7DayBW(days) });
   };
   E.sceneFrom7Day = function (days, titleText, sub) {
     return E.newScene({ name: '7-Day Forecast', duration: 10, bg: { type: 'gradient', grad: 'sky' }, title: { show: true, text: titleText || '7-Day Forecast', sub: sub || 'Billerica, MA' }, objects: E.build7Day(days) });
