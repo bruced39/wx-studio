@@ -72,7 +72,10 @@
   }
   const hlBounds = (x, y, size) => ({ x: x - size * 0.55, y: y - size * 0.55, w: size * 1.1, h: size * 1.4 });
 
-  /* ---------- fronts ---------- */
+  /* ---------- fronts ----------
+ * Glyphs sit on the LEFT-hand side of the drawing direction (the 'Flip side' option swaps them).
+ * Draw a cold front top-to-bottom and its triangles point right (east); draw a warm front
+ * west-to-east and its half-circles point up (north). */
   const FC = { cold: '#2f80ff', warm: '#ff3b3b', occluded: '#b24bf3', stationary: ['#2f80ff', '#ff3b3b'], trough: '#e8932c', dryline: '#ffa83a' };
   function tri(c, p, side, s, col) {
     const nx = -p.ty * side, ny = p.tx * side;
@@ -83,12 +86,12 @@
   }
   function semi(c, p, side, s, col) {
     const ang = Math.atan2(p.ty, p.tx); c.fillStyle = col; c.beginPath();
-    if (side > 0) c.arc(p.x, p.y, s * 0.5, ang + Math.PI, ang + TAU); else c.arc(p.x, p.y, s * 0.5, ang, ang + Math.PI);
+    if (side > 0) c.arc(p.x, p.y, s * 0.5, ang, ang + Math.PI); else c.arc(p.x, p.y, s * 0.5, ang + Math.PI, ang + TAU);
     c.closePath(); c.fill();
   }
   function drawFront(c, kind, pts, size, t, o) {
     o = o || {}; if (!pts || pts.length < 2) return;
-    const prog = o.progress == null ? 1 : o.progress, flip = o.flip ? -1 : 1, spd = o.speed == null ? 0.35 : o.speed;
+    const prog = o.progress == null ? 1 : o.progress, flip = o.flip ? 1 : -1, spd = o.speed == null ? 0.35 : o.speed;
     const m = measure(catmull(pts, false, 10)), Lp = m.L * prog, sp = size * 2.1, lw = Math.max(3, size * 0.2);
     const cols = FC[kind] || '#fff';
     c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
