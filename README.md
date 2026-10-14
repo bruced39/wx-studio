@@ -32,3 +32,9 @@ Or without Streamlit: `python wxbuild.py` then open `dist/studio.html`.
 3. Click-a-site NEXRAD Level II loops (server-side decode)
 4. Model scenes: HRRR, GFS, ECMWF open data, RRFS, tropical tracks (NHC ATCF)
 5. Fill the 7-day builder from NWS / Model Desk
+
+## Mapbox maps
+Scene → Background → **Mapbox map**. Create a free account at mapbox.com, copy your default public token (`pk.…`) and paste it in
+Scene → *Mapbox settings* (stored in your browser), or add `MAPBOX_TOKEN = "pk...."` to the app's Streamlit secrets.
+Styles keep Mapbox's own zoom rules (cities, towns, roads and road shields pop in/out by zoom); Mercator or Globe projection.
+Keep the browser tab visible while exporting. Each studio session uses two Mapbox map loads.

@@ -23,7 +23,7 @@
     o = o || {};
     return {
       id: nid('s'), name: o.name || 'Scene', duration: o.duration || 6, transition: o.transition || { type: 'dissolve', dur: 0.8 },
-      bg: Object.assign({ type: 'map', theme: 'dark', region: 'newengland', view: null, view2: null, grad: 'sky', color: '#101820', asset: null, dim: 0, kenburns: false }, o.bg || {}),
+      bg: Object.assign({ type: (g.MB && g.MB.hasToken()) ? 'mapbox' : 'map', mbStyle: 'streets-v12', proj: 'mercator', theme: 'dark', region: 'newengland', view: null, view2: null, grad: 'sky', color: '#101820', asset: null, dim: 0, kenburns: false }, o.bg || {}),
       title: Object.assign({ show: true, text: '', sub: '', pos: 'top-left' }, o.title || {}), objects: o.objects || []
     };
   };
@@ -69,6 +69,11 @@
   /* ---------- map camera + geo transform ---------- */
   E.viewAt = function (scene, t) {
     const b = scene.bg, M = g.WDMap;
+    if (b.type === 'mapbox') {
+      const a = b.view || g.MB.regionCam(b.region); if (!b.view2 || !b.camDur) return a;
+      const p = ease.inout(clamp((t - (b.camDelay || 0)) / b.camDur, 0, 1)), z = b.view2, L = (x, y) => x + (y - x) * p;
+      return { c: [L(a.c[0], z.c[0]), L(a.c[1], z.c[1])], z: L(a.z, z.z), b: L(a.b || 0, z.b || 0), p: L(a.p || 0, z.p || 0) };
+    }
     const v1 = b.view || (M ? M.regionView(b.region) : { cx: 487, cy: 305, w: 975 });
     if (!b.view2 || !b.camDur) return v1;
     const p = ease.inout(clamp((t - (b.camDelay || 0)) / b.camDur, 0, 1));
@@ -76,6 +81,10 @@
     return { cx: v1.cx + (b.view2.cx - v1.cx) * p, cy: v1.cy + (b.view2.cy - v1.cy) * p, w: Math.exp(lw) };
   };
   E.xf = function (scene, t) {
+    if (scene.bg.type === 'mapbox') {
+      const v = E.viewAt(scene, t), m = g.MB.xf(scene.bg, v), off = () => [-1e5, -1e5];
+      return { k: 1, map: true, mb: true, v, kOf: o => Math.pow(2, v.z - (o.z0 != null ? o.z0 : v.z)), fwd: m ? m.fwd : off, inv: m ? m.inv : off };
+    }
     if (scene.bg.type !== 'map') return { k: 1, fwd: (x, y) => [x, y], inv: (x, y) => [x, y], map: false };
     const v = E.viewAt(scene, t), k = W / v.w;
     return { k, map: true, v, fwd: (x, y) => [W / 2 + (x - v.cx) * k, H / 2 + (y - v.cy) * k], inv: (x, y) => [(x - W / 2) / k + v.cx, (y - H / 2) / k + v.cy] };
@@ -85,13 +94,18 @@
     if (!o.geo || !xf.map) return o;
     const s = Object.assign({}, o);
     if (o.pts) s.pts = o.pts.map(p => xf.fwd(p[0], p[1]));
-    if (o.x != null && o.y != null) { const p = xf.fwd(o.x, o.y); s.x = p[0]; s.y = p[1]; if (GEO_SCALED[o.type]) { s.w = o.w * xf.k; s.h = o.h * xf.k; } }
+    if (o.x != null && o.y != null) { const p = xf.fwd(o.x, o.y), kk = xf.kOf ? xf.kOf(o) : xf.k; s.x = p[0]; s.y = p[1]; if (GEO_SCALED[o.type]) { s.w = o.w * kk; s.h = o.h * kk; } }
     return s;
   }
   E.toScreen = toScreen;
   /* convert an object between screen space and map space (for the "pin to map" toggle) */
   E.setGeo = function (o, scene, t, on) {
     const xf = E.xf(scene, t); if (!xf.map || !!o.geo === !!on) { o.geo = !!on && xf.map; return; }
+    if (xf.mb) {
+      if (on) { if (o.pts) o.pts = o.pts.map(p => xf.inv(p[0], p[1])); if (o.x != null) { const p = xf.inv(o.x, o.y); o.x = p[0]; o.y = p[1]; o.z0 = xf.v.z; } }
+      else { const kk = xf.kOf(o); if (o.pts) o.pts = o.pts.map(p => xf.fwd(p[0], p[1])); if (o.x != null) { const p = xf.fwd(o.x, o.y); o.x = p[0]; o.y = p[1]; if (GEO_SCALED[o.type]) { o.w *= kk; o.h *= kk; } delete o.z0; } }
+      o.geo = !!on; return;
+    }
     if (on) { // screen -> map
       if (o.pts) o.pts = o.pts.map(p => xf.inv(p[0], p[1]));
       if (o.x != null) { const p = xf.inv(o.x, o.y); o.x = p[0]; o.y = p[1]; if (GEO_SCALED[o.type]) { o.w /= xf.k; o.h /= xf.k; } }
@@ -186,7 +200,13 @@
   /* ---------- scene chrome: background, title, logo ---------- */
   function drawBackground(c, show, scene, t, ct) {
     const b = scene.bg; if (ct == null) ct = t;
-    if (b.type === 'map') {
+    if (b.type === 'mapbox') {
+      const fr = g.MB.frame(b, E.viewAt(scene, ct));
+      if (fr) c.drawImage(fr, 0, 0, W, H); else { c.fillStyle = '#0b1a2e'; c.fillRect(0, 0, W, H); }
+      c.save(); c.font = `600 26px ${SANS}`; c.textAlign = 'center';
+      if (!fr || g.MB.status !== 'ready') { c.fillStyle = g.MB.status === 'error' || !g.MB.hasToken() ? '#ffb4a8' : 'rgba(255,255,255,0.6)'; c.fillText(g.MB.status === 'error' ? 'Mapbox: ' + g.MB.err : (!g.MB.hasToken() ? 'Add your Mapbox token: Scene panel → Mapbox settings' : 'Loading Mapbox map…'), W / 2, H / 2); }
+      c.textAlign = 'left'; c.font = `500 15px ${SANS}`; c.fillStyle = 'rgba(255,255,255,0.78)'; c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 4; c.fillText('© Mapbox  © OpenStreetMap contributors', 14, H - 12); c.restore();
+    } else if (b.type === 'map') {
       g.WDMap.draw(c, E.viewAt(scene, ct), b.theme, { W, H, cities: b.cities !== false, counties: b.counties !== false, density: b.cityDensity || 1 });
       if (g.WDMap.status !== 'ready') { c.save(); c.fillStyle = 'rgba(255,255,255,0.18)'; c.font = `600 26px ${SANS}`; c.textAlign = 'center'; c.fillText(g.WDMap.status === 'error' ? 'Map data could not be loaded (needs internet) – backgrounds still work' : 'Loading map…', W / 2, H - 40); c.restore(); }
     } else if (b.type === 'image') {
@@ -254,6 +274,15 @@
     }
     c.restore();
   }
+  /* export helper: make sure every Mapbox frame needed at show time T is rendered before the synchronous draw */
+  E.prepareFrame = async function (show, T) {
+    if (!g.MB || !show.scenes.some(s => s.bg.type === 'mapbox')) return;
+    const st = E.starts(show), tot = E.total(show); T = clamp(T, 0, Math.max(0, tot - 0.0001));
+    let i = 0; while (i + 1 < st.length && T >= st[i + 1]) i++;
+    const sc = show.scenes[i], t = T - st[i], tr = sc.transition || { type: 'cut', dur: 0 }, need = [];
+    if (i > 0 && tr.type !== 'cut' && t < tr.dur) { need.push([show.scenes[i - 1], show.scenes[i - 1].duration + t]); need.push([sc, t]); } else need.push([sc, t]);
+    for (const [s, tt] of need) if (s.bg.type === 'mapbox') await g.MB.snap(s.bg, E.viewAt(s, tt));
+  };
   E.renderShow = function (c, show, T, opts) {
     const st = E.starts(show), tot = E.total(show); T = clamp(T, 0, Math.max(0, tot - 0.0001));
     let i = 0; while (i + 1 < st.length && T >= st[i + 1]) i++;
@@ -284,6 +313,7 @@
   };
   /* move an object by a screen-space delta */
   E.move = function (o, dx, dy, xf) {
+    if (o.geo && xf.mb) { const mv = p => xf.inv(xf.fwd(p[0], p[1])[0] + dx, xf.fwd(p[0], p[1])[1] + dy); if (o.pts) o.pts = o.pts.map(mv); if (o.x != null) { const q = mv([o.x, o.y]); o.x = q[0]; o.y = q[1]; } return; }
     const k = (o.geo && xf.map) ? xf.k : 1, mx = dx / k, my = dy / k;
     if (o.pts) o.pts = o.pts.map(p => [p[0] + mx, p[1] + my]); if (o.x != null) { o.x += mx; o.y += my; }
   };

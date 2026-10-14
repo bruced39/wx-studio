@@ -8,6 +8,7 @@
   const KEY = 'wx.studio.autosave.v1';
   const cur = () => S.show.scenes[S.si];
   const selObj = () => cur().objects.find(o => o.id === S.oid) || null;
+  const isMap = bg => bg.type === 'map' || bg.type === 'mapbox';
   const editT = () => (S.editEnd && cur().bg.view2) ? (cur().bg.camDelay || 0) + (cur().bg.camDur || 3) + 0.01 : 0;
   const clock = () => performance.now() / 1000;
   function h(tag, a, ...kids) { const e = document.createElement(tag); Object.keys(a || {}).forEach(k => { if (k === 'on') Object.keys(a.on).forEach(ev => e.addEventListener(ev, a.on[ev])); else if (k === 'text') e.textContent = a[k]; else if (k === 'style') e.style.cssText = a[k]; else if (k in e && k !== 'list') e[k] = a[k]; else e.setAttribute(k, a[k]); }); kids.flat().forEach(c => { if (c != null) e.append(c.nodeType ? c : document.createTextNode(c)); }); return e; }
@@ -39,7 +40,7 @@
   function delObj() { const sc = cur(); if (!S.oid) return; sc.objects = sc.objects.filter(o => o.id !== S.oid); S.oid = null; commit(); renderPanels(); }
   function dupObj() { const o = selObj(); if (!o) return; const c = JSON.parse(JSON.stringify(o)); c.id = 'o' + Date.now().toString(36); const xf = E.xf(cur(), editT()); E.move(c, 30, 30, xf); cur().objects.push(c); S.oid = c.id; commit(); renderPanels(); }
   function layer(dir) { const a = cur().objects, i = a.findIndex(o => o.id === S.oid); if (i < 0) return; const j = dir === 'front' ? a.length - 1 : dir === 'back' ? 0 : clamp(i + dir, 0, a.length - 1); const [o] = a.splice(i, 1); a.splice(j, 0, o); commit(); }
-  function newScene(after) { const prev = cur(), sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: JSON.parse(JSON.stringify(prev.bg)), title: { show: true, text: '', sub: '' } }); sc.bg.view = prev.bg.view ? Object.assign({}, prev.bg.view) : null; sc.bg.view2 = null; S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
+  function newScene(after) { const prev = cur(), sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: JSON.parse(JSON.stringify(prev.bg)), title: { show: true, text: '', sub: '' } }); sc.bg.view = prev.bg.view ? JSON.parse(JSON.stringify(prev.bg.view)) : null; sc.bg.view2 = null; S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
 
   /* ---------- assets ---------- */
   function readImage(file) {
@@ -88,7 +89,7 @@
     return r;
   }
   function backToEdit() { if (S.mode !== 'edit') { S.mode = 'edit'; S.play = null; updateTransport(); } }
-  function mapView(sc) { const k = (S.editEnd && sc.bg.view2) ? 'view2' : 'view'; if (!sc.bg[k]) sc.bg[k] = Object.assign({}, E.viewAt(sc, editT())); return sc.bg[k]; }
+  function mapView(sc) { const k = (S.editEnd && sc.bg.view2) ? 'view2' : 'view'; if (!sc.bg[k]) sc.bg[k] = JSON.parse(JSON.stringify(E.viewAt(sc, editT()))); return sc.bg[k]; }
   ov.addEventListener('pointerdown', e => {
     if (S.present) return; backToEdit(); ov.setPointerCapture(e.pointerId); const p = pt(e), sc = cur(), xf = E.xf(sc, editT());
     if (S.tool === 'select') {
@@ -120,19 +121,22 @@
     if (d.k === 'move' && o) { E.move(o, p[0] - d.last[0], p[1] - d.last[1], xf); d.last = p; d.moved = true; }
     else if (d.k === 'vert' && o) { const k = (o.geo && xf.map) ? xf.k : 1, q = o.geo && xf.map ? xf.inv(p[0], p[1]) : p; o.pts[d.i] = [q[0], q[1]]; }
     else if (d.k === 'resize' && o) {
-      const so = E.toScreen(o, xf), k = (o.geo && xf.map) ? xf.k : 1;
+      const so = E.toScreen(o, xf), k = (o.geo && xf.map) ? (xf.kOf ? xf.kOf(o) : xf.k) : 1;
       if (o.type === 'shape' || o.type === 'image') { o.w += (p[0] - d.last[0]) / k; o.h += (p[1] - d.last[1]) / k; if (o.type === 'image' && e.shiftKey === false) { /* free resize */ } }
       else if (o.type === 'text') o.size = clamp(o.size + (p[1] - d.last[1]) * 0.6, 12, 400);
       else { const r0 = Math.hypot(d.last[0] - d.c[0], d.last[1] - d.c[1]) || 1, r1 = Math.hypot(p[0] - d.c[0], p[1] - d.c[1]); o.size = clamp((o.size || 100) * r1 / r0, 20, 900); }
       d.last = p;
     }
+    else if (d.k === 'pan' && xf.mb) { const v = mapView(sc), q = xf.inv(W / 2 - (p[0] - d.last[0]), H / 2 - (p[1] - d.last[1])); if (q && isFinite(q[0]) && isFinite(q[1])) v.c = [q[0], Math.max(-85, Math.min(85, q[1]))]; d.last = p; }
     else if (d.k === 'pan') { const v = mapView(sc), kk = W / v.w; v.cx -= (p[0] - d.last[0]) / kk; v.cy -= (p[1] - d.last[1]) / kk; d.last = p; }
     else if (d.k === 'pen' && S.draft) { const l = S.draft.pts[S.draft.pts.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 3) S.draft.pts.push(p); }
     else if (d.k === 'shape' && S.draft) { S.draft.x = Math.min(d.o[0], p[0]); S.draft.y = Math.min(d.o[1], p[1]); S.draft.w = Math.abs(p[0] - d.o[0]); S.draft.h = Math.abs(p[1] - d.o[1]); }
   });
   ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; if (!d) return; if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
   ov.addEventListener('dblclick', () => { if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); } });
-  ov.addEventListener('wheel', e => { const sc = cur(); if (sc.bg.type !== 'map') return; e.preventDefault(); backToEdit(); const p = pt(e), v = mapView(sc), k = W / v.w, P = [v.cx + (p[0] - W / 2) / k, v.cy + (p[1] - H / 2) / k]; v.w = clamp(v.w * Math.exp(e.deltaY * 0.0012), 18, 1700); const k2 = W / v.w; v.cx = P[0] - (p[0] - W / 2) / k2; v.cy = P[1] - (p[1] - H / 2) / k2; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); }, { passive: false });
+  ov.addEventListener('wheel', e => { const sc = cur(); if (!isMap(sc.bg)) return; e.preventDefault(); backToEdit(); const p = pt(e);
+    if (sc.bg.type === 'mapbox') { const v = mapView(sc), ll = E.xf(sc, editT()).inv(p[0], p[1]); v.z = clamp(v.z - e.deltaY * 0.0015, 0, 20); const l2 = E.xf(sc, editT()).inv(p[0], p[1]); if (isFinite(ll[0]) && isFinite(l2[0])) v.c = [v.c[0] + ll[0] - l2[0], Math.max(-85, Math.min(85, v.c[1] + ll[1] - l2[1]))]; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); return; }
+    const v = mapView(sc), k = W / v.w, P = [v.cx + (p[0] - W / 2) / k, v.cy + (p[1] - H / 2) / k]; v.w = clamp(v.w * Math.exp(e.deltaY * 0.0012), 18, 1700); const k2 = W / v.w; v.cx = P[0] - (p[0] - W / 2) / k2; v.cy = P[1] - (p[1] - H / 2) / k2; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); }, { passive: false });
   ['dragover', 'dragenter'].forEach(ev => stage.parentElement.addEventListener(ev, e => { e.preventDefault(); }));
   stage.parentElement.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], e.shiftKey ? 'bg' : 'obj'); });
   document.addEventListener('keydown', e => {
@@ -188,7 +192,7 @@
     if (o && !d) { const so = E.toScreen(o, xf), hd = handles(so), b = hd.box; octx.strokeStyle = '#2f9bff'; octx.setLineDash([10, 7]); octx.strokeRect(b.x, b.y, b.w, b.h); octx.setLineDash([]); octx.fillStyle = '#fff'; octx.strokeStyle = '#2f9bff';
       if (hd.verts) hd.verts.forEach(v => { octx.beginPath(); octx.arc(v[0], v[1], 9, 0, 6.3); octx.fill(); octx.stroke(); });
       if (hd.resize) { octx.fillRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); octx.strokeRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); } }
-    if (sc.bg.type === 'map' && sc.bg.view2) { octx.fillStyle = 'rgba(8,20,38,.8)'; octx.fillRect(W - 330, H - 52, 310, 36); octx.fillStyle = '#9fd0ff'; octx.font = '600 22px sans-serif'; octx.fillText('Editing camera ' + (S.editEnd ? 'END' : 'START') + ' view', W - 318, H - 27); }
+    if (isMap(sc.bg) && sc.bg.view2) { octx.fillStyle = 'rgba(8,20,38,.8)'; octx.fillRect(W - 330, H - 52, 310, 36); octx.fillStyle = '#9fd0ff'; octx.font = '600 22px sans-serif'; octx.fillText('Editing camera ' + (S.editEnd ? 'END' : 'START') + ' view', W - 318, H - 27); }
     octx.restore();
   }
 
@@ -234,18 +238,26 @@
     const sc = cur(), b = sc.bg;
     p.append(h('div', { className: 'h', text: 'Scene' }), bind(sc, 'name', 'text', { label: 'Name', after: () => renderSceneList() }), bind(sc, 'duration', 'num', { min: 1, max: 120, step: 0.5, label: 'Duration (s)', rerender: false, after: () => updateTransport() }),
       bind(sc.transition, 'type', 'select', { label: 'Transition in', options: E.TRANSITIONS }), bind(sc.transition, 'dur', 'range', { min: 0.2, max: 3, step: 0.1, label: 'Trans. length' }));
-    p.append(h('div', { className: 'h', text: 'Background' }), bind(b, 'type', 'select', { label: 'Type', rerender: true, options: [['map', 'US map'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] }));
+    p.append(h('div', { className: 'h', text: 'Background' }), bind(b, 'type', 'select', { label: 'Type', rerender: true, after: () => { b.view = null; b.view2 = null; S.editEnd = false; if (b.type === 'mapbox') g.MB.init().then(() => { refreshAll(); }).catch(() => { refreshAll(); }); }, options: [['mapbox', 'Mapbox map'], ['map', 'US map (basic, offline)'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] }));
+    if (b.type === 'mapbox') {
+      const mv = (S.editEnd && b.view2) ? b.view2 : (b.view || (b.view = JSON.parse(JSON.stringify(E.viewAt(sc, 0)))));
+      p.append(bind(b, 'mbStyle', 'select', { label: 'Map style', options: g.MB.STYLES }), bind(b, 'proj', 'select', { label: 'Projection', options: g.MB.PROJ }),
+        bind(b, 'region', 'select', { label: 'Region', options: g.MB.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; renderPanels(); } }),
+        bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom' }), bind(mv, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }), bind(mv, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' }),
+        h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } })),
+        h('div', { className: 'hint', text: 'Cities, towns, roads and road signs appear and fade by zoom exactly like Mapbox. Drag the empty map to pan, scroll to zoom. Pinned objects follow the map.' }));
+    }
+    if (b.type === 'map' || b.type === 'mapbox') p.append(h('div', { className: 'h', text: 'Camera move (zoom in during the scene)' }), h('div', { className: 'btnrow' },
+        h('button', { text: 'Edit START view', className: S.editEnd ? '' : 'on', on: { click: () => { S.editEnd = false; renderPanels(); } } }),
+        h('button', { text: 'Edit END view', className: S.editEnd ? 'on' : '', on: { click: () => { if (!b.view2) { b.view2 = JSON.parse(JSON.stringify(E.viewAt(sc, 0))); b.camDur = 3; b.camDelay = 0.5; } S.editEnd = true; renderPanels(); } } }),
+        b.view2 ? h('button', { text: 'Clear', className: 'dng', on: { click: () => { b.view2 = null; S.editEnd = false; commit(); renderPanels(); } } }) : null));
+    if ((b.type === 'map' || b.type === 'mapbox') && b.view2) p.append(bind(b, 'camDelay', 'range', { min: 0, max: 20, step: 0.1, label: 'Start at (s)' }), bind(b, 'camDur', 'range', { min: 0.5, max: 20, step: 0.1, label: 'Move length (s)' }));
     if (b.type === 'map') {
       p.append(bind(b, 'theme', 'select', { label: 'Style', options: [['dark', 'Dark blue'], ['radar', 'Radar grey'], ['slate', 'Slate'], ['light', 'Light']] }), bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; } }), bind(b, 'cities', 'check', { label: 'City labels', after: v => { b.cities = v; } }), bind(b, 'counties', 'check', { label: 'County lines (zoomed in)', after: v => { b.counties = v; } }));
       if (b.counties == null) b.counties = true; if (b.cityDensity == null) b.cityDensity = 1;
       p.append(bind(b, 'cityDensity', 'range', { min: 0.3, max: 4, step: 0.1, label: 'Label density' }));
       if (b.cities == null) b.cities = true;
       p.append(h('div', { className: 'hint', text: 'Drag the empty map to pan, scroll to zoom. Pinned objects follow the map.' }));
-      p.append(h('div', { className: 'h', text: 'Camera move (zoom in during the scene)' }), h('div', { className: 'btnrow' },
-        h('button', { text: 'Edit START view', className: S.editEnd ? '' : 'on', on: { click: () => { S.editEnd = false; renderPanels(); } } }),
-        h('button', { text: 'Edit END view', className: S.editEnd ? 'on' : '', on: { click: () => { if (!b.view2) { b.view2 = Object.assign({}, E.viewAt(sc, 0)); b.camDur = 3; b.camDelay = 0.5; } S.editEnd = true; renderPanels(); } } }),
-        b.view2 ? h('button', { text: 'Clear', className: 'dng', on: { click: () => { b.view2 = null; S.editEnd = false; commit(); renderPanels(); } } }) : null));
-      if (b.view2) p.append(bind(b, 'camDelay', 'range', { min: 0, max: 20, step: 0.1, label: 'Start at (s)' }), bind(b, 'camDur', 'range', { min: 0.5, max: 20, step: 0.1, label: 'Move length (s)' }));
     }
     if (b.type === 'gradient') p.append(bind(b, 'grad', 'select', { label: 'Preset', options: Object.keys(E.GRADS).map(k => [k, k]) }));
     if (b.type === 'solid') p.append(bind(b, 'color', 'color', { label: 'Colour' }));
@@ -312,6 +324,13 @@
     const body = h('div', {}, h('div', { className: 'row' }, h('label', { text: 'Title' }), h('input', { type: 'text', value: meta.title, oninput: e => meta.title = e.target.value })), h('div', { className: 'row' }, h('label', { text: 'Location' }), h('input', { type: 'text', value: meta.sub, oninput: e => meta.sub = e.target.value })), tb7, h('div', { className: 'hint', text: 'Pick the starting weekday in Day 1 and the rest follow in order. Sample values – replace them with your forecast. Icons animate and each card slides in one after another. Everything stays editable afterwards.' }));
     modal('7-Day Forecast Builder', body, [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => { const sc = E.sceneFrom7Day(days.map(d => Object.assign({}, d, { hi: Math.round(d.hi), lo: Math.round(d.lo) })), meta.title, meta.sub); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
   }
+  function mapboxSettings() {
+    const tok = h('input', { type: 'password', value: g.MB.token(), placeholder: 'pk.eyJ1…', style: 'width:100%' }), sc = h('select', {}, [['1', 'Small (as on mapbox.com)'], ['1.25', 'Medium'], ['1.5', 'Large (recommended for video)'], ['2', 'Extra large']].map(o => h('option', { value: o[0], text: o[1], selected: +o[0] === g.MB.scale })));
+    const body = h('div', {}, h('div', { className: 'hint', text: 'Create a free account at mapbox.com, copy your default public token (it starts with pk.) and paste it here. It is stored only in this browser. Keep the page tab visible while exporting a Mapbox video.' }), fld('Public token', tok), fld('Label size', sc), h('div', { className: 'hint', id: 'mbstat', text: g.MB.status === 'error' ? 'Status: ' + g.MB.err : 'Status: ' + g.MB.status }));
+    modal('Mapbox settings', body, [h('button', { text: 'Close', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Save & load map', on: { click: () => { const t = tok.value.trim(); if (t && !/^pk\./.test(t)) { toast('Use a public token that starts with pk.'); return; } g.MB.setToken(t); if (+sc.value !== g.MB.scale) g.MB.setScale(+sc.value); closeModal();
+      if (t && S.show.scenes.some(x => x.bg.type === 'map') && confirm('Switch your existing basic-map scenes to Mapbox?')) S.show.scenes.forEach(x => { if (x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; } });
+      g.MB.init().then(() => toast('Mapbox ready')).catch(e => toast(e.message)).then(() => { commit(); refreshAll(); }); } } })]);
+  }
   $('#b7').onclick = sevenDay;
   async function exportDialog() {
     const ac = new AbortController(), bar = h('i'), msg = h('div', { className: 'hint', text: '' }), res = h('div');
@@ -343,7 +362,7 @@
   function boot() {
     buildTools(); let sh = null; try { const raw = localStorage.getItem(KEY); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
     S.show = sh || E.newShow(); S.show.assets = S.show.assets || {}; S.hist = []; S.hp = -1; commit(); refreshAll(); if (sh) { toast('Restored your last session'); E.preload(S.show).then(() => thumbSoon(true)); }
-    g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
+    g.MB.onUpdate = () => thumbSoon(true); if (S.show.scenes.some(x => x.bg.type === 'mapbox') && g.MB.hasToken()) g.MB.init().then(() => thumbSoon(true)).catch(() => { }); g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
     if (document.fonts) { ['800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
     requestAnimationFrame(loop);
   }

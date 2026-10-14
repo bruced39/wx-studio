@@ -31,7 +31,7 @@
     enc.configure(cfg);
     for (let i = 0; i < N; i++) {
       if (err) throw err; if (o.signal && o.signal.aborted) { enc.close(); throw new Error('cancelled'); }
-      E.renderShow(c, show, i / fps, { editing: false }); if (oc) oc.drawImage(cv, 0, 0, W, H);
+      await E.prepareFrame(show, i / fps); E.renderShow(c, show, i / fps, { editing: false }); if (oc) oc.drawImage(cv, 0, 0, W, H);
       const frame = new VideoFrame(out, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
       enc.encode(frame, { keyFrame: i % (fps * 2) === 0 }); frame.close();
       while (enc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 1));
@@ -46,6 +46,7 @@
     else if (g.WDMap && g.WDMap.status === 'loading') { for (let i = 0; i < 100 && g.WDMap.status === 'loading'; i++) await new Promise(r => setTimeout(r, 100)); }
     if (g.WDMap && g.WDMap.countyStatus === 'loading') { for (let i = 0; i < 100 && g.WDMap.countyStatus === 'loading'; i++) await new Promise(r => setTimeout(r, 100)); }
     if (g.WDMap && g.WDMap.placesStatus === 'loading') { for (let i = 0; i < 100 && g.WDMap.placesStatus === 'loading'; i++) await new Promise(r => setTimeout(r, 100)); }
+    if (g.MB && show.scenes.some(s => s.bg.type === 'mapbox')) await g.MB.init();
     await g.Engine.preload(show);
     if (document.fonts && document.fonts.ready) { try { await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 1500))]); } catch (e) { /* ignore */ } }
   }
