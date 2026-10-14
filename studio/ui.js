@@ -6,6 +6,7 @@
   const stage = $('#stage'), sctx = stage.getContext('2d'), ov = $('#overlay'), octx = ov.getContext('2d');
   const S = { show: null, si: 0, oid: null, tool: 'select', opt: { front: 'cold', icon: 'partly-cloudy', hl: 'H', storm: 'H', shape: 'round' }, mode: 'edit', T: 0, play: null, draft: null, editEnd: false, tab: 'scene', hist: [], hp: -1, drag: null, cursor: [0, 0], mapAcc: { basic: true, base: false, land: false, labels: false, boundaries: false, roads: false, cameraMove: false } };
   const KEY = 'wx.studio.autosave.v1';
+  const MAP_DEFAULT_KEY = 'wx.studio.defaultMap.v1';
   const cur = () => S.show.scenes[S.si];
   const selObj = () => cur().objects.find(o => o.id === S.oid) || null;
   const isMap = bg => bg.type === 'map' || bg.type === 'mapbox';
@@ -24,6 +25,47 @@
   function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show)); } catch (e) { /* quota or blocked */ } }
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
   function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
+  function builtInDefaultMapBg(){
+    const bg={type:'mapbox',mbStyle:'broadcast',proj:'mercator',theme:'dark',region:'eastma',view:null,view2:null,grad:'sky',color:'#101820',asset:null,dim:0,kenburns:false};
+    g.MB.ensureConfig(bg); return bg;
+  }
+  function getSavedDefaultMapBg(){
+    try{
+      const raw=localStorage.getItem(MAP_DEFAULT_KEY); if(!raw)return null;
+      const bg=JSON.parse(raw); if(!bg||bg.type!=='mapbox')return null;
+      g.MB.ensureConfig(bg); bg.view2=null; return bg;
+    }catch(e){return null;}
+  }
+  function defaultMapBg(){return getSavedDefaultMapBg()||builtInDefaultMapBg();}
+  function currentMapDefaultBg(sc){
+    const bg=JSON.parse(JSON.stringify(sc.bg)); g.MB.ensureConfig(bg);
+    const v=JSON.parse(JSON.stringify(E.viewAt(sc,editT())));
+    bg.type='mapbox'; bg.view=v; bg.view2=null; delete bg.camDur; delete bg.camDelay;
+    return bg;
+  }
+  function saveCurrentMapDefault(){
+    const sc=cur(); if(sc.bg.type!=='mapbox')return;
+    try{
+      localStorage.setItem(MAP_DEFAULT_KEY,JSON.stringify(currentMapDefaultBg(sc)));
+      toast('Current map saved as the default starting map');
+    }catch(e){toast('Could not save the default map');}
+  }
+  function loadDefaultMap(){
+    const sc=cur(),keepDim=sc.bg.dim;
+    sc.bg=JSON.parse(JSON.stringify(defaultMapBg()));
+    if(sc.bg.dim==null)sc.bg.dim=keepDim||0;
+    S.editEnd=false; commit(); renderPanels(); thumbSoon(true);
+    toast(getSavedDefaultMapBg()?'Saved default map restored':'Built-in Eastern Massachusetts map restored');
+  }
+  function resetMapOrientation(){
+    const sc=cur(); if(sc.bg.type!=='mapbox')return;
+    const v=mapView(sc); v.b=0; v.p=0; commit(); renderPanels(); thumbSoon(true);
+    toast('Map reset to north-up and flat');
+  }
+  function newShowWithDefaultMap(){
+    const sh=E.newShow(); if(sh.scenes&&sh.scenes[0]&&sh.scenes[0].bg&&sh.scenes[0].bg.type==='mapbox')sh.scenes[0].bg=JSON.parse(JSON.stringify(defaultMapBg()));
+    return sh;
+  }
   function loadShow(sh) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); sh.assets = sh.assets || {}; sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
@@ -278,6 +320,11 @@
         bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom' }),
         bind(mv, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }),
         bind(mv, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' }),
+        h('div', { className: 'btnrow mapviewbtns' },
+          h('button', { text: '↥ North Up / Flat', title: 'Keep this location and zoom, but remove rotation and tilt', on: { click: resetMapOrientation } }),
+          h('button', { text: '⌂ Default View', title: 'Return to your saved default starting map', on: { click: loadDefaultMap } }),
+          h('button', { text: '★ Save Current as Default', title: 'Use the current map and map settings as the starting default', on: { click: saveCurrentMapDefault } })
+        ),
         h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } })),
         h('div', { className: 'hint', text: b.mbStyle==='broadcast'?'Mouse: left-drag empty map to pan · right-drag to rotate/tilt · wheel to zoom. WXfusion Weather Director broadcast cartography is active.':'Mouse: left-drag empty map to pan · right-drag to rotate/tilt · wheel to zoom.' })
       ];
@@ -476,7 +523,7 @@
 
   /* ---------- top bar ---------- */
   $('#showName').oninput = e => { S.show.name = e.target.value; }; $('#showName').onchange = commit;
-  $('#bNew').onclick = () => { if (confirm('Start a new show? Unsaved changes will be lost.')) { const a = S.show.assets; loadShow(E.newShow()); } };
+  $('#bNew').onclick = () => { if (confirm('Start a new show? Unsaved changes will be lost.')) { loadShow(newShowWithDefaultMap()); } };
   $('#bSave').onclick = () => { const b = new Blob([JSON.stringify(S.show)], { type: 'application/json' }), a = h('a', { href: URL.createObjectURL(b), download: (S.show.name || 'show').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + '.wxshow.json' }); document.body.append(a); a.click(); a.remove(); toast('Show saved to your downloads'); };
   $('#bOpen').onclick = () => $('#fileOpen').click();
   $('#fileOpen').onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { loadShow(JSON.parse(r.result)); toast('Opened ' + f.name); } catch (err) { toast('That file is not a WX Studio show'); } }; r.readAsText(f); e.target.value = ''; };
@@ -486,7 +533,7 @@
   /* ---------- boot ---------- */
   function boot() {
     buildTools(); let sh = null; try { const raw = localStorage.getItem(KEY); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
-    if (sh) { migrateMB(sh); migrateWDBroadcast(sh); } S.show = sh || E.newShow(); S.show.assets = S.show.assets || {}; S.hist = []; S.hp = -1; commit(); refreshAll(); if (sh) { toast('Restored your last session'); E.preload(S.show).then(() => thumbSoon(true)); }
+    if (sh) { migrateMB(sh); migrateWDBroadcast(sh); } S.show = sh || newShowWithDefaultMap(); S.show.assets = S.show.assets || {}; S.hist = []; S.hp = -1; commit(); refreshAll(); if (sh) { toast('Restored your last session'); E.preload(S.show).then(() => thumbSoon(true)); }
     g.MB.onUpdate = () => thumbSoon(true); if (!g.MB.hasToken() && S.show.scenes.some(x => x.bg.type === 'mapbox')) setTimeout(mapboxSettings, 600); if (S.show.scenes.some(x => x.bg.type === 'mapbox') && g.MB.hasToken()) g.MB.init().then(() => thumbSoon(true)).catch(() => { }); g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
     if (document.fonts) { ['800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
     requestAnimationFrame(loop);
