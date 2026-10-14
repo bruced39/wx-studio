@@ -237,7 +237,8 @@
     p.append(h('div', { className: 'h', text: 'Background' }), bind(b, 'type', 'select', { label: 'Type', rerender: true, options: [['map', 'US map'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] }));
     if (b.type === 'map') {
       p.append(bind(b, 'theme', 'select', { label: 'Style', options: [['dark', 'Dark blue'], ['radar', 'Radar grey'], ['slate', 'Slate'], ['light', 'Light']] }), bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; } }), bind(b, 'cities', 'check', { label: 'City labels', after: v => { b.cities = v; } }), bind(b, 'counties', 'check', { label: 'County lines (zoomed in)', after: v => { b.counties = v; } }));
-      if (b.counties == null) b.counties = true;
+      if (b.counties == null) b.counties = true; if (b.cityDensity == null) b.cityDensity = 1;
+      p.append(bind(b, 'cityDensity', 'range', { min: 0.3, max: 4, step: 0.1, label: 'Label density' }));
       if (b.cities == null) b.cities = true;
       p.append(h('div', { className: 'hint', text: 'Drag the empty map to pan, scroll to zoom. Pinned objects follow the map.' }));
       p.append(h('div', { className: 'h', text: 'Camera move (zoom in during the scene)' }), h('div', { className: 'btnrow' },
@@ -296,12 +297,19 @@
   function sevenDay() {
     const days = E.sample7(), meta = { title: '7-Day Forecast', sub: 'Billerica, MA' }, tb7 = h('table', { className: 't7' }, h('tr', {}, ['Day', 'Date', 'Icon', 'Phrase', 'High', 'Low', 'PoP %', 'Tag'].map(x => h('th', { text: x }))));
     const prev = h('canvas', { width: 64, height: 64 });
-    days.forEach(d => { const sel = h('select', { style: 'width:150px' }, g.Icons.list.map(i => h('option', { value: i.id, text: i.label, selected: i.id === d.icon })));
+    const FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], AB = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], rows = [];
+    const startSel = h('select', { style: 'width:100px' }, FULL.map((n, k) => h('option', { value: k, text: n, selected: AB[k] === days[0].day })));
+    function applyStart() { const k0 = +startSel.value, t = new Date(); t.setHours(12, 0, 0, 0); const off = (k0 - t.getDay() + 7) % 7;
+      days.forEach((d, i) => { const dt = new Date(t); dt.setDate(t.getDate() + off + i); d.day = AB[(k0 + i) % 7]; d.date = `${dt.getMonth() + 1}/${dt.getDate()}`; if (i > 0) rows[i].day.value = d.day; rows[i].date.value = d.date; }); }
+    startSel.onchange = applyStart;
+    days.forEach((d, i) => { const sel = h('select', { style: 'width:150px' }, g.Icons.list.map(i => h('option', { value: i.id, text: i.label, selected: i.id === d.icon })));
       const ph = h('input', { type: 'text', value: d.phrase, style: 'width:150px' }); sel.onchange = () => { if (ph.value === g.Icons.label(d.icon)) ph.value = g.Icons.label(sel.value); d.icon = sel.value; if (!ph.value) ph.value = g.Icons.label(d.icon); d.phrase = ph.value; };
       ph.oninput = () => d.phrase = ph.value; const inp = (k, w, t) => { const i = h('input', { type: t || 'text', value: d[k], style: 'width:' + w + 'px' }); i.oninput = () => d[k] = t === 'number' ? +i.value : i.value; return i; };
       d.phrase = d.phrase || g.Icons.label(d.icon);
-      tb7.append(h('tr', {}, [inp('day', 50), inp('date', 56), sel, ph, inp('hi', 56, 'number'), inp('lo', 56, 'number'), inp('pop', 56, 'number'), inp('tag', 90)].map(x => h('td', {}, x)))); });
-    const body = h('div', {}, h('div', { className: 'row' }, h('label', { text: 'Title' }), h('input', { type: 'text', value: meta.title, oninput: e => meta.title = e.target.value })), h('div', { className: 'row' }, h('label', { text: 'Location' }), h('input', { type: 'text', value: meta.sub, oninput: e => meta.sub = e.target.value })), tb7, h('div', { className: 'hint', text: 'Sample values – replace them with your forecast. Icons animate and each card slides in one after another. Everything stays editable afterwards.' }));
+      const dayCell = i === 0 ? startSel : (rows[i] = h('input', { type: 'text', value: d.day, readOnly: true, style: 'width:50px;opacity:.75' })), dateCell = inp('date', 56); rows[i] = { day: dayCell, date: dateCell };
+      tb7.append(h('tr', {}, [dayCell, dateCell, sel, ph, inp('hi', 56, 'number'), inp('lo', 56, 'number'), inp('pop', 56, 'number'), inp('tag', 90)].map(x => h('td', {}, x)))); });
+    startSel.value = AB.indexOf(days[0].day); applyStart();
+    const body = h('div', {}, h('div', { className: 'row' }, h('label', { text: 'Title' }), h('input', { type: 'text', value: meta.title, oninput: e => meta.title = e.target.value })), h('div', { className: 'row' }, h('label', { text: 'Location' }), h('input', { type: 'text', value: meta.sub, oninput: e => meta.sub = e.target.value })), tb7, h('div', { className: 'hint', text: 'Pick the starting weekday in Day 1 and the rest follow in order. Sample values – replace them with your forecast. Icons animate and each card slides in one after another. Everything stays editable afterwards.' }));
     modal('7-Day Forecast Builder', body, [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => { const sc = E.sceneFrom7Day(days.map(d => Object.assign({}, d, { hi: Math.round(d.hi), lo: Math.round(d.lo) })), meta.title, meta.sub); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
   }
   $('#b7').onclick = sevenDay;
@@ -335,7 +343,7 @@
   function boot() {
     buildTools(); let sh = null; try { const raw = localStorage.getItem(KEY); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
     S.show = sh || E.newShow(); S.show.assets = S.show.assets || {}; S.hist = []; S.hp = -1; commit(); refreshAll(); if (sh) { toast('Restored your last session'); E.preload(S.show).then(() => thumbSoon(true)); }
-    g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
+    g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
     if (document.fonts) { ['800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
     requestAnimationFrame(loop);
   }

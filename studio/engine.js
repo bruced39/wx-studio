@@ -187,7 +187,7 @@
   function drawBackground(c, show, scene, t, ct) {
     const b = scene.bg; if (ct == null) ct = t;
     if (b.type === 'map') {
-      g.WDMap.draw(c, E.viewAt(scene, ct), b.theme, { W, H, cities: b.cities !== false, counties: b.counties !== false });
+      g.WDMap.draw(c, E.viewAt(scene, ct), b.theme, { W, H, cities: b.cities !== false, counties: b.counties !== false, density: b.cityDensity || 1 });
       if (g.WDMap.status !== 'ready') { c.save(); c.fillStyle = 'rgba(255,255,255,0.18)'; c.font = `600 26px ${SANS}`; c.textAlign = 'center'; c.fillText(g.WDMap.status === 'error' ? 'Map data could not be loaded (needs internet) – backgrounds still work' : 'Loading map…', W / 2, H - 40); c.restore(); }
     } else if (b.type === 'image') {
       c.fillStyle = '#000'; c.fillRect(0, 0, W, H); const im = E.img(show, b.asset);
@@ -318,7 +318,7 @@
       if (d.date) add('text', { x: cx, y: y0 + 94, text: d.date, size: 28, align: 'center', color: '#9fc4ea', weight: 600 }, 0.08);
       if (d.tag) add('text', { x: cx, y: y0 + 134, text: d.tag, size: 26, align: 'center', color: '#ffd23f', weight: 800, box: true, boxColor: 'rgba(255,210,63,0.16)' }, 0.3);
       add('icon', { x: cx, y: y0 + 250, size: cw * 0.8, icon: d.icon }, 0.1);
-      add('text', { x: cx, y: y0 + 366, text: wrapText(d.phrase, 28, cw - 24), size: 28, align: 'center', color: '#e6f1ff', weight: 600, font: 'display' }, 0.15);
+      add('text', { x: cx, y: y0 + 350, text: wrapText(d.phrase, 28, cw - 24), size: 28, align: 'center', color: '#e6f1ff', weight: 600, font: 'display' }, 0.15);
       add('text', { x: cx, y: y0 + 428, text: 'HIGH', size: 22, align: 'center', color: '#8fb4dc', weight: 700 }, 0.2);
       add('text', { x: cx, y: y0 + 446, text: String(d.hi) + '°', size: 94, align: 'center', color: E.tempColor(d.hi), weight: 800 }, 0.2);
       add('text', { x: cx, y: y0 + 556, text: 'LOW', size: 22, align: 'center', color: '#8fb4dc', weight: 700 }, 0.25);
