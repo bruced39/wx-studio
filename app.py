@@ -18,8 +18,10 @@ with st.sidebar:
     st.caption("Tip: use Chrome or Edge. MP4 export uses your browser's H.264 encoder.")
 
 
-@st.cache_data(show_spinner=False)
 def _html() -> str:
+    # Rebuild the self-contained studio bundle on every Streamlit rerun.
+    # This intentionally mirrors WXfusion Weather Director so a normal
+    # browser refresh picks up the newest deployed HTML/JS without an app reboot.
     return build_html()
 
 
