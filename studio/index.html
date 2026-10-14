@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WX Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b121c;--p1:#121c2a;--p2:#182536;--line:#26384f;--tx:#e6eef8;--mut:#8aa3c0;--acc:#2f9bff;--acc2:#1c6fc2;--bad:#ff5a5a}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:13px/1.35 Barlow,"Segoe UI",Arial,sans-serif;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:var(--p2);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--acc)}button.pri{background:var(--acc);border-color:var(--acc);color:#04101e;font-weight:700}button.pri:hover{background:#5ab3ff}
+button.on{background:var(--acc2);border-color:var(--acc)}button.sm{padding:2px 7px;font-size:12px}button.dng:hover{border-color:var(--bad);color:var(--bad)}
+input[type=text],input[type=number],select,textarea{background:#0d1623;border:1px solid var(--line);border-radius:5px;padding:4px 6px;width:100%}
+input[type=color]{width:42px;height:26px;padding:0;border:1px solid var(--line);background:none}input[type=range]{width:100%}
+#app{display:grid;grid-template-rows:44px 1fr;height:100vh}
+#top{display:flex;align-items:center;gap:8px;padding:0 10px;background:var(--p1);border-bottom:1px solid var(--line)}
+#top .brand{font:800 20px "Barlow Condensed",sans-serif;letter-spacing:.5px}#top .brand b{color:var(--acc)}
+#showName{width:230px}#top .sp{flex:1}
+#main{display:grid;grid-template-columns:212px 1fr 318px;min-height:0}
+#scenes{background:var(--p1);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+#sceneList{overflow:auto;padding:8px;flex:1}
+.sc{border:2px solid transparent;border-radius:8px;background:var(--p2);padding:5px;margin-bottom:8px;cursor:pointer;position:relative}
+.sc.on{border-color:var(--acc)}.sc canvas{width:100%;display:block;border-radius:4px;background:#000;aspect-ratio:16/9}
+.sc .nm{display:flex;justify-content:space-between;margin-top:4px;font-weight:600}.sc .meta{color:var(--mut);font-size:12px}
+.sc .acts{position:absolute;top:8px;right:8px;display:none;gap:3px}.sc:hover .acts{display:flex}
+#sceneBtns{padding:8px;border-top:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap}
+#center{display:flex;flex-direction:column;min-width:0;min-height:0;padding:8px;gap:6px}
+#stageBox{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#05090f;border-radius:8px}
+#stageWrap{position:relative;aspect-ratio:16/9;max-width:100%;max-height:100%;height:100%}
+#stageWrap canvas{position:absolute;inset:0;width:100%;height:100%}
+#stageWrap.present{position:fixed;inset:0;z-index:50;background:#000;height:auto;max-height:none;aspect-ratio:auto}
+#stageWrap.present canvas{object-fit:contain}
+#tools{display:flex;gap:4px;flex-wrap:wrap;align-items:center}#tools .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+#tools select{width:auto}
+#transport{display:flex;gap:6px;align-items:center}#scrub{flex:1}#tc{width:96px;text-align:right;color:var(--mut);font-variant-numeric:tabular-nums}
+#side{background:var(--p1);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+#tabs{display:flex;border-bottom:1px solid var(--line)}#tabs button{flex:1;border:0;border-radius:0;background:none;padding:8px 2px;border-bottom:2px solid transparent}
+#tabs button.on{border-bottom-color:var(--acc);color:#fff;background:var(--p2)}
+#panels{overflow:auto;flex:1;padding:10px}
+.row{display:grid;grid-template-columns:96px 1fr;gap:6px;align-items:center;margin-bottom:7px}.row label{color:var(--mut)}
+.row.full{grid-template-columns:1fr}.h{font:700 12px Barlow,sans-serif;letter-spacing:.8px;text-transform:uppercase;color:var(--acc);margin:14px 0 6px;border-bottom:1px solid var(--line);padding-bottom:3px}
+.h:first-child{margin-top:0}.hint{color:var(--mut);font-size:12px;margin:4px 0 8px}
+.igrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.ic{background:linear-gradient(#183a63,#0c1d36);border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer;text-align:center;font-size:10.5px;color:var(--mut)}
+.ic canvas{width:100%;display:block}.ic:hover,.ic.on{border-color:var(--acc);color:#fff}
+.btnrow{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.agrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.as{background:var(--p2);border:1px solid var(--line);border-radius:6px;padding:4px}.as img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;border-radius:3px}.as div{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
+#drop{border:2px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--mut);margin-bottom:10px}#drop.hov{border-color:var(--acc);color:#fff}
+#modalBg{position:fixed;inset:0;background:rgba(2,6,12,.72);display:none;align-items:center;justify-content:center;z-index:100}
+#modal{background:var(--p1);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:96vw;max-height:94vh;overflow:auto;min-width:420px}
+#modal h3{margin:0 0 10px;font:800 22px "Barlow Condensed",sans-serif}.mb{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+table.t7{border-collapse:collapse}table.t7 td,table.t7 th{padding:3px;text-align:left;font-weight:600;color:var(--mut)}table.t7 input,table.t7 select{padding:3px 4px}
+.prog{height:12px;background:#0d1623;border-radius:6px;overflow:hidden;border:1px solid var(--line)}.prog i{display:block;height:100%;width:0;background:var(--acc)}
+#toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#0d1623;border:1px solid var(--acc);padding:7px 14px;border-radius:8px;display:none;z-index:200}
+</style></head><body>
+<div id="app">
+ <div id="top"><span class="brand">WX <b>STUDIO</b></span><input id="showName" type="text" title="Show name">
+  <button id="bNew">New</button><button id="bOpen">Open…</button><button id="bSave">Save</button>
+  <button id="bUndo" title="Ctrl+Z">↶</button><button id="bRedo" title="Ctrl+Y">↷</button><span class="sp"></span>
+  <button id="bPresent">▶ Present</button><button id="bExport" class="pri">Export MP4</button><input id="fileOpen" type="file" accept=".json,.wxshow" hidden></div>
+ <div id="main">
+  <div id="scenes"><div id="sceneList"></div><div id="sceneBtns"><button id="bAddScene" class="pri">+ Scene</button><button id="b7">7-Day…</button></div></div>
+  <div id="center">
+   <div id="stageBox"><div id="stageWrap"><canvas id="stage" width="1920" height="1080"></canvas><canvas id="overlay" width="1920" height="1080"></canvas></div></div>
+   <div id="tools"></div>
+   <div id="transport"><button id="bPlayScene">▶ Scene</button><button id="bPlayShow">▶ Show</button><button id="bStop">■</button><input id="scrub" type="range" min="0" max="10" step="0.01" value="0"><span id="tc">0.0 / 0.0 s</span></div>
+  </div>
+  <div id="side"><div id="tabs"><button data-t="scene" class="on">Scene</button><button data-t="object">Object</button><button data-t="library">Library</button><button data-t="media">Media</button></div><div id="panels"></div></div>
+ </div>
+</div>
+<div id="modalBg"><div id="modal"></div></div><div id="toast"></div><input id="fileImg" type="file" accept="image/*" multiple hidden>
+<script src="icons.js"></script><script src="symbols.js"></script><script src="map.js"></script><script src="engine.js"></script><script src="mp4.js"></script><script src="export.js"></script><script src="ui.js"></script>
+</body></html>
