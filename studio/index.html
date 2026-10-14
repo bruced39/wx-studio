@@ -39,7 +39,13 @@ input[type=color]{width:42px;height:26px;padding:0;border:1px solid var(--line);
 #panels{overflow:auto;flex:1;padding:10px}
 .row{display:grid;grid-template-columns:96px 1fr;gap:6px;align-items:center;margin-bottom:7px}.row label{color:var(--mut)}
 .row.full{grid-template-columns:1fr}.h{font:700 12px Barlow,sans-serif;letter-spacing:.8px;text-transform:uppercase;color:var(--acc);margin:14px 0 6px;border-bottom:1px solid var(--line);padding-bottom:3px}
-.h:first-child{margin-top:0}.hint{color:var(--mut);font-size:12px;margin:4px 0 8px}
+.h:first-child{margin-top:0}
+.mapacc{margin:7px 0;border:1px solid var(--line);border-radius:7px;background:#0d1623;overflow:hidden}
+.mapacc>summary{list-style:auto;cursor:pointer;padding:7px 9px;font:700 12px Barlow,sans-serif;letter-spacing:.7px;text-transform:uppercase;color:var(--acc);background:var(--p2);user-select:none}
+.mapacc>summary:hover{background:#1b2c40;color:#fff}
+.mapacc[open]>summary{border-bottom:1px solid var(--line)}
+.mapaccbody{padding:9px 9px 3px}.mapaccbody>.row:last-child{margin-bottom:5px}
+.hint{color:var(--mut);font-size:12px;margin:4px 0 8px}
 .igrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.ic{background:linear-gradient(#183a63,#0c1d36);border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer;text-align:center;font-size:10.5px;color:var(--mut)}
 .ic canvas{width:100%;display:block}.ic:hover,.ic.on{border-color:var(--acc);color:#fff}
 .btnrow{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}

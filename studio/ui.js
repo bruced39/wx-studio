@@ -4,7 +4,7 @@
   const E = g.Engine, W = E.W, H = E.H, $ = s => document.querySelector(s);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const stage = $('#stage'), sctx = stage.getContext('2d'), ov = $('#overlay'), octx = ov.getContext('2d');
-  const S = { show: null, si: 0, oid: null, tool: 'select', opt: { front: 'cold', icon: 'partly-cloudy', hl: 'H', storm: 'H', shape: 'round' }, mode: 'edit', T: 0, play: null, draft: null, editEnd: false, tab: 'scene', hist: [], hp: -1, drag: null, cursor: [0, 0] };
+  const S = { show: null, si: 0, oid: null, tool: 'select', opt: { front: 'cold', icon: 'partly-cloudy', hl: 'H', storm: 'H', shape: 'round' }, mode: 'edit', T: 0, play: null, draft: null, editEnd: false, tab: 'scene', hist: [], hp: -1, drag: null, cursor: [0, 0], mapAcc: { basic: true, base: false, land: false, labels: false, boundaries: false, roads: false, cameraMove: false } };
   const KEY = 'wx.studio.autosave.v1';
   const cur = () => S.show.scenes[S.si];
   const selObj = () => cur().objects.find(o => o.id === S.oid) || null;
@@ -211,6 +211,14 @@
     else { el = h('input', { type: 'text', value: get() == null ? '' : get() }); el.addEventListener('input', () => set(el.value)); el.addEventListener('change', commit); }
     return fld(o.label || key, el);
   }
+  function mapAccordion(key, title, nodes, defaultOpen) {
+    const open = S.mapAcc[key] == null ? !!defaultOpen : !!S.mapAcc[key];
+    const box = h('details', { className: 'mapacc', open },
+      h('summary', { text: title }),
+      h('div', { className: 'mapaccbody' }, ...(nodes || [])));
+    box.addEventListener('toggle', () => { S.mapAcc[key] = box.open; });
+    return box;
+  }
   const OPT = { weight: [[500, 'Medium'], [700, 'Bold'], [800, 'Extra bold']], align: [['left', 'Left'], ['center', 'Center'], ['right', 'Right']], style: [['flow', 'Animated flow'], ['solid', 'Solid'], ['dash', 'Dashed']] };
   function objectPanel(p) {
     const o = selObj(); if (!o) { p.append(h('div', { className: 'hint', text: 'Select an object on the stage, or pick a tool below the stage and draw. Click a polyline object to edit its points; drag the square handle to resize.' })); return; }
@@ -244,61 +252,111 @@
     if (b.type === 'mapbox') {
       g.MB.ensureConfig(b);
       const mv = (S.editEnd && b.view2) ? b.view2 : (b.view || (b.view = JSON.parse(JSON.stringify(E.viewAt(sc, 0)))));
-      p.append(
+      const basic = [
         bind(b, 'mbStyle', 'select', { label: 'Map style', rerender:true, options: g.MB.STYLES, after:()=>g.MB.ensureConfig(b) }),
         bind(b, 'proj', 'select', { label: 'Projection', options: g.MB.PROJ }),
         bind(b, 'region', 'select', { label: 'Camera view', options: g.MB.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; renderPanels(); } }),
         bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom' }),
         bind(mv, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }),
-        bind(mv, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' })
-      );
-      if(b.mbStyle==='broadcast'){
-        const B=(k,kind,o)=>p.append(bind(b,k,kind,o));
-        p.append(h('div',{className:'h',text:'Weather Director map'}));
-        B('broadcastBase','select',{label:'Base',rerender:true,options:[['satellite','Satellite broadcast'],['terrain','Terrain / cartographic']]});
-        B('atmosphere','select',{label:'Atmosphere',options:[['broadcast','Broadcast blue'],['natural','Natural'],['dark','Dark space'],['none','None']]});
-        B('terrain','check',{label:'3D terrain',rerender:true}); if(b.terrain)B('terrainExaggeration','range',{label:'Terrain strength',min:0,max:3,step:.1});
-
-        p.append(h('div',{className:'h',text:'Land + water'}));
-        B('broadcastWaterColor','color',{label:'Water tint'});B('broadcastWaterTintOpacity','range',{label:'Water opacity',min:0,max:.8,step:.05});
-        B('broadcastLandColor','color',{label:'Land tint'});B('broadcastLandTintOpacity','range',{label:'Land opacity',min:0,max:.6,step:.05});
-        if(b.broadcastBase==='satellite'){B('broadcastSatelliteSaturation','range',{label:'Satellite saturation',min:-1,max:1,step:.05});B('broadcastSatelliteContrast','range',{label:'Satellite contrast',min:-1,max:1,step:.05});}
-
-        p.append(h('div',{className:'h',text:'City + town labels'}));
-        B('broadcastShowCities','check',{label:'Show places'});B('broadcastUppercaseLabels','check',{label:'Uppercase'});
-        B('broadcastPlaceDensity','select',{label:'Place types',options:[['cities','Cities only'],['towns','Cities + towns'],['villages','Cities + towns + villages'],['all','Maximum detail']]});
-        B('broadcastKeepMajorCities','check',{label:'Keep major cities'});B('broadcastMajorCityRank','range',{label:'Major-city rank',min:1,max:16,step:1});
-        B('broadcastLabelFont','select',{label:'Label font',options:[['DIN Pro Bold','DIN Pro Bold'],['DIN Pro Medium','DIN Pro Medium'],['Roboto Bold','Roboto Bold'],['Roboto Medium','Roboto Medium'],['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold']]});
-        B('broadcastLabelDensity','select',{label:'Label density',options:[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['maximum','Maximum']]});
-        B('broadcastLabelOpacity','range',{label:'Label opacity',min:0,max:1,step:.05});B('broadcastLabelSpacing','range',{label:'Label spacing',min:.5,max:3,step:.05});
-        B('broadcastLabelColor','color',{label:'Label color'});B('broadcastLabelHaloColor','color',{label:'Label halo'});B('broadcastLabelHaloWidth','range',{label:'Halo width',min:0,max:5,step:.25});
-        B('broadcastCitySize','range',{label:'City size',min:8,max:36,step:1});B('broadcastCityMinZoom','range',{label:'City min zoom',min:0,max:12,step:.5});
-        B('broadcastTownSize','range',{label:'Town size',min:8,max:30,step:1});B('broadcastTownMinZoom','range',{label:'Town min zoom',min:0,max:14,step:.5});
-        B('broadcastVillageSize','range',{label:'Village size',min:7,max:26,step:1});B('broadcastVillageMinZoom','range',{label:'Village min zoom',min:0,max:16,step:.5});
-
-        p.append(h('div',{className:'h',text:'Boundaries'}));
-        B('broadcastShowCoastline','check',{label:'Coastline'});B('broadcastCoastlineColor','color',{label:'Coastline color'});B('broadcastCoastlineWidth','range',{label:'Coastline width',min:.5,max:5,step:.25});
-        B('broadcastShowCountryBorders','check',{label:'Country borders'});B('broadcastCountryColor','color',{label:'Country color'});B('broadcastCountryWidth','range',{label:'Country width',min:.5,max:5,step:.25});
-        B('broadcastShowStateBorders','check',{label:'State borders'});B('broadcastStateColor','color',{label:'State color'});B('broadcastStateWidth','range',{label:'State width',min:.5,max:5,step:.25});
-        B('broadcastShowCountyBorders','check',{label:'County borders',rerender:true});if(b.broadcastShowCountyBorders){B('broadcastCountyColor','color',{label:'County color'});B('broadcastCountyWidth','range',{label:'County width',min:.5,max:4,step:.25});}
-
-        p.append(h('div',{className:'h',text:'Roads'}));
-        B('broadcastShowRoads','check',{label:'Show roads'});B('broadcastRoadColor','color',{label:'Road color'});B('broadcastRoadOpacity','range',{label:'Road opacity',min:0,max:1,step:.05});B('broadcastRoadWidth','range',{label:'Road width',min:.25,max:3,step:.05});
-        B('broadcastMainRoadMinZoom','range',{label:'Major road min',min:0,max:16,step:.5});B('broadcastMainRoadMaxZoom','range',{label:'Major road max',min:.5,max:22,step:.5});
-        B('broadcastStateRoadMinZoom','range',{label:'State/primary min',min:0,max:18,step:.5});B('broadcastOtherRoadMinZoom','range',{label:'Other road min',min:0,max:20,step:.5});
-        B('broadcastShowRoadShields','check',{label:'Road shields',rerender:true});if(b.broadcastShowRoadShields){B('broadcastRoadShieldDensity','range',{label:'Shield density',min:1,max:5,step:1});B('broadcastRoadShieldSize','range',{label:'Shield size',min:.6,max:2,step:.1});B('broadcastRoadShieldMinZoom','range',{label:'Shield min zoom',min:0,max:18,step:.5});}
-        B('broadcastShowRoadLabels','check',{label:'Road names'});B('broadcastShowPOI','check',{label:'POI labels'});B('broadcastShowNaturalLabels','check',{label:'Natural labels'});
-      }
-      p.append(
+        bind(mv, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' }),
         h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } })),
         h('div', { className: 'hint', text: b.mbStyle==='broadcast'?'WXfusion Weather Director broadcast cartography is active. Drag the map to pan and scroll to zoom; map settings are stored with this scene.':'Mapbox stock style. Drag the map to pan and scroll to zoom.' })
-      );
+      ];
+      p.append(mapAccordion('basic','Map + Camera',basic,true));
+
+      if(b.mbStyle==='broadcast'){
+        const B=(k,kind,o)=>bind(b,k,kind,o);
+        const base=[
+          B('broadcastBase','select',{label:'Base',rerender:true,options:[['satellite','Satellite broadcast'],['terrain','Terrain / cartographic']]}),
+          B('atmosphere','select',{label:'Atmosphere',options:[['broadcast','Broadcast blue'],['natural','Natural'],['dark','Dark space'],['none','None']]}),
+          B('terrain','check',{label:'3D terrain',rerender:true})
+        ];
+        if(b.terrain)base.push(B('terrainExaggeration','range',{label:'Terrain strength',min:0,max:3,step:.1}));
+        if(b.broadcastBase==='satellite'){
+          base.push(B('broadcastSatelliteSaturation','range',{label:'Satellite saturation',min:-1,max:1,step:.05}));
+          base.push(B('broadcastSatelliteContrast','range',{label:'Satellite contrast',min:-1,max:1,step:.05}));
+        }
+        p.append(mapAccordion('base','Weather Director Base',base,false));
+
+        p.append(mapAccordion('land','Land + Water',[
+          B('broadcastWaterColor','color',{label:'Water tint'}),
+          B('broadcastWaterTintOpacity','range',{label:'Water opacity',min:0,max:.8,step:.05}),
+          B('broadcastLandColor','color',{label:'Land tint'}),
+          B('broadcastLandTintOpacity','range',{label:'Land opacity',min:0,max:.6,step:.05})
+        ],false));
+
+        p.append(mapAccordion('labels','City + Town Labels',[
+          B('broadcastShowCities','check',{label:'Show places'}),
+          B('broadcastUppercaseLabels','check',{label:'Uppercase'}),
+          B('broadcastPlaceDensity','select',{label:'Place types',options:[['cities','Cities only'],['towns','Cities + towns'],['villages','Cities + towns + villages'],['all','Maximum detail']]}),
+          B('broadcastKeepMajorCities','check',{label:'Keep major cities'}),
+          B('broadcastMajorCityRank','range',{label:'Major-city rank',min:1,max:16,step:1}),
+          B('broadcastLabelFont','select',{label:'Label font',options:[['DIN Pro Bold','DIN Pro Bold'],['DIN Pro Medium','DIN Pro Medium'],['Roboto Bold','Roboto Bold'],['Roboto Medium','Roboto Medium'],['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold']]}),
+          B('broadcastLabelDensity','select',{label:'Label density',options:[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['maximum','Maximum']]}),
+          B('broadcastLabelOpacity','range',{label:'Label opacity',min:0,max:1,step:.05}),
+          B('broadcastLabelSpacing','range',{label:'Label spacing',min:.5,max:3,step:.05}),
+          B('broadcastLabelColor','color',{label:'Label color'}),
+          B('broadcastLabelHaloColor','color',{label:'Label halo'}),
+          B('broadcastLabelHaloWidth','range',{label:'Halo width',min:0,max:5,step:.25}),
+          B('broadcastCitySize','range',{label:'City size',min:8,max:36,step:1}),
+          B('broadcastCityMinZoom','range',{label:'City min zoom',min:0,max:12,step:.5}),
+          B('broadcastTownSize','range',{label:'Town size',min:8,max:30,step:1}),
+          B('broadcastTownMinZoom','range',{label:'Town min zoom',min:0,max:14,step:.5}),
+          B('broadcastVillageSize','range',{label:'Village size',min:7,max:26,step:1}),
+          B('broadcastVillageMinZoom','range',{label:'Village min zoom',min:0,max:16,step:.5})
+        ],false));
+
+        const boundaries=[
+          B('broadcastShowCoastline','check',{label:'Coastline'}),
+          B('broadcastCoastlineColor','color',{label:'Coastline color'}),
+          B('broadcastCoastlineWidth','range',{label:'Coastline width',min:.5,max:5,step:.25}),
+          B('broadcastShowCountryBorders','check',{label:'Country borders'}),
+          B('broadcastCountryColor','color',{label:'Country color'}),
+          B('broadcastCountryWidth','range',{label:'Country width',min:.5,max:5,step:.25}),
+          B('broadcastShowStateBorders','check',{label:'State borders'}),
+          B('broadcastStateColor','color',{label:'State color'}),
+          B('broadcastStateWidth','range',{label:'State width',min:.5,max:5,step:.25}),
+          B('broadcastShowCountyBorders','check',{label:'County borders',rerender:true})
+        ];
+        if(b.broadcastShowCountyBorders){
+          boundaries.push(B('broadcastCountyColor','color',{label:'County color'}));
+          boundaries.push(B('broadcastCountyWidth','range',{label:'County width',min:.5,max:4,step:.25}));
+        }
+        p.append(mapAccordion('boundaries','Boundaries',boundaries,false));
+
+        const roads=[
+          B('broadcastShowRoads','check',{label:'Show roads'}),
+          B('broadcastRoadColor','color',{label:'Road color'}),
+          B('broadcastRoadOpacity','range',{label:'Road opacity',min:0,max:1,step:.05}),
+          B('broadcastRoadWidth','range',{label:'Road width',min:.25,max:3,step:.05}),
+          B('broadcastMainRoadMinZoom','range',{label:'Major road min',min:0,max:16,step:.5}),
+          B('broadcastMainRoadMaxZoom','range',{label:'Major road max',min:.5,max:22,step:.5}),
+          B('broadcastStateRoadMinZoom','range',{label:'State/primary min',min:0,max:18,step:.5}),
+          B('broadcastOtherRoadMinZoom','range',{label:'Other road min',min:0,max:20,step:.5}),
+          B('broadcastShowRoadShields','check',{label:'Road shields',rerender:true})
+        ];
+        if(b.broadcastShowRoadShields){
+          roads.push(B('broadcastRoadShieldDensity','range',{label:'Shield density',min:1,max:5,step:1}));
+          roads.push(B('broadcastRoadShieldSize','range',{label:'Shield size',min:.6,max:2,step:.1}));
+          roads.push(B('broadcastRoadShieldMinZoom','range',{label:'Shield min zoom',min:0,max:18,step:.5}));
+        }
+        roads.push(B('broadcastShowRoadLabels','check',{label:'Road names'}));
+        roads.push(B('broadcastShowPOI','check',{label:'POI labels'}));
+        roads.push(B('broadcastShowNaturalLabels','check',{label:'Natural labels'}));
+        p.append(mapAccordion('roads','Roads',roads,false));
+      }
     }
-    if (b.type === 'map' || b.type === 'mapbox') p.append(h('div', { className: 'h', text: 'Camera move (zoom in during the scene)' }), h('div', { className: 'btnrow' },
+    if (b.type === 'map' || b.type === 'mapbox') {
+      const cameraNodes=[h('div', { className: 'btnrow' },
         h('button', { text: 'Edit START view', className: S.editEnd ? '' : 'on', on: { click: () => { S.editEnd = false; renderPanels(); } } }),
         h('button', { text: 'Edit END view', className: S.editEnd ? 'on' : '', on: { click: () => { if (!b.view2) { b.view2 = JSON.parse(JSON.stringify(E.viewAt(sc, 0))); b.camDur = 3; b.camDelay = 0.5; } S.editEnd = true; renderPanels(); } } }),
-        b.view2 ? h('button', { text: 'Clear', className: 'dng', on: { click: () => { b.view2 = null; S.editEnd = false; commit(); renderPanels(); } } }) : null));
-    if ((b.type === 'map' || b.type === 'mapbox') && b.view2) p.append(bind(b, 'camDelay', 'range', { min: 0, max: 20, step: 0.1, label: 'Start at (s)' }), bind(b, 'camDur', 'range', { min: 0.5, max: 20, step: 0.1, label: 'Move length (s)' }));
+        b.view2 ? h('button', { text: 'Clear', className: 'dng', on: { click: () => { b.view2 = null; S.editEnd = false; commit(); renderPanels(); } } }) : null)];
+      if(b.view2){
+        cameraNodes.push(bind(b, 'camDelay', 'range', { min: 0, max: 20, step: 0.1, label: 'Start at (s)' }));
+        cameraNodes.push(bind(b, 'camDur', 'range', { min: 0.5, max: 20, step: 0.1, label: 'Move length (s)' }));
+      }
+      p.append(mapAccordion('cameraMove','Camera Move',cameraNodes,false));
+    }
     if (b.type === 'map') {
       p.append(bind(b, 'theme', 'select', { label: 'Style', options: [['dark', 'Dark blue'], ['radar', 'Radar grey'], ['slate', 'Slate'], ['light', 'Light']] }), bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; } }), bind(b, 'cities', 'check', { label: 'City labels', after: v => { b.cities = v; } }), bind(b, 'counties', 'check', { label: 'County lines (zoomed in)', after: v => { b.counties = v; } }));
       if (b.counties == null) b.counties = true; if (b.cityDensity == null) b.cityDensity = 1;
