@@ -62,7 +62,7 @@
   };
 
   /* ---------- TopoJSON decoding (quantised + delta arcs, shared/reversed arcs) ---------- */
-  function decode(topo) {
+  function decode(topo, objName) {
     const tf = topo.transform;
     const arcs = topo.arcs.map(a => {
       let x = 0, y = 0;
@@ -70,7 +70,7 @@
     });
     const arcPts = i => i >= 0 ? arcs[i] : arcs[~i].slice().reverse();
     const ring = idx => { let pts = []; idx.forEach((i, k) => { const a = arcPts(i); pts = pts.concat(k ? a.slice(1) : a); }); return pts; };
-    const obj = topo.objects.states || topo.objects[Object.keys(topo.objects)[0]];
+    const obj = topo.objects[objName || 'states'] || topo.objects[Object.keys(topo.objects)[0]];
     const feats = obj.geometries.map(gm => {
       const polys = gm.type === 'Polygon' ? [gm.arcs.map(ring)] : gm.type === 'MultiPolygon' ? gm.arcs.map(p => p.map(ring)) : [];
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -79,17 +79,20 @@
     });
     return feats;
   }
-  function buildPath(feats) {
-    const land = new Path2D();
-    feats.forEach(f => { if (f.id === '02' || f.id === '15' || f.id === '72' || /alaska|hawaii|puerto|guam|virgin|samoa|mariana/i.test(f.name || '')) return; f.polys.forEach(p => p.forEach(r => { r.forEach((q, i) => i ? land.lineTo(q[0], q[1]) : land.moveTo(q[0], q[1])); land.closePath(); })); });
-    return land;
+  const SKIP = f => f.id === '02' || f.id === '15' || f.id === '72' || /alaska|hawaii|puerto|guam|virgin|samoa|mariana/i.test(f.name || '');
+  function ringPath(path, r) { r.forEach((q, i) => i ? path.lineTo(q[0], q[1]) : path.moveTo(q[0], q[1])); path.closePath(); }
+  /* one Path2D per polygon (outer ring + holes) so sliver overlaps between neighbours can never cancel out */
+  function buildPaths(feats) {
+    const polys = [], all = new Path2D();
+    feats.forEach(f => { if (SKIP(f)) return; f.polys.forEach(p => { const pp = new Path2D(); p.forEach(r => { ringPath(pp, r); ringPath(all, r); }); polys.push(pp); }); });
+    return { polys, all };
   }
 
   const WDMap = {
     status: 'idle', feats: null, land: null, projOK: null, error: '', REGIONS, THEMES, CITIES, project, regionView,
     regionList: Object.keys(REGIONS).map(k => [k, REGIONS[k][0]]),
     ingest(topo) {
-      this.feats = decode(topo); this.land = buildPath(this.feats);
+      this.feats = decode(topo, 'states'); const bp = buildPaths(this.feats); this.land = bp.all; this.polys = bp.polys;
       const ma = this.feats.find(f => f.name === 'Massachusetts' || f.id === '25'), b = project(-71.06, 42.36);
       this.projOK = ma ? (b[0] >= ma.bbox[0] && b[0] <= ma.bbox[2] && b[1] >= ma.bbox[1] && b[1] <= ma.bbox[3]) : null;
       if (this.projOK === false) console.warn('[map] projection self-check failed: Boston is outside the Massachusetts bounding box');
@@ -104,6 +107,16 @@
       }
       this.status = 'error';
     },
+    countyStatus: 'idle', counties: null,
+    async loadCounties(url) {
+      if (this.countyStatus !== 'idle') return; this.countyStatus = 'loading';
+      for (const u of (url ? [url] : ['https://cdn.jsdelivr.net/npm/us-atlas@3/counties-albers-10m.json', 'https://unpkg.com/us-atlas@3/counties-albers-10m.json'])) {
+        try { const r = await fetch(u, { mode: 'cors' }); if (!r.ok) throw new Error('HTTP ' + r.status); const topo = await r.json(), fe = decode(topo, 'counties'), p = new Path2D();
+          fe.forEach(f => { if (/^(02|15|72|78|60|66|69)/.test(String(f.id))) return; f.polys.forEach(po => po.forEach(rg => ringPath(p, rg))); }); this.counties = p; this.countyStatus = 'ready'; return; }
+        catch (e) { /* try next */ }
+      }
+      this.countyStatus = 'error';
+    },
     /* draw the base map into a W x H canvas context. view = {cx, cy, w} in projection units */
     draw(c, view, theme, opts) {
       opts = opts || {}; const W = opts.W || 1920, H = opts.H || 1080, th = THEMES[theme] || THEMES.dark;
@@ -111,8 +124,13 @@
       const k = W / view.w;
       if (this.land) {
         c.save(); c.translate(W / 2, H / 2); c.scale(k, k); c.translate(-view.cx, -view.cy);
-        c.fillStyle = th.land; c.fill(this.land, 'evenodd');
-        c.lineJoin = 'round'; c.strokeStyle = th.line; c.lineWidth = 2 / k; c.stroke(this.land);
+        c.fillStyle = th.land; this.polys.forEach(p => c.fill(p, 'evenodd'));
+        c.lineJoin = 'round';
+        if (opts.counties !== false && view.w < 700) {
+          if (this.countyStatus === 'idle') this.loadCounties();
+          if (this.counties) { c.globalAlpha = 0.45; c.strokeStyle = th.line; c.lineWidth = 1 / k; c.stroke(this.counties); c.globalAlpha = 1; }
+        }
+        c.strokeStyle = th.line; c.lineWidth = 2 / k; c.stroke(this.land);
         c.restore();
       }
       if (opts.cities !== false && this.projOK !== false) this.drawCities(c, view, th, W, H, k);

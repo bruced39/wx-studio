@@ -187,7 +187,7 @@
   function drawBackground(c, show, scene, t, ct) {
     const b = scene.bg; if (ct == null) ct = t;
     if (b.type === 'map') {
-      g.WDMap.draw(c, E.viewAt(scene, ct), b.theme, { W, H, cities: b.cities !== false });
+      g.WDMap.draw(c, E.viewAt(scene, ct), b.theme, { W, H, cities: b.cities !== false, counties: b.counties !== false });
       if (g.WDMap.status !== 'ready') { c.save(); c.fillStyle = 'rgba(255,255,255,0.18)'; c.font = `600 26px ${SANS}`; c.textAlign = 'center'; c.fillText(g.WDMap.status === 'error' ? 'Map data could not be loaded (needs internet) – backgrounds still work' : 'Loading map…', W / 2, H - 40); c.restore(); }
     } else if (b.type === 'image') {
       c.fillStyle = '#000'; c.fillRect(0, 0, W, H); const im = E.img(show, b.asset);

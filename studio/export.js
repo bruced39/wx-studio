@@ -44,6 +44,7 @@
   async function prepare(show, o) {
     if (g.WDMap && g.WDMap.status === 'idle') await g.WDMap.load();
     else if (g.WDMap && g.WDMap.status === 'loading') { for (let i = 0; i < 100 && g.WDMap.status === 'loading'; i++) await new Promise(r => setTimeout(r, 100)); }
+    if (g.WDMap && g.WDMap.countyStatus === 'loading') { for (let i = 0; i < 100 && g.WDMap.countyStatus === 'loading'; i++) await new Promise(r => setTimeout(r, 100)); }
     await g.Engine.preload(show);
     if (document.fonts && document.fonts.ready) { try { await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 1500))]); } catch (e) { /* ignore */ } }
   }

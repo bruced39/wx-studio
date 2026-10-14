@@ -236,7 +236,8 @@
       bind(sc.transition, 'type', 'select', { label: 'Transition in', options: E.TRANSITIONS }), bind(sc.transition, 'dur', 'range', { min: 0.2, max: 3, step: 0.1, label: 'Trans. length' }));
     p.append(h('div', { className: 'h', text: 'Background' }), bind(b, 'type', 'select', { label: 'Type', rerender: true, options: [['map', 'US map'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] }));
     if (b.type === 'map') {
-      p.append(bind(b, 'theme', 'select', { label: 'Style', options: [['dark', 'Dark blue'], ['radar', 'Radar grey'], ['slate', 'Slate'], ['light', 'Light']] }), bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; } }), bind(b, 'cities', 'check', { label: 'City labels', after: v => { b.cities = v; } }));
+      p.append(bind(b, 'theme', 'select', { label: 'Style', options: [['dark', 'Dark blue'], ['radar', 'Radar grey'], ['slate', 'Slate'], ['light', 'Light']] }), bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; } }), bind(b, 'cities', 'check', { label: 'City labels', after: v => { b.cities = v; } }), bind(b, 'counties', 'check', { label: 'County lines (zoomed in)', after: v => { b.counties = v; } }));
+      if (b.counties == null) b.counties = true;
       if (b.cities == null) b.cities = true;
       p.append(h('div', { className: 'hint', text: 'Drag the empty map to pan, scroll to zoom. Pinned objects follow the map.' }));
       p.append(h('div', { className: 'h', text: 'Camera move (zoom in during the scene)' }), h('div', { className: 'btnrow' },
