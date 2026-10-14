@@ -4,7 +4,7 @@
   const E = g.Engine, W = E.W, H = E.H, $ = s => document.querySelector(s);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const stage = $('#stage'), sctx = stage.getContext('2d'), ov = $('#overlay'), octx = ov.getContext('2d');
-  const S = { show: null, si: 0, oid: null, tool: 'select', opt: { front: 'cold', icon: 'partly-cloudy', hl: 'H', storm: 'H', shape: 'round' }, mode: 'edit', T: 0, play: null, draft: null, editEnd: false, tab: 'scene', hist: [], hp: -1, drag: null, cursor: [0, 0], mapAcc: { basic: true, base: false, land: false, labels: false, boundaries: false, roads: false, cameraMove: false } };
+  const S = { show: null, si: 0, oid: null, tool: 'select', opt: { front: 'cold', icon: 'partly-cloudy', hl: 'H', storm: 'H', shape: 'round' }, mode: 'edit', T: 0, play: null, draft: null, editEnd: false, tab: 'scene', hist: [], hp: -1, drag: null, cursor: [0, 0], mapAcc: { sceneSettings: false, background: false, basic: true, base: false, land: false, labels: false, boundaries: false, roads: false, cameraMove: false, titleBanner: false, showBranding: false } };
   const KEY = 'wx.studio.autosave.v1';
   const MAP_DEFAULT_KEY = 'wx.studio.defaultMap.v1';
   const cur = () => S.show.scenes[S.si];
@@ -307,9 +307,44 @@
 
   function scenePanel(p) {
     const sc = cur(), b = sc.bg;
-    p.append(h('div', { className: 'h', text: 'Scene' }), bind(sc, 'name', 'text', { label: 'Name', after: () => renderSceneList() }), bind(sc, 'duration', 'num', { min: 1, max: 120, step: 0.5, label: 'Duration (s)', rerender: false, after: () => updateTransport() }),
-      bind(sc.transition, 'type', 'select', { label: 'Transition in', options: E.TRANSITIONS }), bind(sc.transition, 'dur', 'range', { min: 0.2, max: 3, step: 0.1, label: 'Trans. length' }));
-    p.append(h('div', { className: 'h', text: 'Background' }), bind(b, 'type', 'select', { label: 'Type', rerender: true, after: () => { b.view = null; b.view2 = null; S.editEnd = false; if (b.type === 'mapbox') g.MB.init().then(() => { refreshAll(); }).catch(() => { refreshAll(); }); }, options: [['mapbox', 'Mapbox map'], ['map', 'US map (basic, offline)'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] }));
+
+    p.append(mapAccordion('sceneSettings','Scene Settings',[
+      bind(sc, 'name', 'text', { label: 'Name', after: () => renderSceneList() }),
+      bind(sc, 'duration', 'num', { min: 1, max: 120, step: 0.5, label: 'Duration (s)', rerender: false, after: () => updateTransport() }),
+      bind(sc.transition, 'type', 'select', { label: 'Transition in', options: E.TRANSITIONS }),
+      bind(sc.transition, 'dur', 'range', { min: 0.2, max: 3, step: 0.1, label: 'Trans. length' })
+    ],false));
+
+    const bgNodes=[
+      bind(b, 'type', 'select', { label: 'Type', rerender: true, after: () => { b.view = null; b.view2 = null; S.editEnd = false; if (b.type === 'mapbox') g.MB.init().then(() => { refreshAll(); }).catch(() => { refreshAll(); }); }, options: [['mapbox', 'Mapbox map'], ['map', 'US map (basic, offline)'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] })
+    ];
+    if (b.type === 'map') {
+      if (b.counties == null) b.counties = true;
+      if (b.cityDensity == null) b.cityDensity = 1;
+      if (b.cities == null) b.cities = true;
+      bgNodes.push(
+        bind(b, 'theme', 'select', { label: 'Style', options: [['dark', 'Dark blue'], ['radar', 'Radar grey'], ['slate', 'Slate'], ['light', 'Light']] }),
+        bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; } }),
+        bind(b, 'cities', 'check', { label: 'City labels', after: v => { b.cities = v; } }),
+        bind(b, 'counties', 'check', { label: 'County lines (zoomed in)', after: v => { b.counties = v; } }),
+        bind(b, 'cityDensity', 'range', { min: 0.3, max: 4, step: 0.1, label: 'Label density' }),
+        h('div', { className: 'hint', text: 'Drag the empty map to pan, scroll to zoom. Pinned objects follow the map.' })
+      );
+    }
+    if (b.type === 'gradient') bgNodes.push(bind(b, 'grad', 'select', { label: 'Preset', options: Object.keys(E.GRADS).map(k => [k, k]) }));
+    if (b.type === 'solid') bgNodes.push(bind(b, 'color', 'color', { label: 'Colour' }));
+    if (b.type === 'image') {
+      bgNodes.push(
+        fld('Image', h('select', { on: { change: e => { b.asset = e.target.value; commit(); } } },
+          h('option', { value: '', text: '— choose —' }),
+          Object.keys(S.show.assets).map((id, i) => h('option', { value: id, text: 'Image ' + (i + 1), selected: id === b.asset })))),
+        h('div', { className: 'btnrow' }, h('button', { text: 'Upload background…', on: { click: () => pickImages('bg') } })),
+        bind(b, 'kenburns', 'check', { label: 'Slow zoom' })
+      );
+    }
+    bgNodes.push(bind(b, 'dim', 'range', { min: 0, max: 0.85, step: 0.05, label: 'Darken' }));
+    p.append(mapAccordion('background','Background',bgNodes,false));
+
     if (b.type === 'mapbox') {
       g.MB.ensureConfig(b);
       const mv = (S.editEnd && b.view2) ? b.view2 : (b.view || (b.view = JSON.parse(JSON.stringify(E.viewAt(sc, 0)))));
@@ -412,6 +447,7 @@
         p.append(mapAccordion('roads','Roads',roads,false));
       }
     }
+
     if (b.type === 'map' || b.type === 'mapbox') {
       const cameraNodes=[h('div', { className: 'btnrow' },
         h('button', { text: 'Edit START view', className: S.editEnd ? '' : 'on', on: { click: () => { S.editEnd = false; renderPanels(); } } }),
@@ -423,21 +459,24 @@
       }
       p.append(mapAccordion('cameraMove','Camera Move',cameraNodes,false));
     }
-    if (b.type === 'map') {
-      p.append(bind(b, 'theme', 'select', { label: 'Style', options: [['dark', 'Dark blue'], ['radar', 'Radar grey'], ['slate', 'Slate'], ['light', 'Light']] }), bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; } }), bind(b, 'cities', 'check', { label: 'City labels', after: v => { b.cities = v; } }), bind(b, 'counties', 'check', { label: 'County lines (zoomed in)', after: v => { b.counties = v; } }));
-      if (b.counties == null) b.counties = true; if (b.cityDensity == null) b.cityDensity = 1;
-      p.append(bind(b, 'cityDensity', 'range', { min: 0.3, max: 4, step: 0.1, label: 'Label density' }));
-      if (b.cities == null) b.cities = true;
-      p.append(h('div', { className: 'hint', text: 'Drag the empty map to pan, scroll to zoom. Pinned objects follow the map.' }));
-    }
-    if (b.type === 'gradient') p.append(bind(b, 'grad', 'select', { label: 'Preset', options: Object.keys(E.GRADS).map(k => [k, k]) }));
-    if (b.type === 'solid') p.append(bind(b, 'color', 'color', { label: 'Colour' }));
-    if (b.type === 'image') { p.append(fld('Image', h('select', { on: { change: e => { b.asset = e.target.value; commit(); } } }, h('option', { value: '', text: '— choose —' }), Object.keys(S.show.assets).map((id, i) => h('option', { value: id, text: 'Image ' + (i + 1), selected: id === b.asset })))), h('div', { className: 'btnrow' }, h('button', { text: 'Upload background…', on: { click: () => pickImages('bg') } })), bind(b, 'kenburns', 'check', { label: 'Slow zoom' })); }
-    p.append(bind(b, 'dim', 'range', { min: 0, max: 0.85, step: 0.05, label: 'Darken' }));
-    p.append(h('div', { className: 'h', text: 'Title banner' }), bind(sc.title, 'show', 'check', { label: 'Show' }), bind(sc.title, 'text', 'text', { label: 'Title' }), bind(sc.title, 'sub', 'text', { label: 'Subtitle' }), bind(sc.title, 'pos', 'select', { label: 'Position', options: [['top-left', 'Top left'], ['bottom-left', 'Bottom left']] }));
-    p.append(h('div', { className: 'h', text: 'Show' }), bind(S.show, 'accent', 'color', { label: 'Accent colour' }), bind(S.show, 'bugText', 'text', { label: 'Corner tag text' }));
-    p.append(fld('Logo', h('div', { className: 'btnrow' }, h('button', { text: S.show.logo ? 'Replace logo…' : 'Upload logo…', on: { click: () => pickImages('logo') } }), S.show.logo ? h('button', { text: 'Remove', on: { click: () => { S.show.logo = null; commit(); renderPanels(); } } }) : null)));
+
+    p.append(mapAccordion('titleBanner','Title Banner',[
+      bind(sc.title, 'show', 'check', { label: 'Show' }),
+      bind(sc.title, 'text', 'text', { label: 'Title' }),
+      bind(sc.title, 'sub', 'text', { label: 'Subtitle' }),
+      bind(sc.title, 'pos', 'select', { label: 'Position', options: [['top-left', 'Top left'], ['bottom-left', 'Bottom left']] })
+    ],false));
+
+    const showNodes=[
+      bind(S.show, 'accent', 'color', { label: 'Accent colour' }),
+      bind(S.show, 'bugText', 'text', { label: 'Corner tag text' }),
+      fld('Logo', h('div', { className: 'btnrow' },
+        h('button', { text: S.show.logo ? 'Replace logo…' : 'Upload logo…', on: { click: () => pickImages('logo') } }),
+        S.show.logo ? h('button', { text: 'Remove', on: { click: () => { S.show.logo = null; commit(); renderPanels(); } } }) : null))
+    ];
+    p.append(mapAccordion('showBranding','Show + Branding',showNodes,false));
   }
+
   function libraryPanel(p) {
     p.append(h('div', { className: 'hint', text: 'Click an icon to place it (or swap the selected icon). All icons are animated and export to video.' }));
     const cats = {}; g.Icons.list.forEach(i => (cats[i.cat] = cats[i.cat] || []).push(i));
