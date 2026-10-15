@@ -51,6 +51,40 @@ input[type=color]{width:42px;height:26px;padding:0;border:1px solid var(--line);
 .btnrow{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .agrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.as{background:var(--p2);border:1px solid var(--line);border-radius:6px;padding:4px}.as img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;border-radius:3px}.as div{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
 #drop{border:2px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--mut);margin-bottom:10px}#drop.hov{border-color:var(--acc);color:#fff}
+/* Aguacero-inspired map style flyout; independent scroll, editor stays usable. */
+#bMapStyle{padding:5px 9px;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+#bMapStyle svg{display:block}
+#bMapStyle.active{background:#1452b6;border-color:#397cff;color:#fff}
+#mapStyleFlyout{position:fixed;z-index:80;top:51px;left:8px;bottom:10px;width:min(394px,calc(100vw - 16px));display:none;flex-direction:column;background:#17191c;border:1px solid #33373e;border-radius:9px;box-shadow:0 12px 35px rgba(0,0,0,.65);color:#eceef4;overflow:hidden}
+#mapStyleFlyout.open{display:flex}
+#mapStyleHead{height:51px;min-height:51px;display:flex;align-items:center;padding:0 10px;gap:8px;border-bottom:1px solid #33383f}
+#mapStyleHead strong{font-weight:800;font-size:17px;flex:1}
+#mapStyleHead button{background:none;border:0;color:inherit}
+#mapStyleHead button.pri{background:#1458d4;border:1px solid #2069ef;color:#fff}
+#mapStyleClose{font-size:22px!important;padding:2px 9px!important}
+#mapStyleTabs{display:flex;min-height:40px;border-bottom:1px solid #3a3e46}
+#mapStyleTabs button{width:50%;background:none;border:0;border-radius:0}
+#mapStyleTabs button.on{border-bottom:2px solid #2679ed;color:#fff;font-weight:700}
+#mapStyleScroll{padding:10px 8px 30px;overflow:auto;overscroll-behavior:contain;min-height:0;flex:1}
+#mapStyleScroll .mapacc{background:#181a1d;border-color:#353a41;margin:8px 0}
+#mapStyleScroll .mapacc>summary{background:#24262a;color:#f2f3f5;letter-spacing:0;text-transform:none;font-size:12px}
+#mapStyleScroll .mapaccbody{padding:10px}
+#mapStyleScroll .row{grid-template-columns:142px minmax(0,1fr);gap:8px}
+#mapStyleScroll .row label{color:#d9dce2}
+#mapStyleScroll input[type=text],#mapStyleScroll input[type=number],#mapStyleScroll select{background:#222429;border-color:#40434d}
+#mapStyleScroll input[type=checkbox]{accent-color:#2471ee}
+#mapStyleScroll input[type=range]{accent-color:#2471ee}
+#mapStyleScroll .hint{color:#a9aeb9}
+.mapstyle-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:10px 0}
+.mapstyle-card{height:93px;padding:0!important;display:flex;flex-direction:column;overflow:hidden;border-radius:7px!important;background:#222!important}
+.mapstyle-card .swatch{height:61px;display:block;width:100%;background:#111}
+.mapstyle-card.active{border:2px solid #2471ee!important}
+.mapstyle-card .caption{font-size:12px;text-align:center;padding:5px 0;font-weight:700}
+.mapstyle-choices{display:flex;gap:3px;margin:8px 0}
+.mapstyle-choices button{flex:1;padding:7px 0;background:#26282c;border:1px solid #343941;border-radius:3px}
+.mapstyle-choices button.active{background:#2466df;color:white}
+.mapstyle-actions{display:flex;gap:8px;align-items:center;margin:8px 0}
+.mapstyle-actions button{flex:1}
 #modalBg{position:fixed;inset:0;background:rgba(2,6,12,.72);display:none;align-items:center;justify-content:center;z-index:100}
 #modal{background:var(--p1);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:96vw;max-height:94vh;overflow:auto;min-width:420px}
 #modal h3{margin:0 0 10px;font:800 22px "Barlow Condensed",sans-serif}.mb{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
@@ -63,6 +97,7 @@ table.t7{border-collapse:collapse}table.t7 td,table.t7 th{padding:3px;text-align
  <div id="top"><span class="brand">WX <b>STUDIO</b></span><span id="ver" title="Build version – if this does not change after an update, the app has not redeployed yet" style="font:600 12px Barlow,sans-serif;color:#7fb2e6;background:#10243d;border:1px solid #234a78;border-radius:10px;padding:2px 9px;margin:0 10px 0 -4px;white-space:nowrap">v__WX_VERSION__</span><input id="showName" type="text" title="Show name">
   <button id="bNew">New</button><button id="bOpen">Open…</button><button id="bSave">Save</button>
   <button id="bUndo" title="Ctrl+Z">↶</button><button id="bRedo" title="Ctrl+Y">↷</button><span class="sp"></span>
+  <button id="bMapStyle" title="Map Style settings" aria-label="Open Map Style settings"><svg width="19" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 7h4l2-2h4l2 2h4v12H4z"/><circle cx="12" cy="13" r="3.6"/></svg></button>
   <button id="bPresent">▶ Present</button><button id="bExport" class="pri">Export MP4</button><input id="fileOpen" type="file" accept=".json,.wxshow" hidden></div>
  <div id="main">
   <div id="scenes"><div id="sceneList"></div><div id="sceneBtns"><button id="bAddScene" class="pri">+ Scene</button><button id="b7">7-Day…</button></div></div>
@@ -74,6 +109,11 @@ table.t7{border-collapse:collapse}table.t7 td,table.t7 th{padding:3px;text-align
   <div id="side"><div id="tabs"><button data-t="scene" class="on">Scene</button><button data-t="object">Object</button><button data-t="library">Library</button><button data-t="media">Media</button></div><div id="panels"></div></div>
  </div>
 </div>
+<div id="mapStyleFlyout" role="dialog" aria-label="Map Style" aria-modal="false">
+  <div id="mapStyleHead"><strong>Map Style</strong><button id="mapStyleSave" class="pri">Save Style</button><button id="mapStyleClose" title="Close map settings" aria-label="Close Map Style">×</button></div>
+  <div id="mapStyleTabs"><button data-mt="customize" class="on">Customize</button><button data-mt="saved">Saved Styles</button></div>
+  <div id="mapStyleScroll"></div>
+ </div>
 <div id="modalBg"><div id="modal"></div></div><div id="toast"></div><input id="fileImg" type="file" accept="image/*" multiple hidden>
 <script src="icons.js"></script><script src="symbols.js"></script><script src="map.js"></script><script src="mapbox.js"></script><script src="bg7day.js"></script><script src="engine.js"></script><script src="mp4.js"></script><script src="export.js"></script><script src="ui.js"></script>
 </body></html>
