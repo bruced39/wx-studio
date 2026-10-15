@@ -2,6 +2,7 @@
 Streamlit just hosts it, so video export happens on your own PC, not on the server."""
 import streamlit as st
 import streamlit.components.v1 as components
+import json
 
 from wxbuild import build_html
 
@@ -39,5 +40,24 @@ def _token() -> str:
 _tok = _token()
 _inject = ""
 if _tok.startswith("pk."):
-    _inject = "<script>window.WX_MAPBOX_TOKEN=" + __import__("json").dumps(_tok) + ";</script>"
+    _inject += "<script>window.WX_MAPBOX_TOKEN=" + json.dumps(_tok) + ";</script>"
+
+# Publishable Supabase keys are intended for browser usage. Never send a
+# service-role or secret key to the iframe, and do not bake API keys into Git.
+def _cloud_config() -> dict:
+    try:
+        endpoint = str(st.secrets.get("WX_SUPABASE_URL", "")).strip()
+        pub_key = str(st.secrets.get("WX_SUPABASE_PUBLISHABLE_KEY", "")).strip()
+        if (endpoint.startswith("https://") and
+            (pub_key.startswith("sb_publishable_") or pub_key.startswith("eyJ"))):
+            return {"url": endpoint, "publishableKey": pub_key}
+    except Exception:
+        pass
+    return {}
+
+_cloud = _cloud_config()
+if _cloud:
+    # Prevent accidental </script> escaping from embedded configuration.
+    _cloud_json = json.dumps(_cloud).replace("<", "\\u003c")
+    _inject += "<script>window.WX_CLOUD_CONFIG=" + _cloud_json + ";</script>"
 components.html(_inject + _html(), height=height, scrolling=False)
