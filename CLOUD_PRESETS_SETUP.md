@@ -11,14 +11,14 @@ WX_SUPABASE_URL = "https://caszmwcapacaofvcrzli.supabase.co"
 WX_SUPABASE_PUBLISHABLE_KEY = "YOUR_REAL_SB_PUBLISHABLE_KEY"
 ```
 
-Find the value under **Supabase Dashboard → project `wxfusion` → Settings → API Keys → Publishable key**. Only the `sb_publishable_` (or legacy anon) key belongs here. **NEVER use the `service_role` / secret key.** Do not commit keys or passwords to GitHub or this file.
+Find the value under **Supabase Dashboard → project `wxfusion` → Settings → API Keys → Publishable key**. Use only an `sb_publishable_` key (the application deliberately rejects legacy JWT keys to prevent accidentally exposing service-role credentials). **NEVER use a `service_role` or `sb_secret_` key.** Do not commit keys or passwords to GitHub or this file.
 
 After saving Streamlit secrets and redeploying/rerunning the app, refresh WX Studio and open **Map Style → Saved Styles**.
 
 ## Using it
 
 1. Under **Cloud Presets**, create a cloud account with your email and a unique password, or sign in with an existing Supabase Auth account for this project.
-2. Depending on the project's authentication configuration, you may need to click a confirmation link sent to your email, return to WX Studio, then **Sign In**. In Supabase **Authentication → URL Configuration**, set the Site URL to the deployed WX Studio Streamlit app address; leave other applications' settings intact.
+2. Depending on the project's authentication configuration, you may need to click a confirmation link sent to your email, return to WX Studio, then **Sign In**. This Supabase project is shared with WXfusion: **do not change its existing Auth Site URL** just for WX Studio, since other flows may depend on it. If email confirmation redirects need adjustment, review the existing settings and add the WX Studio URL to allowed redirect URLs without replacing the existing Site URL.
 3. Set up the map (center, zoom, pitch, bearing, colors, borders, overlays, etc.), and click **Save to Cloud**. Enter a preset name.
 4. On any device, open WX Studio, sign in using the same email/password, open **Saved Styles** and click **Load Preset**.
 5. Loading a preset changes the *current scene's* map view and settings only. You can then pan, zoom and edit the map without changing the stored preset. Objects/other scenes are preserved.
