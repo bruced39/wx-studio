@@ -26,9 +26,13 @@
     broadcastShowCountryBorders:true, broadcastCountryColor:'#101010', broadcastCountryWidth:2.5,
     broadcastShowStateBorders:true, broadcastStateColor:'#171717', broadcastStateWidth:2,
     broadcastShowCountyBorders:false, broadcastCountyColor:'#89939d', broadcastCountyWidth:1,
+    showZoomBadge:true,
     broadcastShowRoads:true, broadcastRoadColor:'#e5e7eb', broadcastRoadOpacity:.8, broadcastRoadWidth:1,
-    broadcastMainRoadMinZoom:3, broadcastMainRoadMaxZoom:16, broadcastStateRoadMinZoom:5, broadcastOtherRoadMinZoom:7,
-    broadcastShowRoadShields:false, broadcastRoadShieldDensity:3, broadcastRoadShieldSize:1, broadcastRoadShieldMinZoom:7
+    broadcastMainRoadMinZoom:3, broadcastMainRoadMaxZoom:16,
+    broadcastStateRoadMinZoom:5, broadcastStateRoadMaxZoom:24,
+    broadcastOtherRoadMinZoom:7, broadcastOtherRoadMaxZoom:24,
+    broadcastShowRoadShields:false, broadcastRoadShieldDensity:3, broadcastRoadShieldSize:1, broadcastRoadShieldMinZoom:7, broadcastRoadShieldMaxZoom:24,
+    broadcastRoadLabelMinZoom:3, broadcastRoadLabelMaxZoom:16
   };
   MB.DEFAULTS = WD_DEFAULTS;
   MB.ensureConfig = bg => {
@@ -113,7 +117,10 @@
           else if(roadLabel){
             const vis=shield?!!cfg.broadcastShowRoadShields:!!cfg.broadcastShowRoadLabels;map.setLayoutProperty(l.id,'visibility',vis?'visible':'none');
             if(!map.__wdOriginalZoomRanges[l.id])map.__wdOriginalZoomRanges[l.id]={min:+l.minzoom||0,max:l.maxzoom==null?24:+l.maxzoom};
-            const zr=map.__wdOriginalZoomRanges[l.id],min=shield?Math.max(0,+cfg.broadcastRoadShieldMinZoom||7):Math.max(0,+cfg.broadcastMainRoadMinZoom||3),mx=Math.max(min+.5,+cfg.broadcastMainRoadMaxZoom||16);
+            const zr=map.__wdOriginalZoomRanges[l.id],
+              min=shield?Math.max(0,+cfg.broadcastRoadShieldMinZoom||7):Math.max(0,+cfg.broadcastRoadLabelMinZoom||3),
+              requestedMax=shield?(+cfg.broadcastRoadShieldMaxZoom||24):(+cfg.broadcastRoadLabelMaxZoom||16),
+              mx=Math.max(min+.5,requestedMax);
             try{map.setLayerZoomRange(l.id,Math.max(zr.min,min),Math.max(Math.max(zr.min,min)+.01,Math.min(zr.max,mx)));}catch(e){}
             if(vis&&shield){const d=Math.max(1,Math.min(5,+cfg.broadcastRoadShieldDensity||3)),sp=[900,700,520,350,220][d-1],sz=Math.max(.6,Math.min(2,+cfg.broadcastRoadShieldSize||1));try{map.setLayoutProperty(l.id,'symbol-spacing',sp);}catch(e){}try{map.setLayoutProperty(l.id,'icon-size',sz);}catch(e){}}
             else if(vis&&!shield){try{map.setLayoutProperty(l.id,'text-font',wdFontStack(cfg.broadcastLabelFont));}catch(e){}try{map.setPaintProperty(l.id,'text-color',cfg.broadcastLabelColor);}catch(e){}try{map.setPaintProperty(l.id,'text-halo-color',cfg.broadcastLabelHaloColor);}catch(e){}}
@@ -127,7 +134,8 @@
             if(!map.__wdOriginalZoomRanges[l.id])map.__wdOriginalZoomRanges[l.id]={min:+l.minzoom||0,max:l.maxzoom==null?24:+l.maxzoom};
             const zr=map.__wdOriginalZoomRanges[l.id],sig=(id+' '+JSON.stringify(l.filter||[])).toLowerCase(),tier=(sig.includes('motorway')||sig.includes('trunk')||sig.includes('freeway'))?'main':(sig.includes('primary')||sig.includes('secondary'))?'state':'other';
             const min=tier==='main'?+cfg.broadcastMainRoadMinZoom:tier==='state'?+cfg.broadcastStateRoadMinZoom:+cfg.broadcastOtherRoadMinZoom;
-            const max=tier==='main'?Math.min(zr.max,Math.max((min||0)+.5,+cfg.broadcastMainRoadMaxZoom||16)):zr.max;
+            const requestedMax=tier==='main'?+cfg.broadcastMainRoadMaxZoom:tier==='state'?+cfg.broadcastStateRoadMaxZoom:+cfg.broadcastOtherRoadMaxZoom;
+            const max=Math.min(zr.max,Math.max((min||0)+.5,requestedMax||24));
             try{map.setLayerZoomRange(l.id,Math.max(zr.min,min||0),Math.max(Math.max(zr.min,min||0)+.01,max));}catch(e){}
             if(vis){try{map.setPaintProperty(l.id,'line-color',cfg.broadcastRoadColor);}catch(e){}try{map.setPaintProperty(l.id,'line-opacity',Math.max(0,Math.min(1,+cfg.broadcastRoadOpacity)));}catch(e){}
               const s=Math.max(.25,+cfg.broadcastRoadWidth||1);try{map.setPaintProperty(l.id,'line-width',['interpolate',['linear'],['zoom'],3,.8*s,5,1.2*s,7,1.8*s,9,2.8*s,11,4.2*s]);}catch(e){}}

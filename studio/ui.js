@@ -255,6 +255,12 @@
     if (o && !d) { const so = E.toScreen(o, xf), hd = handles(so), b = hd.box; octx.strokeStyle = '#2f9bff'; octx.setLineDash([10, 7]); octx.strokeRect(b.x, b.y, b.w, b.h); octx.setLineDash([]); octx.fillStyle = '#fff'; octx.strokeStyle = '#2f9bff';
       if (hd.verts) hd.verts.forEach(v => { octx.beginPath(); octx.arc(v[0], v[1], 9, 0, 6.3); octx.fill(); octx.stroke(); });
       if (hd.resize) { octx.fillRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); octx.strokeRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); } }
+    if (sc.bg.type === 'mapbox' && sc.bg.showZoomBadge !== false) {
+      const zv=E.viewAt(sc,editT()), txt='ZOOM '+Number(zv.z||0).toFixed(1), x=W-178, y=22, w=154, hh=44;
+      octx.save(); E.rrect(octx,x,y,w,hh,8); octx.fillStyle='rgba(8,20,38,.88)'; octx.fill();
+      octx.strokeStyle='rgba(100,180,255,.75)'; octx.lineWidth=2; octx.stroke();
+      octx.fillStyle='#ffffff'; octx.font='700 23px Barlow, sans-serif'; octx.textAlign='center'; octx.textBaseline='middle'; octx.fillText(txt,x+w/2,y+hh/2+1); octx.restore();
+    }
     if (isMap(sc.bg) && sc.bg.view2) { octx.fillStyle = 'rgba(8,20,38,.8)'; octx.fillRect(W - 330, H - 52, 310, 36); octx.fillStyle = '#9fd0ff'; octx.font = '600 22px sans-serif'; octx.fillText('Editing camera ' + (S.editEnd ? 'END' : 'START') + ' view', W - 318, H - 27); }
     octx.restore();
   }
@@ -279,6 +285,16 @@
       h('div', { className: 'mapaccbody' }, ...(nodes || [])));
     box.addEventListener('toggle', () => { S.mapAcc[key] = box.open; });
     return box;
+  }
+  function zoomRangeRow(obj,label,minKey,maxKey,o){
+    o=o||{}; const lo=o.min==null?0:o.min, hi=o.max==null?24:o.max, step=o.step||.5;
+    const make=(key,caption)=>{
+      const el=h('input',{type:'number',min:lo,max:hi,step,value:obj[key]});
+      el.addEventListener('input',()=>{obj[key]=+el.value;});
+      el.addEventListener('change',commit);
+      return h('div',{className:'zoomrangebox'},h('span',{text:caption}),el);
+    };
+    return h('div',{className:'row zoomrangerow'},h('label',{text:label}),h('div',{className:'zoomrangepair'},make(minKey,'Min'),make(maxKey,'Max')));
   }
   const OPT = { weight: [[500, 'Medium'], [700, 'Bold'], [800, 'Extra bold']], align: [['left', 'Left'], ['center', 'Center'], ['right', 'Right']], style: [['flow', 'Animated flow'], ['solid', 'Solid'], ['dash', 'Dashed']] };
   function objectPanel(p) {
@@ -353,6 +369,7 @@
         bind(b, 'proj', 'select', { label: 'Projection', options: g.MB.PROJ }),
         bind(b, 'region', 'select', { label: 'Camera view', options: g.MB.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; renderPanels(); } }),
         bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom' }),
+        bind(b, 'showZoomBadge', 'check', { label: 'Show zoom level' }),
         bind(mv, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }),
         bind(mv, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' }),
         h('div', { className: 'btnrow mapviewbtns' },
@@ -428,20 +445,20 @@
         const roads=[
           B('broadcastShowRoads','check',{label:'Show roads'}),
           B('broadcastRoadColor','color',{label:'Road color'}),
-          B('broadcastRoadOpacity','range',{label:'Road opacity',min:0,max:1,step:.05}),
-          B('broadcastRoadWidth','range',{label:'Road width',min:.25,max:3,step:.05}),
-          B('broadcastMainRoadMinZoom','range',{label:'Major road min',min:0,max:16,step:.5}),
-          B('broadcastMainRoadMaxZoom','range',{label:'Major road max',min:.5,max:22,step:.5}),
-          B('broadcastStateRoadMinZoom','range',{label:'State/primary min',min:0,max:18,step:.5}),
-          B('broadcastOtherRoadMinZoom','range',{label:'Other road min',min:0,max:20,step:.5}),
+          B('broadcastRoadOpacity','num',{label:'Road opacity',min:0,max:1,step:.05}),
+          B('broadcastRoadWidth','num',{label:'Road width',min:.25,max:3,step:.05}),
+          zoomRangeRow(b,'Major roads','broadcastMainRoadMinZoom','broadcastMainRoadMaxZoom',{min:0,max:24,step:.5}),
+          zoomRangeRow(b,'State / primary','broadcastStateRoadMinZoom','broadcastStateRoadMaxZoom',{min:0,max:24,step:.5}),
+          zoomRangeRow(b,'Other roads','broadcastOtherRoadMinZoom','broadcastOtherRoadMaxZoom',{min:0,max:24,step:.5}),
           B('broadcastShowRoadShields','check',{label:'Road shields',rerender:true})
         ];
         if(b.broadcastShowRoadShields){
-          roads.push(B('broadcastRoadShieldDensity','range',{label:'Shield density',min:1,max:5,step:1}));
-          roads.push(B('broadcastRoadShieldSize','range',{label:'Shield size',min:.6,max:2,step:.1}));
-          roads.push(B('broadcastRoadShieldMinZoom','range',{label:'Shield min zoom',min:0,max:18,step:.5}));
+          roads.push(B('broadcastRoadShieldDensity','num',{label:'Shield density',min:1,max:5,step:1}));
+          roads.push(B('broadcastRoadShieldSize','num',{label:'Shield size',min:.6,max:2,step:.1}));
+          roads.push(zoomRangeRow(b,'Road shields','broadcastRoadShieldMinZoom','broadcastRoadShieldMaxZoom',{min:0,max:24,step:.5}));
         }
-        roads.push(B('broadcastShowRoadLabels','check',{label:'Road names'}));
+        roads.push(B('broadcastShowRoadLabels','check',{label:'Road names',rerender:true}));
+        if(b.broadcastShowRoadLabels)roads.push(zoomRangeRow(b,'Road names','broadcastRoadLabelMinZoom','broadcastRoadLabelMaxZoom',{min:0,max:24,step:.5}));
         roads.push(B('broadcastShowPOI','check',{label:'POI labels'}));
         roads.push(B('broadcastShowNaturalLabels','check',{label:'Natural labels'}));
         p.append(mapAccordion('roads','Roads',roads,false));
