@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.2` (`VERSION`).
+- **Last reviewed application version:** `0.9.3` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -29,6 +29,7 @@ Core files: `studio/mapbox.js` (Mapbox backgrounds/cartography), `studio/ui.js` 
 | 0.9.0 | `3647ad0` | AguaceroWX-style Overlays settings and map layers |
 | 0.9.1 | `e9650e0` | Lat/Lon grid modes Off / On / Ocean Only with water polygon clipping and legacy interval migration |
 | 0.9.2 | see Git log | Standalone Map Style toolbar popout; Custom/Dark/Satellite bases, saved styles, new Globe/Satellite/Waterways/Terrain options, Aguacero category ordering |
+| 0.9.3 | see Git log | Folded map icon relocated before Redo, crisper Map Style typography, Dark/Custom maps hide all hydrographic fills/coastlines/waterways |
 
 In 0.8.9 the broadcast ocean/water color default is `#1d253a`; bathymetry color `#000000`; parks `#252525`; building footprint `#242424`. Preserve existing saved scenes/settings unless a migration is explicitly necessary.
 
@@ -59,6 +60,15 @@ New source features: flat dark/custom map background, native satellite shadow/hi
 **Not yet finished:** Aguacero's full independently configurable label hierarchy (road signs, cities/dots, towns/dots, villages, hamlets, counties, countries, water labels, etc.), railroads, per-zoom styling toggles, polar projections, full custom Mapbox Style picker, and future data-overlay layer ordering. Avoid claiming complete pixel/function parity. These should be added incrementally without regressing current labels/maps.
 
 **Testing status:** JS syntax validated in connector-side V8; actual deployed Streamlit map, Mapbox web rendering, popup UX and browser performance have NOT been tested. User needs to test after deployment.
+
+## v0.9.3 feedback and corrections
+
+User screenshots (2026-10-15) showed the top toolbar using a camera glyph rather than a folded-map glyph, the Map Style flyout text appearing less crisp than AguaceroWX, and Dark/Custom Color basemaps still showing lakes and rivers. In v0.9.3:
+
+- Replaced the camera svg with a compact folded-map svg placed immediately between **Undo** and **Redo (Ctrl+Y)**.
+- Changed flyout typography to a screen-optimized Segoe UI/Arial stack with larger section/control fonts and stronger section-label rules; does not alter the actual city/town Mapbox glyph renderer.
+- Dark and Custom Color now have a uniform selected fill for land and water in both Mercator and Globe. Suppress separate Mapbox Streets water fills, native waterways and hydro labels, custom WD water/coastline lines, water depth, national parks and the optional WD waterways. Saved toggles and style settings are **not overwritten** and remain available when switching back to Satellite, which is unchanged.
+- **Requires live browser validation:** check Dark/Custom at coastal New England and Great Lakes, both projections and multiple zooms; confirm sea/lake layers do not show through and that Satellite settings restore. Verify popup labels are acceptably sharp at current browser zoom and Streamlit iframe size. Do not assume runtime rendering has been tested based on JavaScript syntax tests.
 
 ## Next work / QA priorities
 
