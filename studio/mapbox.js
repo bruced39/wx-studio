@@ -596,6 +596,12 @@
             // draws country/state/county ONCE with solid lines below.
             // This removes duplicate borders, dash artifacts and mixed alpha.
             map.setLayoutProperty(l.id,'visibility','none');
+          }else if(sl==='water'||sl==='waterway'){
+            // Suppress native Streets water outlines: these trace merged
+            // ocean/lake/river shapes regardless of the inland-water toggle.
+            // The dedicated ocean and optional inland layers above replace
+            // these. Water fill polygons and user waterways styling stay.
+            map.setLayoutProperty(l.id,'visibility','none');
           }
         }else if(cfg.broadcastBase!=='satellite'&&
           ((l.type==='fill'&&['water','waterway','landuse','landuse_overlay'].includes(sl))||
