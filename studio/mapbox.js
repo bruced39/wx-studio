@@ -781,8 +781,10 @@
       try{
         if(pProj!==pr){P.setProjection(pr);pProj=pr;}
         P.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
-        // Mapbox's native pixel pan accounts for pitch, bearing and globe.
-        P.panBy([dx/s,dy/s],{duration:0});
+        // panBy specifies the camera's screen offset, opposite to the pointer
+        // motion for our preview. Negating both axes makes the map follow
+        // the mouse (right drag -> map right; up drag -> map up).
+        P.panBy([-dx/s,-dy/s],{duration:0});
         pKey=null;
         const c=P.getCenter();
         if(c&&Number.isFinite(c.lng)&&Number.isFinite(c.lat))
