@@ -540,13 +540,15 @@
           overlayLine('tz','Time Zone Boundaries','overlayTimeZones')
         ];
         const gridNodes=[
-          B('overlayLatLonMode','select',{label:'Lat / lon grid',rerender:true,options:[['off','Off'],['.5','0.5°'],['1','1°'],['2','2°'],['5','5°'],['10','10°'],['15','15°'],['30','30°']]})
+          B('overlayLatLonMode','select',{label:'Lat / lon grid',rerender:true,options:[['off','Off'],['on','On (land + water)'],['ocean','Ocean Only']]})
         ];
         if(b.overlayLatLonMode!=='off'){
           gridNodes.push(B('overlayLatLonColor','color',{label:'Color'}));
           gridNodes.push(B('overlayLatLonWidth','num',{label:'Line width',min:.1,max:4,step:.05}));
           gridNodes.push(B('overlayLatLonOpacity','num',{label:'Opacity',min:0,max:1,step:.05}));
-          gridNodes.push(B('overlayLatLonAutoSpacing','check',{label:'Auto spacing (zoom)'}));
+          gridNodes.push(B('overlayLatLonAutoSpacing','check',{label:'Auto spacing (zoom)',rerender:true}));
+          if(!b.overlayLatLonAutoSpacing)
+            gridNodes.push(B('overlayLatLonManualSpacing','select',{label:'Grid interval',options:[['.5','0.5°'],['1','1°'],['2','2°'],['5','5°'],['10','10°'],['15','15°'],['30','30°']]}));
         }
         overlays.push(mapAccordion('ov-grid','Lat / Lon Grid',gridNodes,false));
         overlays.push(h('div',{className:'hint',text:'NWS boundaries load from NOAA/NWS reference-map data for the current map area. Time zones use U.S. DOT/BTS boundary data.'}));
