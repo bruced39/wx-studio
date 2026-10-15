@@ -28,17 +28,33 @@
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
   function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
   function builtInDefaultMapBg(){
-    const bg={type:'mapbox',mbStyle:'broadcast',proj:'mercator',theme:'dark',region:'eastma',view:null,view2:null,grad:'sky',color:'#101820',asset:null,dim:0,kenburns:false};
+    const bg={type:'mapbox',mbStyle:'broadcast',broadcastBase:'satellite',proj:'mercator',theme:'dark',region:'eastma',view:null,view2:null,grad:'sky',color:'#101820',asset:null,dim:0,kenburns:false};
     g.MB.ensureConfig(bg); return bg;
   }
   function getSavedDefaultMapBg(){
     try{
       const raw=localStorage.getItem(MAP_DEFAULT_KEY); if(!raw)return null;
       const bg=JSON.parse(raw); if(!bg||bg.type!=='mapbox')return null;
-      g.MB.ensureConfig(bg); bg.view2=null; return bg;
+      g.MB.ensureConfig(bg);bg.mbStyle='broadcast';bg.broadcastBase='satellite';
+      bg.view2=null;return bg;
     }catch(e){return null;}
   }
   function defaultMapBg(){return getSavedDefaultMapBg()||builtInDefaultMapBg();}
+  function applySavedDefaultOnStartup(show){
+    const scene=show?.scenes?.[0];
+    if(!scene||scene.bg?.type!=='mapbox')return false;
+    const saved=getSavedDefaultMapBg();
+    if(saved){
+      // The saved camera wins over the recent autosaved camera, without
+      // replacing any other scenes or weather graphics in this show.
+      scene.bg=JSON.parse(JSON.stringify(saved));
+      return true;
+    }
+    // Without a saved default, retain the last session's actual camera.
+    g.MB.ensureConfig(scene.bg);
+    scene.bg.mbStyle='broadcast';scene.bg.broadcastBase='satellite';
+    return false;
+  }
   function currentMapDefaultBg(sc){
     const bg=JSON.parse(JSON.stringify(sc.bg)); g.MB.ensureConfig(bg);
     const v=JSON.parse(JSON.stringify(E.viewAt(sc,editT())));
@@ -106,7 +122,7 @@
   }
 
   /* ---------- tools ---------- */
-  const TOOLS = [['select', '⌖ Select'], ['pen', '✎ Pen'], ['arrow', '➚ Arrow'], ['line', '〰 Isobar'], ['front', '▲ Front'], ['hl-H', 'H'], ['hl-L', 'L'], ['icon', '☀ Icon'], ['text', 'T Text'], ['rect', '▭ Box'], ['ellipse', '◯ Oval'], ['pin', '● Pin'], ['storm', '🌀 Storm'], ['barb', '⇶ Wind barb']];
+  const TOOLS = [['pan', '✋ Pan Map'], ['select', '⌖ Select'], ['pen', '✎ Pen'], ['arrow', '➚ Arrow'], ['line', '〰 Isobar'], ['front', '▲ Front'], ['hl-H', 'H'], ['hl-L', 'L'], ['icon', '☀ Icon'], ['text', 'T Text'], ['rect', '▭ Box'], ['ellipse', '◯ Oval'], ['pin', '● Pin'], ['storm', '🌀 Storm'], ['barb', '⇶ Wind barb']];
   function buildTools() {
     const t = $('#tools'); t.innerHTML = '';
     TOOLS.forEach(([id, label]) => t.append(h('button', { 'data-tool': id, text: label, title: id, on: { click: () => setTool(id) } })));
@@ -115,7 +131,12 @@
     t.append(fs, h('button', { text: 'Delete', className: 'dng', on: { click: delObj } }), h('button', { text: 'Duplicate', on: { click: dupObj } }));
     setTool('select');
   }
-  function setTool(id) { finishDraft(); S.tool = id; document.querySelectorAll('#tools button[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === id)); ov.style.cursor = id === 'select' && S.show?.scenes?.[S.si]?.bg?.type==='mapbox' ? 'grab' : id === 'select' ? 'default' : 'crosshair'; }
+  function setTool(id) {
+    finishDraft();S.tool=id;
+    document.querySelectorAll('#tools button[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===id));
+    // Do not access cur() before S.show exists.
+    ov.style.cursor=(id==='pan'||(id==='select'&&S.show?.scenes?.[S.si]?.bg?.type==='mapbox'))?'grab':id==='select'?'default':'crosshair';
+  }
   function finishDraft() {
     const d = S.draft; S.draft = null; if (!d) return;
     if (d.type === 'shape') { if (Math.abs(d.w) > 8 && Math.abs(d.h) > 8) addObject('shape', { shape: d.shape, x: d.x, y: d.y, w: d.w, h: d.h, fill: '#ffffff', opacity: 0.2, stroke: '#ffffff', lw: 4 }); }
@@ -148,6 +169,13 @@
     }
     if (e.button !== 0) return;
     backToEdit(); ov.setPointerCapture(e.pointerId); const xf = E.xf(sc, editT());
+    if(S.tool==='pan'&&xf.mb){
+      // Pan independent of selectable weather objects covering the map.
+      e.preventDefault();g.MB.setInteractive(true);
+      S.drag={k:'pan',last:p,start:p,startCam:JSON.parse(JSON.stringify(mapView(sc)))};
+      ov.style.cursor='grabbing';
+      return;
+    }
     if (S.tool === 'select') {
       const so = selObj() ? E.toScreen(selObj(), xf) : null;
       if (so) { const hd = handles(so);
@@ -200,15 +228,15 @@
     else if(d.k==='pan'&&xf.mb){
       const v=mapView(sc),deltaX=p[0]-d.start[0],deltaY=p[1]-d.start[1];
       const q=g.MB.panByPixels(sc.bg,d.startCam,deltaX,deltaY);
-      if(q)v.c=q;
+      if(q&&Number.isFinite(q[0])&&Number.isFinite(q[1]))v.c=q;
       d.last=p;
     }
     else if (d.k === 'pan') { const v = mapView(sc), kk = W / v.w; v.cx -= (p[0] - d.last[0]) / kk; v.cy -= (p[1] - d.last[1]) / kk; d.last = p; }
     else if (d.k === 'pen' && S.draft) { const l = S.draft.pts[S.draft.pts.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 3) S.draft.pts.push(p); }
     else if (d.k === 'shape' && S.draft) { S.draft.x = Math.min(d.o[0], p[0]); S.draft.y = Math.min(d.o[1], p[1]); S.draft.w = Math.abs(p[0] - d.o[0]); S.draft.h = Math.abs(p[1] - d.o[1]); }
   });
-  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; ov.style.cursor = S.tool==='select'&&cur().bg.type==='mapbox'?'grab':''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
-  ov.addEventListener('pointercancel', () => { const d=S.drag; S.drag = null; ov.style.cursor = S.tool==='select'&&cur().bg.type==='mapbox'?'grab':''; if(d&&(d.k==='orbit'||d.k==='pan'))g.MB.setInteractive(false); });
+  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
+  ov.addEventListener('pointercancel', () => { const d=S.drag; S.drag = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if(d&&(d.k==='orbit'||d.k==='pan'))g.MB.setInteractive(false); });
   ov.addEventListener('contextmenu', e => { if (cur().bg.type === 'mapbox') e.preventDefault(); });
   ov.addEventListener('dblclick', () => { if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); } });
   ov.addEventListener('wheel', e => { const sc = cur(); if (!isMap(sc.bg)) return; e.preventDefault(); backToEdit(); const p = pt(e);
@@ -928,7 +956,16 @@
   /* ---------- boot ---------- */
   function boot() {
     buildTools(); let sh = null; try { const raw = localStorage.getItem(KEY); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
-    if (sh) { migrateMB(sh); migrateWDBroadcast(sh); } S.show = sh || newShowWithDefaultMap(); S.show.assets = S.show.assets || {}; S.hist = []; S.hp = -1; commit(); refreshAll(); if (sh) { toast('Restored your last session'); E.preload(S.show).then(() => thumbSoon(true)); }
+    if(sh){migrateMB(sh);migrateWDBroadcast(sh);}
+    S.show=sh||newShowWithDefaultMap();
+    const loadedDefault=applySavedDefaultOnStartup(S.show);
+    S.show.assets=S.show.assets||{};S.hist=[];S.hp=-1;
+    commit();refreshAll();
+    if(S.show.scenes[0]?.bg?.type==='mapbox')setTool('pan');
+    if(sh){
+      toast(loadedDefault?'Last show restored with saved default Satellite map':'Last show restored; Satellite selected');
+      E.preload(S.show).then(()=>thumbSoon(true));
+    }
     g.MB.onUpdate = () => thumbSoon(true); if (!g.MB.hasToken() && S.show.scenes.some(x => x.bg.type === 'mapbox')) setTimeout(mapboxSettings, 600); if (S.show.scenes.some(x => x.bg.type === 'mapbox') && g.MB.hasToken()) g.MB.init().then(() => thumbSoon(true)).catch(() => { }); g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
     if (document.fonts) { ['800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
     requestAnimationFrame(loop);
