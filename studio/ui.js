@@ -400,7 +400,7 @@
         p.append(mapAccordion('base','Weather Director Base',base,false));
 
         const landWater=[
-          B('broadcastWaterColor','color',{label:'Water color'}),
+          B('broadcastWaterColor','color',{label:'Ocean / lake color',after:()=>updateMapStyleCardPreviews(b)}),
           B('showWaterDepth','check',{label:'Show water depth',rerender:true})
         ];
         landWater.push(B('waterDepthColor','color',{label:'Depth color'}));
@@ -652,17 +652,41 @@
     commit();renderPanels();toast('Map style loaded: '+item.name);
   }
   function mapStyleButton(label,fn,cls){return h('button',{text:label,className:cls||'',on:{click:fn}});}
+  // Crisp vector previews for color maps; satellite pulls a real @2x Mapbox
+  // Static image with SVG preview underneath as an offline fallback.
+  function mapStyleCardBackground(key,b){
+    const isSat=key==='satellite';
+    const land=isSat?'#365840':toHex(key==='dark'?b.broadcastDarkColor:b.broadcastCustomColor);
+    const water=isSat?'#366274':toHex(b.broadcastWaterColor);
+    const edge=isSat?'#f0eedf':'#e7ebf2';
+    const svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 142">'+
+      '<rect width="280" height="142" fill="'+water+'"/>'+
+      '<path d="M-3 -3H198L178 13 184 23 172 34 187 46 166 55 170 69 153 76 158 91 140 99 146 108 130 122 134 145H-3Z" fill="'+land+'" stroke="'+edge+'" stroke-width="1.6"/>'+
+      '<path d="M163 114l12-4 5 8-7 7 4 10-10 3-9-12z M207 91l5-4 5 5-3 8-6-1z M234 58l6-1 5 5-6 6-5-2z" fill="'+land+'" stroke="'+edge+'" stroke-width="1.2"/>'+
+      '<path d="M20 0L30 140M68 0L68 142M115 0L111 140M2 29L184 30M0 70L159 69M0 110L145 109M38 10L141 120M7 86L143 13" stroke="'+edge+'" stroke-width=".9" opacity=".48" fill="none"/>'+
+      '<text x="30" y="50" fill="#fff" stroke="#111" stroke-width="2" paint-order="stroke" font-family="Arial" font-size="12" font-weight="bold">BOSTON</text>'+
+      '<text x="38" y="96" fill="#fff" stroke="#111" stroke-width="2" paint-order="stroke" font-family="Arial" font-size="12" font-weight="bold">NEW YORK</text></svg>';
+    const fallback='url("data:image/svg+xml,'+encodeURIComponent(svg)+'") center / cover no-repeat';
+    if(isSat&&g.MB.hasToken()){
+      const url='https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/-71.5,42.4,6/280x142@2x?access_token='+encodeURIComponent(g.MB.token());
+      return 'url("'+url+'") center / cover no-repeat, '+fallback;
+    }
+    return fallback;
+  }
+  function updateMapStyleCardPreviews(b){
+    const p=$('#mapStyleScroll');if(!p)return;
+    p.querySelectorAll('.mapstyle-card[data-base]').forEach(card=>{
+      const swatch=card.querySelector('.swatch');
+      if(swatch)swatch.style.background=mapStyleCardBackground(card.getAttribute('data-base'),b);
+    });
+  }
   function mapStyleCards(b){
     const box=h('div',{className:'mapstyle-cards'});
     const selected=b.broadcastBase==='dark'?'dark':b.broadcastBase==='satellite'?'satellite':'custom';
-    for(const [key,title,swatch] of [
-      ['custom','Custom Color','linear-gradient(135deg,#143550,#266c94)'],
-      ['dark','Dark','linear-gradient(135deg,#111219,#222e39)'],
-      ['satellite','Satellite','linear-gradient(145deg,#3a624a,#263f35 45%,#3c6c82 55%,#42573a)']
-    ]){
-      const btn=h('button',{className:'mapstyle-card'+(selected===key?' active':''),title:title+' map base',
+    for(const [key,title] of [['custom','Custom Color'],['dark','Dark'],['satellite','Satellite']]){
+      const btn=h('button',{className:'mapstyle-card'+(selected===key?' active':''),title:title+' map base','data-base':key,
         on:{click:()=>{b.mbStyle='broadcast';b.broadcastBase=key;commit();renderPanels();}}},
-        h('span',{className:'swatch',style:'background:'+swatch}),
+        h('span',{className:'swatch',style:'background:'+mapStyleCardBackground(key,b)}),
         h('span',{className:'caption',text:title}));
       box.append(btn);
     }
@@ -727,8 +751,9 @@
       Object.assign(b,JSON.parse(JSON.stringify(g.MB.DEFAULTS)),keep);
       b.mbStyle='broadcast';commit();renderPanels();
     }),mapStyleCards(b));
-    if(b.broadcastBase==='custom')scroll.append(B('broadcastCustomColor','color',{label:'Custom background color'}));
-    if(b.broadcastBase==='dark')scroll.append(B('broadcastDarkColor','color',{label:'Dark background color'}));
+    if(b.broadcastBase==='custom')scroll.append(B('broadcastCustomColor','color',{label:'Land color',after:()=>updateMapStyleCardPreviews(b)}));
+    if(b.broadcastBase==='dark')scroll.append(B('broadcastDarkColor','color',{label:'Land color',after:()=>updateMapStyleCardPreviews(b)}));
+    if(b.broadcastBase!=='satellite')scroll.append(B('broadcastWaterColor','color',{label:'Ocean / lake color',after:()=>updateMapStyleCardPreviews(b)}));
     const proj=h('div',{className:'mapstyle-choices'});
     for(const [key,label] of [['mercator','Mercator'],['globe','Globe']])
       proj.append(mapStyleButton(label,()=>{b.proj=key;commit();renderPanels();},b.proj===key?'active':''));
