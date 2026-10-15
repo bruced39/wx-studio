@@ -136,7 +136,9 @@
     })};
   }
   function loadFlatLand(map){
-    if(flatLandData){const src=map.getSource('wd-flat-land-data');if(src)src.setData(flatLandData);return;}
+    // The newly added source already starts with cached geometry. Avoid
+    // re-parsing the entire world each time a color/checkbox is changed.
+    if(flatLandData)return;
     if(!flatLandPromise)flatLandPromise=fetch(FLAT_LAND_URL,{cache:'force-cache'})
       .then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json();})
       .then(prepareFlatLand)
