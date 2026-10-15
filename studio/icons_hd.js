@@ -79,6 +79,22 @@
     c.restore();
   }
 
+  /* ---- falling snowflakes (six-armed crystals that drift, sway and slowly spin) ---- */
+  function flake(c, x, y, R, rot, a) {
+    c.save(); c.translate(x, y); c.rotate(rot); c.shadowColor = 'rgba(150,205,255,' + (0.85 * a) + ')'; c.shadowBlur = 7; c.strokeStyle = 'rgba(240,248,255,' + (0.95 * a) + ')'; c.lineCap = 'round';
+    for (let k = 0; k < 6; k++) { c.save(); c.rotate(k * Math.PI / 3); c.lineWidth = Math.max(1.4, R * 0.17); c.beginPath(); c.moveTo(0, 0); c.lineTo(R, 0); c.stroke(); c.lineWidth = Math.max(1, R * 0.12); c.beginPath(); c.moveTo(R * 0.55, 0); c.lineTo(R * 0.78, -R * 0.26); c.moveTo(R * 0.55, 0); c.lineTo(R * 0.78, R * 0.26); c.stroke(); c.restore(); }
+    c.restore();
+  }
+  function snow(c, ph, p) {
+    const r = rng(p.seed); c.save();
+    for (let i = 0; i < p.n; i++) {
+      const x0 = 100 + 200 * r(), spd = 1 + (r() < 0.5 ? 1 : 0), off = r(), f = ((ph * spd + off) % 1), y = 264 + 215 * f, sw = p.s0 + p.s1 * r(), x = x0 + sw * Math.sin(TAU * (ph * spd + off)),
+        a = Math.min(1, f * 6) * Math.sin(Math.PI * Math.min(1, f * 1.05)) ** 0.6, R = p.r0 + p.r1 * r(), rot = (r() < 0.5 ? 1 : -1) * TAU * (ph * spd + off) + r() * 6;
+      flake(c, x, y, R, rot, a);
+    }
+    c.restore();
+  }
+
   /* rain presets on the grey cloud (cloud centre y=232, rain starts under it) */
   const RP = (o) => Object.assign({ seed: 9, x0: 95, xw: 210, spd: 4, spdP: 0.4, top: 267, len: 190, fk: 6, fs: 1.06, L: 26, w0: 2.3, w1: 2.1, aS: 0.95, aG: 0.7, blur: 4 }, o);
   const P_RAIN = RP({}), P_SHOWERS = RP({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 }), P_DRIZZLE = RP({ n: 6, spd: 2, spdP: 0.5, L: 27, w0: 3.4, w1: 1.6, aS: 0.92, aG: 0.65, blur: 5 }), P_HEAVY = RP({ n: 75, spd: 5, spdP: 0.5, L: 34, w0: 2.8, w1: 2.4 });
@@ -97,6 +113,7 @@
     { id: 'drizzle', k: 1.18, label: 'Drizzle', oy: 300, fn: (c, ph) => { rain(c, ph, P_DRIZZLE); cloudImg(c, 200, 232, ph); } },
     { id: 'heavy-rain', k: 1.18, label: 'Heavy Rain', oy: 300, fn: (c, ph) => { rain(c, ph, P_HEAVY); cloudImg(c, 200, 232, ph); } },
     { id: 'heavy-rain-wind', k: 1.18, label: 'Heavy Rain & Wind', oy: 300, fn: (c, ph) => { windRain(c, ph); cloudImg(c, 200, 232, ph); } },
+    { id: 'flurries', k: 1.18, label: 'Flurries', oy: 300, fn: (c, ph) => { snow(c, ph, { seed: 14, n: 5, s0: 10, s1: 10, r0: 6.5, r1: 2 }); cloudImg(c, 200, 232, ph); } },
     { id: 'mostly-sunny-rain', label: 'Mostly Sunny/Rain', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({})); } },
     { id: 'mostly-sunny-showers', label: 'Mostly Sunny/Showers', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 })); } }
   ];
