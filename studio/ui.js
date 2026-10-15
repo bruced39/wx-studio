@@ -671,17 +671,25 @@
   function saveCurrentStyle(){
     const b=cur().bg;
     if(b.type!=='mapbox')return toast('Select a Mapbox background first');
-    const name=prompt('Save this map style as:', 'My Map Style');
+    const name=prompt('Name this map view and style preset:', 'My Map View');
     if(!name||!name.trim())return;
     const settings={};
     g.MB.ensureConfig(b);
     for(const k of Object.keys(g.MB.DEFAULTS))settings[k]=b[k];
     settings.proj=b.proj;settings.mbStyle=b.mbStyle;
-    const list=readMapStylePresets(),item={name:name.trim(),settings,created:new Date().toISOString()};
+    // Capture the same active camera the viewer sees. Saving a preset should
+    // not modify the scene or its animated camera move.
+    const active=E.viewAt(cur(),editT());
+    const camera=JSON.parse(JSON.stringify({
+      c:active.c,z:active.z,b:active.b||0,p:active.p||0
+    }));
+    const list=readMapStylePresets(),item={
+      name:name.trim(),settings,camera,created:new Date().toISOString()
+    };
     const existing=list.findIndex(x=>x.name===item.name);
     if(existing>=0){if(!confirm('Replace saved style "'+item.name+'"?'))return;list[existing]=item;}
     else list.unshift(item);
-    saveMapStylePresets(list);toast('Map style saved');renderMapStylePanel();
+    saveMapStylePresets(list);toast('Named map view and style saved');renderMapStylePanel();
   }
   function applySavedMapStyle(item){
     const b=cur().bg;
@@ -690,7 +698,18 @@
     for(const k of Object.keys(g.MB.DEFAULTS))if(Object.prototype.hasOwnProperty.call(cfg,k))b[k]=cfg[k];
     if(cfg.proj==='globe'||cfg.proj==='mercator')b.proj=cfg.proj;
     b.mbStyle='broadcast';g.MB.ensureConfig(b);
-    commit();renderPanels();toast('Map style loaded: '+item.name);
+    // Legacy style-only presets remain valid; leave the camera untouched for
+    // those. New presets restore the exact saved location/zoom/tilt/bearing.
+    const cam=item.camera;
+    if(cam&&Array.isArray(cam.c)&&cam.c.length===2&&cam.c.every(Number.isFinite)
+       &&Number.isFinite(cam.z)){
+      b.view={c:cam.c.slice(),z:cam.z,b:Number.isFinite(cam.b)?cam.b:0,
+        p:Number.isFinite(cam.p)?cam.p:0};
+      b.view2=null;delete b.camDur;delete b.camDelay;
+      S.editEnd=false;
+    }
+    commit();renderPanels();thumbSoon(true);
+    toast((cam?'Map view and style':'Map style')+' loaded: '+item.name);
   }
   function mapStyleButton(label,fn,cls){return h('button',{text:label,className:cls||'',on:{click:fn}});}
   // Crisp vector previews for color maps; satellite pulls a real @2x Mapbox
@@ -762,13 +781,18 @@
     const sc=cur(),b=sc.bg;
     if(MS.tab==='saved'){
       const list=readMapStylePresets();
-      scroll.append(h('div',{className:'hint',text:'Saved styles include colors, labels, overlays, terrain and line settings. Camera location and scene objects remain unchanged.'}));
-      if(!list.length)scroll.append(h('div',{className:'hint',text:'No map styles saved yet. Customize a map and click Save Style.'}));
+      scroll.append(h('div',{className:'hint',text:'Save and load named map views: location, zoom, rotation, tilt, map colors, labels, boundaries and overlays. Existing weather graphics stay in the scene. Presets are stored in this browser.'}));
+      if(!list.length)scroll.append(h('div',{className:'hint',text:'No presets saved yet. Set your map view and style, then click Save Style.'}));
       for(const item of list){
         scroll.append(h('div',{className:'mapacc',style:'padding:10px'},
-          h('div',{style:'font-weight:700;margin-bottom:8px',text:item.name}),
+          h('div',{style:'font-weight:700;margin-bottom:4px',text:item.name}),
+          h('div',{className:'hint',style:'margin-bottom:8px',text:
+            item.camera&&Number.isFinite(item.camera.z)
+              ? 'Zoom '+item.camera.z.toFixed(1)+' · '+(item.settings?.proj==='globe'?'Globe':'Mercator')+
+                ' · '+(item.settings?.broadcastBase||'Satellite')
+              : 'Style-only preset (saved before map views were added)'}),
           h('div',{className:'btnrow'},
-            mapStyleButton('Apply',()=>applySavedMapStyle(item),'pri'),
+            mapStyleButton('Load Preset',()=>applySavedMapStyle(item),'pri'),
             mapStyleButton('Delete',()=>{
               if(!confirm('Delete saved style "'+item.name+'"?'))return;
               saveMapStylePresets(readMapStylePresets().filter(x=>x.name!==item.name));renderMapStylePanel();
