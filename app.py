@@ -49,7 +49,7 @@ def _cloud_config() -> dict:
         endpoint = str(st.secrets.get("WX_SUPABASE_URL", "")).strip()
         pub_key = str(st.secrets.get("WX_SUPABASE_PUBLISHABLE_KEY", "")).strip()
         if (endpoint.startswith("https://") and
-            (pub_key.startswith("sb_publishable_") or pub_key.startswith("eyJ"))):
+            pub_key.startswith("sb_publishable_")):
             return {"url": endpoint, "publishableKey": pub_key}
     except Exception:
         pass
