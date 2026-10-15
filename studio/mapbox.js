@@ -527,10 +527,10 @@
           if(road||aeroway){
             map.setLayoutProperty(l.id,'visibility','none');
           }else if(boundary){
-            const country=id.includes('admin-0')||id.includes('country')||id.includes('national'),county=id.includes('admin-2')||id.includes('county');
-            const vis=country?cfg.broadcastShowCountryBorders!==false:county?!!cfg.broadcastShowCountyBorders:cfg.broadcastShowStateBorders!==false;
-            const color=country?cfg.broadcastCountryColor:county?cfg.broadcastCountyColor:cfg.broadcastStateColor,width=country?+cfg.broadcastCountryWidth:county?+cfg.broadcastCountyWidth:+cfg.broadcastStateWidth;
-            map.setLayoutProperty(l.id,'visibility',vis?'visible':'none');if(vis){try{map.setPaintProperty(l.id,'line-color',color);}catch(e){}try{map.setPaintProperty(l.id,'line-width',Math.max(.5,width||1));}catch(e){}}
+            // Hide Mapbox's stock dashed admin strokes. WX Studio now
+            // draws country/state/county ONCE with solid lines below.
+            // This removes duplicate borders, dash artifacts and mixed alpha.
+            map.setLayoutProperty(l.id,'visibility','none');
           }
         }else if(cfg.broadcastBase!=='satellite'&&
           ((l.type==='fill'&&['water','waterway','landuse','landuse_overlay'].includes(sl))||
@@ -555,33 +555,33 @@
       }catch(e){}
     }
     const source=streetsSource(map);installBaseTints(map,cfg,source);
-    try{if(map.getLayer('wd-county-boundaries'))map.removeLayer('wd-county-boundaries');}catch(e){}
-    if(source&&cfg.broadcastShowCountyBorders){
-      const minz=Math.max(0,Math.min(22,cfg.broadcastCountyMinZoom==null?6:+cfg.broadcastCountyMinZoom));
-      const layer={id:'wd-county-boundaries',type:'line',source,'source-layer':'admin',minzoom:minz,maxzoom:24,
-        filter:['all',['==',['get','admin_level'],2],['!=',['get','maritime'],true]],
-        layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':cfg.broadcastCountyColor||'#89939d','line-width':Math.max(.2,+cfg.broadcastCountyWidth||1),
-          'line-opacity':cfg.broadcastBase==='satellite'?.85:.48}};
-      const firstLabel=(map.getStyle().layers||[]).find(l=>l.type==='symbol')?.id;
-      try{firstLabel?map.addLayer(layer,firstLabel):map.addLayer(layer);}catch(e){console.warn('WX Studio county boundary layer',e);}
+    // One source and one solid, antialiased stroke per admin level. Admin
+    // levels are 0=country, 1=state/province and 2=county on Streets v8.
+    // Explicit full opacity avoids the thin washed-out/dashed appearance.
+    for(const id of ['wd-admin-country','wd-admin-state','wd-admin-county','wd-county-boundaries']){
+      try{if(map.getLayer(id))map.removeLayer(id);}catch(e){}
     }
-    if(cfg.broadcastBase!=='satellite'){
-      const firstSymbol=(map.getStyle().layers||[]).find(l=>l.type==='symbol')?.id;
-      for(const original of layers){
-        const id=String(original.id||'').toLowerCase(),sl=String(original['source-layer']||'').toLowerCase();
-        if(original.type!=='line'||!(sl==='admin'||id.includes('boundary')||id.includes('admin')))continue;
-        try{
-          if(map.getLayer(original.id)){
-            // Retain any explicitly chosen non-default border colors.
-            const country=id.includes('admin-0')||id.includes('country')||id.includes('national');
-            const county=id.includes('admin-2')||id.includes('county');
-            const configured=country?cfg.broadcastCountryColor:county?cfg.broadcastCountyColor:cfg.broadcastStateColor;
-            const defaultColor=country?'#101010':county?'#89939d':'#171717';
-            if(configured===defaultColor)map.setPaintProperty(original.id,'line-color','#dce3eb');
-            firstSymbol?map.moveLayer(original.id,firstSymbol):map.moveLayer(original.id);
-          }
-        }catch(e){console.warn('WX Studio map border',e);}
+    if(source){
+      const label=(map.getStyle().layers||[]).find(l=>l.type==='symbol')?.id;
+      const layers=[
+        ['country',0,cfg.broadcastShowCountryBorders!==false,cfg.broadcastCountryColor,cfg.broadcastCountryWidth,0],
+        ['state',1,cfg.broadcastShowStateBorders!==false,cfg.broadcastStateColor,cfg.broadcastStateWidth,0],
+        ['county',2,!!cfg.broadcastShowCountyBorders,cfg.broadcastCountyColor,cfg.broadcastCountyWidth,
+          cfg.broadcastCountyMinZoom==null?6:+cfg.broadcastCountyMinZoom]
+      ];
+      for(const [name,level,enabled,color,width,minZoom] of layers){
+        if(!enabled)continue;
+        const minz=Math.max(0,Math.min(22,Number.isFinite(minZoom)?minZoom:0));
+        const layer={id:'wd-admin-'+name,type:'line',source,'source-layer':'admin',
+          minzoom:minz,maxzoom:24,
+          filter:['all',['==',['get','admin_level'],level],['!=',['get','maritime'],true]],
+          layout:{'line-cap':'round','line-join':'round','visibility':'visible'},
+          paint:{'line-color':color||'#e0e4eb',
+            'line-width':Math.max(.25,Math.min(8,+width||1)),
+            'line-opacity':1,'line-blur':0}
+        };
+        try{label?map.addLayer(layer,label):map.addLayer(layer);}
+        catch(e){console.warn('WX Studio '+name+' boundary',e);}
       }
     }
     installHillshade(map,cfg);installLandWaterFeatures(map,cfg,source);installTransportation(map,cfg,source);installOverlays(map,cfg);
@@ -714,7 +714,15 @@
   }
 
   function liveCanvas(bg,cam){
-    if(!visualConfigReady(bg))return null;
+    if(!visualConfigReady(bg)){
+      // A boundary slider can change cfgKey while the next Mapbox style
+      // update is still queued. During a drag, keep the EXISTING live WebGL
+      // canvas moving rather than freezing on an obsolete cached snapshot.
+      // The queued style update applies once the drag ends.
+      const sameStyle=D&&MB.status==='ready'&&
+        ((bg.mbStyle||'stock')+'|'+styleOf(bg)===curStyleKey)&&projOf(bg)===curProj;
+      if(!(MB.interacting&&sameStyle))return null;
+    }
     const k=norm(cam), key=[k.c[0].toFixed(6),k.c[1].toFixed(6),k.z.toFixed(4),k.b.toFixed(3),k.p.toFixed(3)].join('|');
     if(key!==liveKey){
       D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
