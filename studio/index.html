@@ -10,7 +10,10 @@ button,input,select,textarea{font:inherit;color:inherit}
 button{background:var(--p2);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
 button:hover{border-color:var(--acc)}button.pri{background:var(--acc);border-color:var(--acc);color:#04101e;font-weight:700}button.pri:hover{background:#5ab3ff}
 button.on{background:var(--acc2);border-color:var(--acc)}button.sm{padding:2px 7px;font-size:12px}button.dng:hover{border-color:var(--bad);color:var(--bad)}
-input[type=text],input[type=number],select,textarea{background:#0d1623;border:1px solid var(--line);border-radius:5px;padding:4px 6px;width:100%}
+input[type=text],input[type=number],input[type=email],input[type=password],select,textarea{background:#0d1623;color:#f5f8ff;caret-color:#f5f8ff;border:1px solid var(--line);border-radius:5px;padding:4px 6px;width:100%;color-scheme:dark}
+input[type=email]::placeholder,input[type=password]::placeholder{color:#a9b6cb;opacity:1}
+input[type=email]:-webkit-autofill,input[type=password]:-webkit-autofill{
+  -webkit-text-fill-color:#f5f8ff;box-shadow:0 0 0 1000px #0d1623 inset;caret-color:#f5f8ff}
 input[type=color]{width:42px;height:26px;padding:0;border:1px solid var(--line);background:none}input[type=range]{width:100%}
 #app{display:grid;grid-template-rows:44px 1fr;height:100vh}
 #top{display:flex;align-items:center;gap:8px;padding:0 10px;background:var(--p1);border-bottom:1px solid var(--line)}
