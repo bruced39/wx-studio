@@ -7,8 +7,8 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.0` (`VERSION`).
-- **Last reviewed code commit:** `3647ad05ec4bff306ded3e26bb26edc3bc8c1602` — `WX Studio 0.9.0: add Aguacero-style map overlays`.
+- **Last reviewed application version:** `0.9.1` (`VERSION`).
+- **Last reviewed code commit:** see the latest commit on `main` (0.9.1 Lat/Lon grid option fix; read `git log` before further edits).
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
 ## Purpose / ownership boundaries
@@ -27,6 +27,7 @@ Core files: `studio/mapbox.js` (Mapbox backgrounds/cartography), `studio/ui.js` 
 | 0.8.8 | `19f6961` | Native sharp Mapbox rendering and reduced stop-motion flicker |
 | 0.8.9 | `ce2ecd9` | Land & Water, depth, national parks, building footprints and 3D controls |
 | 0.9.0 | `3647ad0` | AguaceroWX-style Overlays settings and map layers |
+| 0.9.1 | pending commit | Lat/Lon grid modes Off / On / Ocean Only with water polygon clipping and legacy interval migration |
 
 In 0.8.9 the broadcast ocean/water color default is `#1d253a`; bathymetry color `#000000`; parks `#252525`; building footprint `#242424`. Preserve existing saved scenes/settings unless a migration is explicitly necessary.
 
@@ -40,7 +41,7 @@ Implemented under **Scene → Background → Mapbox map → Weather Director Bro
 - NWS Fire Weather Zones.
 - NWS Coastal Marine Zones.
 - Time Zone Boundaries.
-- Latitude / Longitude Grid (off, 0.5°, 1°, 2°, 5°, 10°, 15°, 30°; color, width, opacity, automatic spacing).
+- Latitude / Longitude Grid **Off / On (land + water) / Ocean Only**; color, width, opacity, automatic spacing and optional fixed interval. Ocean Only clips generated grid lines against loaded Mapbox Streets water polygons, using `sourcedata` refresh as water tiles arrive.
 
 Boundary line controls offer enable, color, solid/dashed/dotted style, width, opacity, and min/max zoom. NWS layers use the NOAA/NWS ArcGIS reference-map service, with layer IDs 1 (CWA), 8 (public), 9 (fire), 5 (coastal marine). Time zones use the U.S. DOT/Bureau of Transportation Statistics ArcGIS layer. Each overlay defaults off.
 
@@ -50,7 +51,7 @@ Boundary line controls offer enable, color, solid/dashed/dotted style, width, op
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
 2. Enable each NWS and time-zone overlay around Boston/New England; confirm geometry actually renders, can be styled, and honors min/max zoom. Check error console and performance. NWS fetches are viewport-based; ensure network responses remain complete and old requests do not overwrite newer viewport results.
-3. **Known likely UX issue in source:** `overlayLatLonAutoSpacing` defaults to `true`. When true, selecting a fixed grid spacing from the dropdown will be overridden by automatic zoom-dependent spacing. Resolve the control semantics, ideally allowing manual interval selection to do what it says.
+3. **0.9.1 change needs a browser visual test:** confirm Ocean Only excludes land and islands at coastlines, reacts to pans and zooms without flicker, and that On spans land + water. Mapbox Streets `water` includes oceans and inland lakes; this implementation masks to water rather than distinguishing salt from freshwater. Grid intervals are now separate from the mode selector when auto spacing is off.
 4. Verify Day/Night shading's terminator and how its data refreshes when the scene is stationary; 0.9.0 refresh is attached to Mapbox `moveend`.
 5. Confirm 0.8.8 smooth Mapbox navigation and flicker-free stop behavior are still intact with overlays enabled; avoid large synchronous/async updates on every camera step.
 6. Continue matching AguaceroWX cartography: city/town names, resolution/sharpness, road widths and coloring, coastline/water behavior. Do not change Claude's other UI features.
@@ -70,4 +71,4 @@ Boundary line controls offer enable, color, solid/dashed/dotted style, width, op
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.0 overlay code exists on `main`; next task is **live testing and targeted overlay fixes**, not wholesale reimplementation.
+**Status at handoff:** v0.9.1 grid choice change implemented and syntax checked. Next is **live browser test**, especially Ocean Only on New England shorelines. Other overlays remain unchanged.
