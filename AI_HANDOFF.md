@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.8` (`VERSION`).
+- **Last reviewed application version:** `0.9.9` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -131,6 +131,20 @@ User reported on Oct 15, 2026 that left-mouse panning still did not work after v
 - Focused V8 tests passed for named preset saving/restoration (including location, zoom, pitch, bearing, overlays, and projection), legacy style-only compatibility, and right/left/up/down pan directions. Full Streamlit + Firefox browser interactions still need the user's visual verification.
 - Do not regress v0.9.6 safe startup or v0.9.7 dedicated Pan Map tool. Next: user verifies drag direction and presets, then continue any remaining Aguacero parity work.
 
+## v0.9.9 — per-user cloud presets (requires Streamlit secret configuration)
+
+User requested map-view presets accessible from any computer, with Delete and freedom to pan/zoom/edit after loading a preset. Existing v0.9.8 local Saved Styles already supported **named** views/styles, load and delete; v0.9.9 adds optional **cloud sync**:
+
+- Connected existing Supabase \`wxfusion\` project ID \`caszmwcapacaofvcrzli\` (already connected to user). Created isolated \`public.wx_studio_map_presets\` table on 2026-10-15, with **RLS enforced** and SELECT/INSERT/UPDATE/DELETE policies restricted to \`auth.uid() = user_id\`. The owner is the signed-in Supabase Auth user; no anonymous cloud access. Schema is tracked in \`supabase/migrations/20261015_create_wx_studio_map_presets.sql\`.
+- Added \`studio/cloud_presets.js\`: browser-facing Supabase REST sign-in/sign-up/sign-out, session refresh, authenticated per-user list, save/upsert by name, and delete. It uses only the Supabase **public publishable key** provided at runtime by Streamlit; service-role keys must never enter the browser or GitHub.
+- Added Streamlit \`WX_SUPABASE_URL\` and \`WX_SUPABASE_PUBLISHABLE_KEY\` secrets read in \`app.py\`, injected into iframe before \`cloud_presets.js\`. **No keys are committed.** Cloud controls remain disabled with helpful fallback until user adds the two values under Streamlit Manage app → Settings → Secrets, then reruns app. Setup instructions: \`CLOUD_PRESETS_SETUP.md\`. The existing project URL is \`https://caszmwcapacaofvcrzli.supabase.co\`; retrieve its publishable key from the Supabase dashboard, never copy a service-role or secret key.
+- Saved Styles now has **Cloud Presets** and **This Browser — Local Presets** groups. A signed-in user sees the cloud list plus Refresh, Delete, Sign Out, and Upload Local Presets to Cloud. Save Style automatically targets cloud while signed in (button becomes Save to Cloud); otherwise it still saves local browser presets. Local-to-cloud upload preserves browser copies and warns that matching cloud names are replaced.
+- Each cloud preset stores \`name\`, \`camera\` (center, zoom, bearing, pitch), \`settings\` (map styling, boundaries, labels, overlays), and timestamps; loading a preset only modifies the current scene's map. User can then pan, zoom and edit freely without changing the stored record. Cloud presets do **not** alter Save Default View or overwrite weather objects. Legacy style-only presets with no camera continue working.
+- Existing WXfusion forecast public tables \`forecast_runs\`, \`forecast_daily\`, \`verification\`, \`custom_locations\`, \`wxfusion_schema_meta\` currently have RLS disabled and a critical Supabase advisor warning. We did **not modify them**; enabling RLS without reviewing application policies could break WXfusion. This unrelated security issue should be raised to the user for separate review. Never apply remedial SQL automatically.
+- Auth signup may require email confirmation; the shared Supabase project's Auth Site URL must not be overwritten solely for WX Studio. Email/password sign-in from another device works after signup/confirmation, subject to Supabase Auth configuration/rate limits.
+- **Tested:** the cloud JS client with mocked sign-in, authenticated cloud GET/POST/DELETE and sign-out; the Supabase table actually exists and RLS policies for all four actions have been checked. JS source syntax verified. **Not tested:** real Auth email signup/confirmation or live browser cloud interaction (secrets not yet configured). User must finish Streamlit secrets and log in for first live test.
+- Protect the earlier 0.9.6 startup fix, Mapbox pan directions in v0.9.8, the local preset format/storage and all unrelated weather workflows.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -155,4 +169,4 @@ User reported on Oct 15, 2026 that left-mouse panning still did not work after v
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.8 corrects inverted Pan Map movement and saves/loads named camera+style presets, retaining legacy style-only presets. Awaiting deployed browser confirmation.
+**Status at handoff:** v0.9.9 cloud presets code and per-user Supabase table implemented; Streamlit public publishable config must be set by user for live use. Cloud UI supports login, saved view load/edit, delete, sync old local presets.
