@@ -8,7 +8,7 @@
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
 - **Last reviewed application version:** `0.9.1` (`VERSION`).
-- **Last reviewed code commit:** see the latest commit on `main` (0.9.1 Lat/Lon grid option fix; read `git log` before further edits).
+- **Last reviewed code commit:** `e9650e0baa66f4a0ea72727bf3a467cc59907085` — exact Off / On / Ocean Only grid labels on v0.9.1.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
 ## Purpose / ownership boundaries
@@ -27,7 +27,7 @@ Core files: `studio/mapbox.js` (Mapbox backgrounds/cartography), `studio/ui.js` 
 | 0.8.8 | `19f6961` | Native sharp Mapbox rendering and reduced stop-motion flicker |
 | 0.8.9 | `ce2ecd9` | Land & Water, depth, national parks, building footprints and 3D controls |
 | 0.9.0 | `3647ad0` | AguaceroWX-style Overlays settings and map layers |
-| 0.9.1 | pending commit | Lat/Lon grid modes Off / On / Ocean Only with water polygon clipping and legacy interval migration |
+| 0.9.1 | `e9650e0` | Lat/Lon grid modes Off / On / Ocean Only with water polygon clipping and legacy interval migration |
 
 In 0.8.9 the broadcast ocean/water color default is `#1d253a`; bathymetry color `#000000`; parks `#252525`; building footprint `#242424`. Preserve existing saved scenes/settings unless a migration is explicitly necessary.
 
