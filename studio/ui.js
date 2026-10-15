@@ -241,7 +241,7 @@
   ov.addEventListener('contextmenu', e => { if (cur().bg.type === 'mapbox') e.preventDefault(); });
   ov.addEventListener('dblclick', () => { if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); } });
   ov.addEventListener('wheel', e => { const sc = cur(); if (!isMap(sc.bg)) return; e.preventDefault(); backToEdit(); const p = pt(e);
-    if (sc.bg.type === 'mapbox') { g.MB.setInteractive(true); const v = mapView(sc), ll = E.xf(sc, editT()).inv(p[0], p[1]); v.z = clamp(v.z - e.deltaY * 0.0025, 0, 20); const l2 = E.xf(sc, editT()).inv(p[0], p[1]); if (isFinite(ll[0]) && isFinite(l2[0])) v.c = [v.c[0] + ll[0] - l2[0], Math.max(-85, Math.min(85, v.c[1] + ll[1] - l2[1]))]; clearTimeout(ov._wt); ov._wt = setTimeout(()=>{g.MB.setInteractive(false);commit();},180); return; }
+    if (sc.bg.type === 'mapbox') { g.MB.setInteractive(true); const v = mapView(sc), ll = E.xf(sc, editT()).inv(p[0], p[1]); v.z = clamp(v.z - e.deltaY * 0.0025, 0, 20); const l2 = E.xf(sc, editT()).inv(p[0], p[1]); if (isFinite(ll[0]) && isFinite(l2[0])) v.c = [v.c[0] + ll[0] - l2[0], Math.max(-85, Math.min(85, v.c[1] + ll[1] - l2[1]))]; updateZoomBadge(); clearTimeout(ov._wt); ov._wt = setTimeout(()=>{g.MB.setInteractive(false);commit();},180); return; }
     const v = mapView(sc), k = W / v.w, P = [v.cx + (p[0] - W / 2) / k, v.cy + (p[1] - H / 2) / k]; v.w = clamp(v.w * Math.exp(e.deltaY * 0.0012), 18, 1700); const k2 = W / v.w; v.cx = P[0] - (p[0] - W / 2) / k2; v.cy = P[1] - (p[1] - H / 2) / k2; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); }, { passive: false });
   ['dragover', 'dragenter'].forEach(ev => stage.parentElement.addEventListener(ev, e => { e.preventDefault(); }));
   stage.parentElement.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], e.shiftKey ? 'bg' : 'obj'); });
@@ -272,11 +272,29 @@
   $('#bPresent').onclick = present;
   $('#stageWrap').addEventListener('click', () => { if (S.present) stopPlay(); });
 
+  /* ---------- live camera zoom readout ---------- */
+  function updateZoomBadge() {
+    const badge=$('#mapZoomBadge');
+    if(!badge||!S.show)return;
+    const scene=cur();
+    if(S.mode!=='edit'||scene.bg.type!=='mapbox'||scene.bg.showZoomBadge!==true){
+      badge.hidden=true;
+      return;
+    }
+    const view=E.viewAt(scene,editT()),z=Number(view?.z);
+    if(!Number.isFinite(z)){badge.hidden=true;return;}
+    badge.hidden=false;
+    const label=$('#mapZoomValue'),value='ZOOM '+z.toFixed(1);
+    if(label&&label.textContent!==value)label.textContent=value;
+  }
+
   /* ---------- render loop ---------- */
   let last = 0;
   function loop(ts) {
     requestAnimationFrame(loop); const liveMapScene=cur&&cur().bg&&cur().bg.type==='mapbox'; const frameMs=(liveMapScene&&(g.MB.interacting||S.mode!=='edit'))?15:30; if (ts - last < frameMs) return; last = ts;
     try {
+      // Keep the zoom text synchronized independently of expensive map frames.
+      updateZoomBadge();
       if (S.mode === 'edit') { E.renderScene(sctx, S.show, cur(), clock(), { editing: true, camT: editT(), liveMap: true }); drawOverlay(); }
       else {
         if (S.mode === 'play' && S.play) { S.T = S.play.a + (clock() - S.play.t0); if (S.T >= S.play.b) { S.T = S.play.b - 0.001; E.renderShow(sctx, S.show, S.T, { liveMap: true }); stopPlay(); return; } }
@@ -298,12 +316,6 @@
     if (o && !d) { const so = E.toScreen(o, xf), hd = handles(so), b = hd.box; octx.strokeStyle = '#2f9bff'; octx.setLineDash([10, 7]); octx.strokeRect(b.x, b.y, b.w, b.h); octx.setLineDash([]); octx.fillStyle = '#fff'; octx.strokeStyle = '#2f9bff';
       if (hd.verts) hd.verts.forEach(v => { octx.beginPath(); octx.arc(v[0], v[1], 9, 0, 6.3); octx.fill(); octx.stroke(); });
       if (hd.resize) { octx.fillRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); octx.strokeRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); } }
-    if (sc.bg.type === 'mapbox' && sc.bg.showZoomBadge === true) {
-      const zv=E.viewAt(sc,editT()), txt='ZOOM '+Number(zv.z||0).toFixed(1), x=W-178, y=22, w=154, hh=44;
-      octx.save(); E.rrect(octx,x,y,w,hh,8); octx.fillStyle='rgba(8,20,38,.88)'; octx.fill();
-      octx.strokeStyle='rgba(100,180,255,.75)'; octx.lineWidth=2; octx.stroke();
-      octx.fillStyle='#ffffff'; octx.font='700 23px Barlow, sans-serif'; octx.textAlign='center'; octx.textBaseline='middle'; octx.fillText(txt,x+w/2,y+hh/2+1); octx.restore();
-    }
     if (isMap(sc.bg) && sc.bg.view2) { octx.fillStyle = 'rgba(8,20,38,.8)'; octx.fillRect(W - 330, H - 52, 310, 36); octx.fillStyle = '#9fd0ff'; octx.font = '600 22px sans-serif'; octx.fillText('Editing camera ' + (S.editEnd ? 'END' : 'START') + ' view', W - 318, H - 27); }
     octx.restore();
   }
@@ -411,8 +423,8 @@
         bind(b, 'mbStyle', 'select', { label: 'Map style', rerender:true, options: g.MB.STYLES, after:()=>g.MB.ensureConfig(b) }),
         bind(b, 'proj', 'select', { label: 'Projection', options: g.MB.PROJ }),
         bind(b, 'region', 'select', { label: 'Camera view', options: g.MB.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; renderPanels(); } }),
-        bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom' }),
-        bind(b, 'showZoomBadge', 'check', { label: 'Show zoom level' }),
+        bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom', after:updateZoomBadge }),
+        bind(b, 'showZoomBadge', 'check', { label: 'Show zoom level', after:updateZoomBadge }),
         bind(mv, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }),
         bind(mv, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' }),
         h('div', { className: 'btnrow mapviewbtns' },
@@ -948,7 +960,7 @@
     const proj=h('div',{className:'mapstyle-choices'});
     for(const [key,label] of [['mercator','Mercator'],['globe','Globe']])
       proj.append(mapStyleButton(label,()=>{b.proj=key;commit();renderPanels();},b.proj===key?'active':''));
-    scroll.append(proj,B('showZoomBadge','check',{label:'Show zoom',after:()=>drawOverlay()}));
+    scroll.append(proj,B('showZoomBadge','check',{label:'Show zoom',after:updateZoomBadge}));
     const extras=h('div',{className:'mapstyle-actions'},
       mapStyleButton('Mapbox Token / Quality…',mapboxSettings),
       mapStyleButton('Save Default View',saveCurrentMapDefault));
