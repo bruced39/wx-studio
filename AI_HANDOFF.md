@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.5` (`VERSION`).
+- **Last reviewed application version:** `0.9.6` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -100,6 +100,15 @@ User's 2026-10-15 screenshots clarify **Dark and Custom Color** map style:
 - The toolbar still has Undo → Redo → folded Map Style icon; keep it.
 - Next: user live visual QA, then iterate only confirmed rendering issues and the full independent Labels parity list from `MAP_STYLE_REFERENCE.md`.
 
+## Emergency v0.9.6 editor startup hotfix
+
+On Oct 15, 2026 the user reported v0.9.5 loaded an empty black stage, empty left tools and empty right inspector, even after restarting Streamlit. Root cause identified in `studio/ui.js`: `boot()` calls `buildTools()` before initializing `S.show`; `buildTools()` calls `setTool('select')`; v0.9.5 newly added `cur()?.bg?.type` inside `setTool()`. The optional chaining on `cur()` **does not guard the dereference inside `cur`**, which reads `S.show.scenes` when `S.show` is still null. This throws and aborts `boot`, leaving the UI blank. v0.9.6 changes only that cursor condition to use `S.show?.scenes?.[S.si]?.bg?.type`, which is safe before load.
+
+- Verified with a focused V8 test calling `setTool('select')` when `S.show=null` and a syntax parse.
+- **Do not add code paths accessing `cur()` before `S.show` is initialized.**
+- v0.9.5 map changes are retained; still need live browser validation. Next ask user to refresh and confirm tools, scene panel and map return before further map changes.
+- This is a startup hotfix, not verification of third-party Natural Earth coastline loading or browser pan behavior.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -124,4 +133,4 @@ User's 2026-10-15 screenshots clarify **Dark and Custom Color** map style:
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.5 clean coastline-only flat map, ocean toggle and county min zoom, stable pan code. Next: live QA; avoid regressions to Satellite, smooth globe/mercator movement and overlays. User confirmed v0.9.1 Lat/Lon lines work perfectly.
+**Status at handoff:** v0.9.6 emergency startup fix restores safe initialization of Select tool; user must verify the deployed app boots. v0.9.5 map changes remain in place pending live QA.
