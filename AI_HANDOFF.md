@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.10` (`VERSION`).
+- **Last reviewed application version:** `0.9.12` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -151,6 +151,18 @@ A brand-new, ISOLATED Supabase project **WX Studio** was created under **Dave's 
 - Source CSS verified to contain selectors and readable colors. Live browser visual check still required, especially Firefox/Windows autofill.
 - Do not accidentally regress v0.9.6 startup or cloud auth from v0.9.9.
 
+## v0.9.12 — administrative boundary rendering, pan after restyle, zoom toggle
+
+On Oct 15, 2026, user reported that Show Zoom off continued displaying a badge, that left-drag map panning could freeze after changing county width, that zoomed-in country/state/county lines looked thin/washed out/dashed and ugly when enlarged, and that border sliders with matching thumb positions displayed different pixel values.
+
+- `studio/mapbox.js` hides original, multiply drawn Mapbox Streets administrative line layers (which have their own width/blur/dash/opacity). Draws **one dedicated solid line layer per admin level** using Streets v8 `admin` source: `admin_level` 0 country, 1 state/province, 2 county/second-level. Sets `line-opacity:1`, `line-blur:0`, round caps/joins, pixel width exactly from user control. Uses proper text-valued `maritime:'true'` exclusion. Respects per-layer show/color/width settings; county min zoom defaults 6. Avoid adding duplicated lines across restyles. Original coastline drawing remains unchanged. Note county availability depends on native Streets v8 second-level coverage.
+- `studio/ui.js` boundary sliders coastline, country, state and county now share the **identical 0.25–8.0 px range with 0.05 px step** and visually consistent readouts; old preset pixel values aren't migrated or changed. All widths can now match.
+- Live Mapbox camera canvas stays available for panning **while a changed style/config is still waiting for a background snapshot** (provided same Mapbox base style/projection), preventing the frozen preview after changing line width. Renderer applies new styling once interaction ends. Tested mock with pending config and stable old base.
+- Zoom overlay now requires `showZoomBadge===true` and Show Zoom toggle invokes immediate `drawOverlay()` repaint, rather than waiting on stale preview or treating undefined as on. Mapbox background defaults already set showZoomBadge true.
+- Source checked for JS syntax; mocked border layer setup test confirms exactly 3 lines, full opacity/no dash, custom widths, county off and min zoom 6; mocked live map while config pending passes.
+- **Live browser QA required**: dark/custom vs satellite, low/high zoom detail/line colors, county coverage, toggle Show Zoom off, right/left pan immediately after changing border sliders, no icon/scene/cloud regressions. Original color choices preserved: user may need to change dark black borders to a light color for Satellite contrast. The slide renderer uses its native 1920x1080 pixel scale, so thin strokes can appear narrower in resized preview.
+- Claude published v0.9.11 HD animated weather icons; preserved **all Claude changes** by branching from v0.9.11 main commit `fc526f5`. Only mapbox.js/ui.js (plus VERSION/handoff) changed here.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -182,4 +194,4 @@ A brand-new, ISOLATED Supabase project **WX Studio** was created under **Dave's 
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.10 CSS fix for readable cloud account email/password inputs; cloud account signup and cloud preset flow need live browser confirmation. Isolated Supabase intact; WXfusion untouched.
+**Status at handoff:** v0.9.12 targeted boundary/zoom/pan improvements staged or deployed; waiting for user live screenshot/QA. Cloud preset authentication and Claude's HD weather icons retained.
