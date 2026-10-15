@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.9` (`VERSION`).
+- **Last reviewed application version:** `0.9.10` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -144,6 +144,13 @@ A brand-new, ISOLATED Supabase project **WX Studio** was created under **Dave's 
 - `CLOUD_PRESETS_SETUP.md` now covers account setup, user controls and security. Auth email confirmation and actual multi-device browser behavior need LIVE user verification; the cloud JS REST client was tested with mocked sign-in/list/upsert/delete/sign-out. The isolated DB schema/RLS policies were verified by Supabase.
 - Preserve the v0.9.6 startup null-show safeguard, v0.9.8 corrected map panning, scene compatibility and Claude's features. Do not alter unrelated code.
 
+## v0.9.10 — Cloud account input text contrast
+
+- Fixed unreadable email/password text in **Map Style → Saved Styles → Cloud Presets → Create Account/Sign In**. The new input types in v0.9.9 were not included in the global dark input CSS; browsers used their white default input backgrounds while inheriting the studio's near-white foreground text.
+- Updated **studio/index.html only** for the application CSS: email and password share the existing dark background with explicit high-contrast light text, caret color, visible placeholder color and WebKit autofill styling. No login handler, cloud project, map controls, preset data or Supabase code changed.
+- Source CSS verified to contain selectors and readable colors. Live browser visual check still required, especially Firefox/Windows autofill.
+- Do not accidentally regress v0.9.6 startup or cloud auth from v0.9.9.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -168,4 +175,4 @@ A brand-new, ISOLATED Supabase project **WX Studio** was created under **Dave's 
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.9 cloud presets on dedicated isolated Supabase (US East, $0/month quote), RLS enabled, PUBLIC client key auto-configured. Awaiting actual deployed Streamlit user signup/email confirmation and Save/Load/Delete smoke test. Existing WXfusion untouched.
+**Status at handoff:** v0.9.10 CSS fix for readable cloud account email/password inputs; cloud account signup and cloud preset flow need live browser confirmation. Isolated Supabase intact; WXfusion untouched.
