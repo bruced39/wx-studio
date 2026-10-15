@@ -198,10 +198,10 @@
   }
 
   /* ---------- scene chrome: background, title, logo ---------- */
-  function drawBackground(c, show, scene, t, ct) {
+  function drawBackground(c, show, scene, t, ct, opts) {
     const b = scene.bg; if (ct == null) ct = t;
     if (b.type === 'mapbox') {
-      const fr = g.MB.frame(b, E.viewAt(scene, ct));
+      const cam=E.viewAt(scene,ct), fr=(opts&&opts.liveMap&&g.MB.liveFrame)?g.MB.liveFrame(b,cam):g.MB.frame(b,cam);
       if (fr) c.drawImage(fr, 0, 0, W, H); else { c.fillStyle = '#0b1a2e'; c.fillRect(0, 0, W, H); }
       c.save(); c.font = `600 26px ${SANS}`; c.textAlign = 'center';
       if (!fr || g.MB.status !== 'ready') { c.fillStyle = g.MB.status === 'error' || !g.MB.hasToken() ? '#ffb4a8' : 'rgba(255,255,255,0.6)'; c.fillText(g.MB.status === 'error' ? 'Mapbox: ' + g.MB.err : (!g.MB.hasToken() ? 'Add your Mapbox token: Scene panel → Mapbox settings' : 'Loading Mapbox map…'), W / 2, H / 2); }
@@ -241,7 +241,7 @@
   E.renderScene = function (c, show, scene, t, opts) {
     opts = opts || {}; const editing = !!opts.editing, ct = opts.camT != null ? opts.camT : t, xf = E.xf(scene, ct);
     c.save(); c.clearRect(0, 0, W, H);
-    drawBackground(c, show, scene, t, ct);
+    drawBackground(c, show, scene, t, ct, opts);
     scene.objects.forEach(o => { if (!o.hidden) drawObjectAnimated(c, o, scene, xf, t, show, editing); });
     drawTitle(c, show, scene, t, editing); drawBug(c, show);
     c.restore();

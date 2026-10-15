@@ -229,7 +229,15 @@
 
   MB.token = () => String(g.WX_MAPBOX_TOKEN || ls.get('wx.mapbox.token') || '').trim();
   MB.hasToken = () => /^pk\./.test(MB.token());
-  MB.scale = num(+ls.get('wx.mapbox.scale'), 1.5) || 1.5;
+  {
+    const scaleKey='wx.mapbox.scale', migrationKey='wx.mapbox.nativeScale.v1';
+    let saved=+ls.get(scaleKey);
+    if(!ls.get(migrationKey)){
+      if(!saved || Math.abs(saved-1.5)<0.001){saved=1;ls.set(scaleKey,'1');}
+      ls.set(migrationKey,'1');
+    }
+    MB.scale=num(saved,1)||1;
+  }
   MB.STYLES = [['broadcast','Weather Director Broadcast'],['streets-v12', 'Streets'], ['outdoors-v12', 'Outdoors'], ['light-v11', 'Light'], ['dark-v11', 'Dark'], ['satellite-streets-v12', 'Satellite + streets'], ['navigation-day-v1', 'Navigation (road signs)']];
   MB.PROJ = [['mercator', 'Mercator (flat)'], ['globe', 'Globe']];
   const R = {
@@ -355,16 +363,19 @@
     busy = true; const w = want; want = null;
     MB.snap(w.bg, w.cam).catch(() => { }).then(() => { busy = false; if (MB.onUpdate) MB.onUpdate(); pump(); });
   }
+  MB.liveFrame = function(bg,cam){
+    if(!MB.hasToken())return null;
+    const live=liveCanvas(bg,cam);
+    if(live)return live;
+    const key=keyOf(bg,cam),c=MB.cache.get(key); if(c)return c;
+    want={bg:cloneBg(bg),cam:norm(cam)};pump();
+    return MB.last;
+  };
   MB.frame = function (bg, cam) {
     if (!MB.hasToken()) return null;
     const key = keyOf(bg, cam), c = MB.cache.get(key); if (c) return c;
-    if(MB.interacting){
-      const live=liveCanvas(bg,cam);
-      if(live)return live;
-      return MB.last;
-    }
     want = { bg: cloneBg(bg), cam: norm(cam) }; pump();
-    return MB.last || liveCanvas(bg,cam);
+    return MB.last;
   };
 
   /* ---- lng/lat <-> 1920x1080 screen pixels ---- */
