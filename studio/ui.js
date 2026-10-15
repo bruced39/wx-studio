@@ -403,27 +403,20 @@
           B('broadcastWaterColor','color',{label:'Water color'}),
           B('showWaterDepth','check',{label:'Show water depth',rerender:true})
         ];
-        if(b.showWaterDepth){
-          landWater.push(B('waterDepthColor','color',{label:'Depth color'}));
-          landWater.push(zoomRangeRow(b,'Water depth','waterDepthMinZoom','waterDepthMaxZoom',{min:0,max:24,step:.5}));
-        }
+        landWater.push(B('waterDepthColor','color',{label:'Depth color'}));
+        landWater.push(zoomRangeRow(b,'Water depth','waterDepthMinZoom','waterDepthMaxZoom',{min:0,max:24,step:.5}));
 
         const parkNodes=[B('showNationalParks','check',{label:'National parks',rerender:true})];
-        if(b.showNationalParks){
-          parkNodes.push(B('nationalParkColor','color',{label:'Color'}));
-          parkNodes.push(zoomRangeRow(b,'National parks','nationalParkMinZoom','nationalParkMaxZoom',{min:0,max:24,step:.5}));
-        }
+        parkNodes.push(B('nationalParkColor','color',{label:'Color'}));
+        parkNodes.push(zoomRangeRow(b,'National parks','nationalParkMinZoom','nationalParkMaxZoom',{min:0,max:24,step:.5}));
         landWater.push(mapAccordion('nationalParks','National Parks',parkNodes,false));
 
         const buildingNodes=[
           B('showBuildingFootprints','check',{label:'Building footprints',rerender:true})
         ];
-        if(b.showBuildingFootprints)buildingNodes.push(B('buildingFootprintColor','color',{label:'Footprint color'}));
+        buildingNodes.push(B('buildingFootprintColor','color',{label:'Footprint color'}));
         buildingNodes.push(B('show3DBuildings','check',{label:'3D buildings',rerender:true}));
-        if(b.show3DBuildings){
-          buildingNodes.push(B('buildingFootprintColor','color',{label:'3D color'}));
-          buildingNodes.push(B('building3DHeight','num',{label:'3D height',min:0,max:3,step:.1}));
-        }
+        buildingNodes.push(B('building3DHeight','range',{label:'3D height (%)',min:0,max:3,step:.05}));
         landWater.push(mapAccordion('buildings','Buildings',buildingNodes,false));
         landWater.push(h('div',{className:'hint',text:'Water depth uses Mapbox Bathymetry v2. National parks and buildings use Mapbox Streets data.'}));
         p.append(mapAccordion('land','Land + Water',landWater,false));
@@ -459,12 +452,10 @@
           B('broadcastShowStateBorders','check',{label:'State borders'}),
           B('broadcastStateColor','color',{label:'State color'}),
           B('broadcastStateWidth','range',{label:'State width',min:.5,max:5,step:.25}),
-          B('broadcastShowCountyBorders','check',{label:'County borders',rerender:true})
+          B('broadcastShowCountyBorders','check',{label:'County borders',rerender:true}),
+          B('broadcastCountyColor','color',{label:'County color'}),
+          B('broadcastCountyWidth','range',{label:'County width (px)',min:.5,max:4,step:.25})
         ];
-        if(b.broadcastShowCountyBorders){
-          boundaries.push(B('broadcastCountyColor','color',{label:'County color'}));
-          boundaries.push(B('broadcastCountyWidth','range',{label:'County width',min:.5,max:4,step:.25}));
-        }
         p.append(mapAccordion('boundaries','Boundaries',boundaries,false));
 
         const roadStyle=(key,title,subtitle,prefix)=>{
@@ -474,8 +465,8 @@
           ];
           if(b[prefix+'Show']!==false){
             nodes.push(B(prefix+'Color','color',{label:'Color'}));
-            nodes.push(B(prefix+'Width','num',{label:'Width (px)',min:.05,max:8,step:.1}));
-            nodes.push(B(prefix+'Opacity','num',{label:'Opacity',min:0,max:1,step:.05}));
+            nodes.push(B(prefix+'Width','range',{label:'Width (px)',min:.05,max:8,step:.05}));
+            nodes.push(B(prefix+'Opacity','range',{label:'Opacity (%)',min:0,max:1,step:.01}));
             nodes.push(B(prefix+'Outline','check',{label:'Outline',rerender:true}));
             if(b[prefix+'Outline']){
               nodes.push(B(prefix+'OutlineColor','color',{label:'Outline color'}));
@@ -524,11 +515,11 @@
 
         const overlayLine=(key,title,prefix)=>{
           const nodes=[B(prefix,'check',{label:title,rerender:true})];
-          if(b[prefix]){
+          {
             nodes.push(B(prefix+'Color','color',{label:'Color'}));
             nodes.push(B(prefix+'LineType','select',{label:'Line type',options:[['solid','Solid'],['dashed','Dashed'],['dotted','Dotted']]}));
-            nodes.push(B(prefix+'Width','num',{label:'Width (px)',min:.1,max:6,step:.1}));
-            nodes.push(B(prefix+'Opacity','num',{label:'Opacity',min:0,max:1,step:.05}));
+            nodes.push(B(prefix+'Width','range',{label:'Width (px)',min:.1,max:6,step:.1}));
+            nodes.push(B(prefix+'Opacity','range',{label:'Opacity (%)',min:0,max:1,step:.01}));
             nodes.push(zoomRangeRow(b,title,prefix+'MinZoom',prefix+'MaxZoom',{min:0,max:24,step:.5}));
           }
           return mapAccordion('ov-'+key,title,nodes,false);
@@ -542,16 +533,14 @@
           overlayLine('tz','Time Zone Boundaries','overlayTimeZones')
         ];
         const gridNodes=[
-          B('overlayLatLonMode','select',{label:'Lat / lon grid',rerender:true,options:[['off','Off'],['on','On'],['ocean','Ocean Only']]})
+          B('overlayLatLonMode','select',{label:'Lat / lon grid',rerender:true,options:[['off','Off'],['on','On'],['ocean','Ocean Only']]}),
+          B('overlayLatLonColor','color',{label:'Color'}),
+          B('overlayLatLonWidth','range',{label:'Line width (px)',min:.1,max:4,step:.05}),
+          B('overlayLatLonOpacity','range',{label:'Opacity (%)',min:0,max:1,step:.01}),
+          B('overlayLatLonAutoSpacing','check',{label:'Auto spacing (zoom)',rerender:true})
         ];
-        if(b.overlayLatLonMode!=='off'){
-          gridNodes.push(B('overlayLatLonColor','color',{label:'Color'}));
-          gridNodes.push(B('overlayLatLonWidth','num',{label:'Line width',min:.1,max:4,step:.05}));
-          gridNodes.push(B('overlayLatLonOpacity','num',{label:'Opacity',min:0,max:1,step:.05}));
-          gridNodes.push(B('overlayLatLonAutoSpacing','check',{label:'Auto spacing (zoom)',rerender:true}));
-          if(!b.overlayLatLonAutoSpacing)
-            gridNodes.push(B('overlayLatLonManualSpacing','select',{label:'Grid interval',options:[['.5','0.5°'],['1','1°'],['2','2°'],['5','5°'],['10','10°'],['15','15°'],['30','30°']]}));
-        }
+        if(!b.overlayLatLonAutoSpacing)
+          gridNodes.push(B('overlayLatLonManualSpacing','select',{label:'Grid interval',options:[['.5','0.5°'],['1','1°'],['2','2°'],['5','5°'],['10','10°'],['15','15°'],['30','30°']]}));
         overlays.push(mapAccordion('ov-grid','Lat / Lon Grid',gridNodes,false));
         overlays.push(h('div',{className:'hint',text:'NWS boundaries load from NOAA/NWS reference-map data for the current map area. Time zones use U.S. DOT/BTS boundary data.'}));
         p.append(mapAccordion('overlays','Overlays',overlays,false));
