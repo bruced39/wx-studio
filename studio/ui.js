@@ -519,6 +519,38 @@
         roads.push(B('broadcastShowPOI','check',{label:'POI labels'}));
         roads.push(B('broadcastShowNaturalLabels','check',{label:'Natural labels'}));
         p.append(mapAccordion('roads','Transportation',roads,false));
+
+        const overlayLine=(key,title,prefix)=>{
+          const nodes=[B(prefix,'check',{label:title,rerender:true})];
+          if(b[prefix]){
+            nodes.push(B(prefix+'Color','color',{label:'Color'}));
+            nodes.push(B(prefix+'LineType','select',{label:'Line type',options:[['solid','Solid'],['dashed','Dashed'],['dotted','Dotted']]}));
+            nodes.push(B(prefix+'Width','num',{label:'Width (px)',min:.1,max:6,step:.1}));
+            nodes.push(B(prefix+'Opacity','num',{label:'Opacity',min:0,max:1,step:.05}));
+            nodes.push(zoomRangeRow(b,title,prefix+'MinZoom',prefix+'MaxZoom',{min:0,max:24,step:.5}));
+          }
+          return mapAccordion('ov-'+key,title,nodes,false);
+        };
+        const overlays=[
+          B('overlayDayNight','check',{label:'Day / night cycle'}),
+          overlayLine('cwa','NWS Forecast Areas (CWA)','overlayCWA'),
+          overlayLine('public','NWS Public Zones','overlayPublicZones'),
+          overlayLine('fire','NWS Fire Weather Zones','overlayFireZones'),
+          overlayLine('marine','NWS Coastal Marine Zones','overlayMarineZones'),
+          overlayLine('tz','Time Zone Boundaries','overlayTimeZones')
+        ];
+        const gridNodes=[
+          B('overlayLatLonMode','select',{label:'Lat / lon grid',rerender:true,options:[['off','Off'],['.5','0.5°'],['1','1°'],['2','2°'],['5','5°'],['10','10°'],['15','15°'],['30','30°']]})
+        ];
+        if(b.overlayLatLonMode!=='off'){
+          gridNodes.push(B('overlayLatLonColor','color',{label:'Color'}));
+          gridNodes.push(B('overlayLatLonWidth','num',{label:'Line width',min:.1,max:4,step:.05}));
+          gridNodes.push(B('overlayLatLonOpacity','num',{label:'Opacity',min:0,max:1,step:.05}));
+          gridNodes.push(B('overlayLatLonAutoSpacing','check',{label:'Auto spacing (zoom)'}));
+        }
+        overlays.push(mapAccordion('ov-grid','Lat / Lon Grid',gridNodes,false));
+        overlays.push(h('div',{className:'hint',text:'NWS boundaries load from NOAA/NWS reference-map data for the current map area. Time zones use U.S. DOT/BTS boundary data.'}));
+        p.append(mapAccordion('overlays','Overlays',overlays,false));
       }
     }
 

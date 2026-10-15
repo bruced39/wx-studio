@@ -20,6 +20,14 @@
     showNationalParks:false, nationalParkColor:'#252525', nationalParkMinZoom:0, nationalParkMaxZoom:24,
     showBuildingFootprints:false, buildingFootprintColor:'#242424',
     show3DBuildings:false, building3DHeight:1,
+
+    overlayDayNight:false,
+    overlayCWA:false, overlayCWAColor:'#8056bb', overlayCWALineType:'solid', overlayCWAWidth:1.2, overlayCWAOpacity:1, overlayCWAMinZoom:3, overlayCWAMaxZoom:12,
+    overlayPublicZones:false, overlayPublicZonesColor:'#e3b952', overlayPublicZonesLineType:'solid', overlayPublicZonesWidth:1, overlayPublicZonesOpacity:1, overlayPublicZonesMinZoom:4, overlayPublicZonesMaxZoom:16,
+    overlayFireZones:false, overlayFireZonesColor:'#e17f30', overlayFireZonesLineType:'solid', overlayFireZonesWidth:1, overlayFireZonesOpacity:1, overlayFireZonesMinZoom:4, overlayFireZonesMaxZoom:16,
+    overlayMarineZones:false, overlayMarineZonesColor:'#67a8df', overlayMarineZonesLineType:'solid', overlayMarineZonesWidth:1.2, overlayMarineZonesOpacity:1, overlayMarineZonesMinZoom:3, overlayMarineZonesMaxZoom:16,
+    overlayTimeZones:false, overlayTimeZonesColor:'#209e84', overlayTimeZonesLineType:'solid', overlayTimeZonesWidth:1.2, overlayTimeZonesOpacity:1, overlayTimeZonesMinZoom:2, overlayTimeZonesMaxZoom:8,
+    overlayLatLonMode:'off', overlayLatLonColor:'#b9b9b9', overlayLatLonWidth:.75, overlayLatLonOpacity:.45, overlayLatLonAutoSpacing:true,
     broadcastSatelliteSaturation:0, broadcastSatelliteContrast:.15,
     broadcastShowCities:true, broadcastUppercaseLabels:true, broadcastPlaceDensity:'towns', broadcastKeepMajorCities:true, broadcastMajorCityRank:9,
     broadcastLabelFont:'DIN Pro Bold', broadcastLabelDensity:'normal', broadcastLabelOpacity:1, broadcastLabelSpacing:1.25,
@@ -220,6 +228,116 @@
     }
   }
 
+  const NWS_REF='https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/MapServer';
+  const TZ_QUERY='https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/NTAD_Time_Zones/FeatureServer/0/query?where=1%3D1&outFields=zone&returnGeometry=true&outSR=4326&f=geojson';
+  const emptyFC=()=>({type:'FeatureCollection',features:[]});
+  let overlayRefreshTimer=null, activeOverlayCfg=null;
+
+  function lineDash(type){
+    return type==='dashed'?[4,3]:type==='dotted'?[1,2]:[1,0];
+  }
+  function removeOverlayLayers(map){
+    ['wd-day-night','wd-nws-cwa','wd-nws-public','wd-nws-fire','wd-nws-marine','wd-time-zones','wd-latlon-grid'].forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch(e){}});
+  }
+  function ensureGeoSource(map,id,data){
+    try{
+      if(!map.getSource(id))map.addSource(id,{type:'geojson',data:data||emptyFC()});
+      else if(data)map.getSource(id).setData(data);
+      return map.getSource(id);
+    }catch(e){return null;}
+  }
+  function addOverlayLine(map,id,source,color,width,opacity,minz,maxz,lineType){
+    const before=(map.getStyle().layers||[]).find(l=>l.type==='symbol')?.id;
+    const layer={id,type:'line',source,minzoom:+minz||0,maxzoom:Math.max((+minz||0)+.01,+maxz||24),
+      layout:{'line-cap':'round','line-join':'round'},
+      paint:{'line-color':color,'line-width':Math.max(.1,+width||1),'line-opacity':Math.max(0,Math.min(1,+opacity||0))}};
+    const d=lineDash(lineType); if(!(d[0]===1&&d[1]===0))layer.paint['line-dasharray']=d;
+    try{before?map.addLayer(layer,before):map.addLayer(layer);}catch(e){}
+  }
+
+  function nwsGeoUrl(layer,map){
+    const b=map.getBounds(),padLng=Math.max(.5,(b.getEast()-b.getWest())*.15),padLat=Math.max(.5,(b.getNorth()-b.getSouth())*.15);
+    const xmin=Math.max(-180,b.getWest()-padLng),ymin=Math.max(-90,b.getSouth()-padLat),xmax=Math.min(180,b.getEast()+padLng),ymax=Math.min(90,b.getNorth()+padLat);
+    const geom=[xmin,ymin,xmax,ymax].join(',');
+    return NWS_REF+'/'+layer+'/query?where=1%3D1&outFields=*&returnGeometry=true&geometryType=esriGeometryEnvelope&geometry='+encodeURIComponent(geom)+'&inSR=4326&outSR=4326&spatialRel=esriSpatialRelIntersects&f=geojson';
+  }
+  async function fetchOverlayGeo(id,url,map){
+    try{
+      const r=await fetch(url,{cache:'force-cache'}); if(!r.ok)throw new Error('HTTP '+r.status);
+      const data=await r.json(); if(data&&data.type==='FeatureCollection'&&map.getSource(id))map.getSource(id).setData(data);
+    }catch(e){console.warn('WX Studio overlay '+id,e);}
+  }
+
+  function gridSpacing(cfg,map){
+    if(!cfg.overlayLatLonAutoSpacing&&cfg.overlayLatLonMode!=='off')return +cfg.overlayLatLonMode||5;
+    const z=map.getZoom();
+    if(z<2.5)return 30;if(z<4)return 15;if(z<5.5)return 10;if(z<7)return 5;if(z<8.5)return 2;if(z<10)return 1;return .5;
+  }
+  function gridGeoJSON(cfg,map){
+    if(cfg.overlayLatLonMode==='off')return emptyFC();
+    const s=gridSpacing(cfg,map),features=[];
+    for(let lon=Math.ceil(-180/s)*s;lon<=180;lon+=s)features.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[lon,-85],[lon,85]]}});
+    for(let lat=Math.ceil(-80/s)*s;lat<=80;lat+=s)features.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[-180,lat],[180,lat]]}});
+    return {type:'FeatureCollection',features};
+  }
+  function nightGeoJSON(){
+    const now=new Date(),start=Date.UTC(now.getUTCFullYear(),0,0),day=(now-start)/86400000;
+    const decl=23.44*Math.sin((2*Math.PI/365)*(day-81))*Math.PI/180;
+    const h=now.getUTCHours()+now.getUTCMinutes()/60+now.getUTCSeconds()/3600;
+    const subLon=180-h*15,coords=[];
+    for(let lon=-180;lon<=180;lon+=2){
+      const dl=(lon-subLon)*Math.PI/180;
+      let lat;
+      if(Math.abs(Math.tan(decl))<1e-5)lat=Math.cos(dl)>0?-89:89;
+      else lat=Math.atan(-Math.cos(dl)/Math.tan(decl))*180/Math.PI;
+      coords.push([lon,Math.max(-89,Math.min(89,lat))]);
+    }
+    const pole=decl>=0?-89:89;
+    coords.push([180,pole],[-180,pole],coords[0]);
+    return {type:'FeatureCollection',features:[{type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[coords]}}]};
+  }
+
+  function installOverlays(map,cfg){
+    removeOverlayLayers(map); activeOverlayCfg=cfg;
+    const addNws=(show,id,layer,color,width,opacity,minz,maxz,lineType)=>{
+      if(!show)return;
+      ensureGeoSource(map,id,emptyFC());addOverlayLine(map,id,id,color,width,opacity,minz,maxz,lineType);
+      fetchOverlayGeo(id,nwsGeoUrl(layer,map),map);
+    };
+    addNws(cfg.overlayCWA,'wd-nws-cwa',1,cfg.overlayCWAColor,cfg.overlayCWAWidth,cfg.overlayCWAOpacity,cfg.overlayCWAMinZoom,cfg.overlayCWAMaxZoom,cfg.overlayCWALineType);
+    addNws(cfg.overlayPublicZones,'wd-nws-public',8,cfg.overlayPublicZonesColor,cfg.overlayPublicZonesWidth,cfg.overlayPublicZonesOpacity,cfg.overlayPublicZonesMinZoom,cfg.overlayPublicZonesMaxZoom,cfg.overlayPublicZonesLineType);
+    addNws(cfg.overlayFireZones,'wd-nws-fire',9,cfg.overlayFireZonesColor,cfg.overlayFireZonesWidth,cfg.overlayFireZonesOpacity,cfg.overlayFireZonesMinZoom,cfg.overlayFireZonesMaxZoom,cfg.overlayFireZonesLineType);
+    addNws(cfg.overlayMarineZones,'wd-nws-marine',5,cfg.overlayMarineZonesColor,cfg.overlayMarineZonesWidth,cfg.overlayMarineZonesOpacity,cfg.overlayMarineZonesMinZoom,cfg.overlayMarineZonesMaxZoom,cfg.overlayMarineZonesLineType);
+
+    if(cfg.overlayTimeZones){
+      ensureGeoSource(map,'wd-time-zones',TZ_QUERY);
+      addOverlayLine(map,'wd-time-zones','wd-time-zones',cfg.overlayTimeZonesColor,cfg.overlayTimeZonesWidth,cfg.overlayTimeZonesOpacity,cfg.overlayTimeZonesMinZoom,cfg.overlayTimeZonesMaxZoom,cfg.overlayTimeZonesLineType);
+    }
+    if(cfg.overlayLatLonMode!=='off'){
+      ensureGeoSource(map,'wd-latlon-grid',gridGeoJSON(cfg,map));
+      addOverlayLine(map,'wd-latlon-grid','wd-latlon-grid',cfg.overlayLatLonColor,cfg.overlayLatLonWidth,cfg.overlayLatLonOpacity,0,24,'solid');
+    }
+    if(cfg.overlayDayNight){
+      ensureGeoSource(map,'wd-day-night',nightGeoJSON());
+      const before=(map.getStyle().layers||[]).find(l=>l.type==='symbol')?.id;
+      const layer={id:'wd-day-night',type:'fill',source:'wd-day-night',paint:{'fill-color':'#07101f','fill-opacity':.28}};
+      try{before?map.addLayer(layer,before):map.addLayer(layer);}catch(e){}
+    }
+  }
+
+  function refreshDynamicOverlays(map){
+    const cfg=activeOverlayCfg;if(!cfg||!map)return;
+    clearTimeout(overlayRefreshTimer);overlayRefreshTimer=setTimeout(()=>{
+      const tasks=[
+        [cfg.overlayCWA,'wd-nws-cwa',1],[cfg.overlayPublicZones,'wd-nws-public',8],
+        [cfg.overlayFireZones,'wd-nws-fire',9],[cfg.overlayMarineZones,'wd-nws-marine',5]
+      ];
+      tasks.forEach(([show,id,layer])=>{if(show&&map.getSource(id))fetchOverlayGeo(id,nwsGeoUrl(layer,map),map);});
+      if(cfg.overlayLatLonMode!=='off'&&map.getSource('wd-latlon-grid'))map.getSource('wd-latlon-grid').setData(gridGeoJSON(cfg,map));
+      if(cfg.overlayDayNight&&map.getSource('wd-day-night'))map.getSource('wd-day-night').setData(nightGeoJSON());
+    },220);
+  }
+
   function addBroadcastCartography(map,cfg){
     if(!map||cfg.mbStyle!=='broadcast')return;
     const layers=map.getStyle().layers||[];
@@ -267,7 +385,7 @@
         }
       }catch(e){}
     }
-    const source=streetsSource(map);installBaseTints(map,cfg,source);installLandWaterFeatures(map,cfg,source);installTransportation(map,cfg,source);
+    const source=streetsSource(map);installBaseTints(map,cfg,source);installLandWaterFeatures(map,cfg,source);installTransportation(map,cfg,source);installOverlays(map,cfg);
     ['wd-major-city-labels','wd-city-labels','wd-town-labels','wd-small-place-labels'].forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch{}});
     if(source&&cfg.broadcastShowCities!==false){
       const d=cfg.broadcastPlaceDensity||'towns',cityMin=Math.max(0,+cfg.broadcastCityMinZoom||3),add=l=>{try{map.addLayer(l);}catch(e){}};
@@ -329,6 +447,7 @@
         D = new g.mapboxgl.Map({ container: de, style: 'mapbox://styles/mapbox/streets-v12', center: c0.c, zoom: c0.z, interactive: false, attributionControl: false, preserveDrawingBuffer: true, fadeDuration: 0, antialias: true, trackResize: false, projection: 'mercator' });
         P = new g.mapboxgl.Map({ container: pe, style: { version: 8, sources: {}, layers: [] }, center: c0.c, zoom: c0.z, interactive: false, attributionControl: false, trackResize: false, projection: 'mercator' });
         D.on('error', e => { const m = e && e.error && e.error.message; if (m && /401|403|token|Unauthorized/i.test(m)) { MB.err = 'Mapbox rejected the token (' + m + ')'; MB.status = 'error'; } });
+        D.on('moveend',()=>refreshDynamicOverlays(D));
         await Promise.all([once(D, 'load'), once(P, 'load')]);
         curStyle = 'streets-v12'; curStyleKey='stock|streets-v12'; curCfgKey=null; curProj = 'mercator'; pProj = 'mercator'; MB.status = 'ready';
       } catch (e) { MB.status = 'error'; MB.err = e.message || String(e); initP = null; throw e; }
