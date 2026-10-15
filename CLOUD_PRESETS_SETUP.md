@@ -1,47 +1,37 @@
-> **ACTIVATION BLOCKED — SECURITY REVIEW REQUIRED.** Do NOT add a publishable key from the existing `wxfusion` Supabase project to Streamlit. Its five older public forecast tables lack RLS. Prefer a dedicated, isolated Supabase project for cloud presets; ask the project owner to approve its cost and organization first. Update this guide with the NEW project's URL afterward.
+# WX Studio Cloud Map Presets — User Guide
 
-# WX Studio Cloud Map Presets — Setup
+## Status
 
-**Status:** An empty, RLS-protected table was created in the existing `wxfusion` project, but we are NOT activating it because other WXfusion forecast tables remain accessible to its anonymous API role. A separate Supabase project with this same schema is the recommended deployment target. No forecast tables were changed.
+**Configured to use a dedicated, isolated WX Studio Supabase project in US East.**
+The project was created on 2026-10-15 in Dave's Org at a quoted cost of **$0/month**.
+Project ID: `lcujugmyyuumrshdasla`.
 
-## One-time Streamlit secrets configuration
+- Secure table: `public.wx_studio_map_presets`, with row-level security and per-account Read / Add / Update / Delete policies.
+- WX Studio includes this project's **public** `sb_publishable_` key in `app.py`. This is intentionally browser-safe. No database secret or service-role key is present in GitHub or sent to a browser.
+- Streamlit **does not need secrets configured** to use the standard cloud account. If you need to migrate projects later, optional `WX_SUPABASE_URL` and `WX_SUPABASE_PUBLISHABLE_KEY` entries in Streamlit Cloud Secrets override these public defaults.
+- Existing WXfusion forecast tables remain in their separate Supabase project, untouched.
 
-Open the WX Studio application in Streamlit Community Cloud, go to **Manage app → Settings → Secrets** (wording can vary), and add:
+## First use
 
-```toml
-WX_SUPABASE_URL = "https://YOUR_NEW_ISOLATED_PROJECT.supabase.co"
-WX_SUPABASE_PUBLISHABLE_KEY = "YOUR_REAL_SB_PUBLISHABLE_KEY"
-```
+1. Open the deployed WX Studio and go to **Map Style (folded-map toolbar icon) → Saved Styles**.
+2. Under **Cloud Presets**, select **Create Account** using your email and a password with at least 8 characters.
+3. If Supabase sends a confirmation email, confirm your address and return to WX Studio to **Sign In**. If email confirmation redirects to a generic page, the account can still be confirmed; return to the WX Studio tab.
+4. Arrange your map exactly how you want: location, zoom, pitch, bearing, satellite/dark/custom, colors, labels, borders and overlays. Click **Save to Cloud** at the top, and enter a preset name.
+5. On another computer or browser, open WX Studio, sign in with the **same cloud account**, click **Saved Styles → Load Preset**. All matching view/style values load into the active scene.
+6. **Move, zoom and edit freely after loading.** This does not edit the stored preset. To intentionally update its stored version, click **Save to Cloud** again using the same name and approve overwrite.
+7. To delete, choose **Delete** on the named cloud preset and confirm.
+8. Any presets already stored in your browser appear under **This Browser — Local Presets**. Click **Upload Local Presets to Cloud** to copy them up; browser copies stay in place.
 
-Find the value under **Supabase Dashboard → your NEW dedicated WX Studio project → Settings → API Keys → Publishable key**. Use only an `sb_publishable_` key (the application deliberately rejects legacy JWT keys to prevent accidentally exposing service-role credentials). **NEVER use a `service_role` or `sb_secret_` key.** Do not commit keys or passwords to GitHub or this file.
+## Existing shows / default map
 
-After saving Streamlit secrets and redeploying/rerunning the app, refresh WX Studio and open **Map Style → Saved Styles**.
+Cloud presets are separate from your WX Studio show files and **Save Default View**. Loading a preset does not automatically replace the startup default. To set that view as the startup default, load it and click **Save Default View**.
 
-## Using it
+Cloud presets are private to the signed-in Supabase account; there is no cross-account sharing. Cloud presets are not saved as GitHub commits and not automatically imported from old browser storage.
 
-1. Under **Cloud Presets**, create a cloud account with your email and a unique password, or sign in with an existing Supabase Auth account for this project.
-2. Depending on the project's authentication configuration, you may need to click a confirmation link sent to your email, return to WX Studio, then **Sign In**. For a dedicated WX Studio Supabase project, set the Auth Site URL/allowed redirects to the WX Studio app after reviewing email confirmation behavior.
-3. Set up the map (center, zoom, pitch, bearing, colors, borders, overlays, etc.), and click **Save to Cloud**. Enter a preset name.
-4. On any device, open WX Studio, sign in using the same email/password, open **Saved Styles** and click **Load Preset**.
-5. Loading a preset changes the *current scene's* map view and settings only. You can then pan, zoom and edit the map without changing the stored preset. Objects/other scenes are preserved.
-6. **Delete** removes a named cloud preset from the signed-in account, after confirmation.
-7. If you have old browser-only presets, click **Upload Local Presets to Cloud**. Copies remain in this browser; matching cloud names will be overwritten only after confirmation. Old style-only presets without a saved camera still load without moving the map.
+## Setup and operational notes
 
-Cloud presets are NOT the same as **Save Default View**. Loading one does not change WX Studio's startup default; load it, then click Save Default View if you want that view at launch.
-
-## Fallback / limitations
-
-- Without Streamlit secrets, the Saved Styles tab shows that cloud setup is missing and continues to offer working browser-local presets. This preserves compatibility with prior versions.
-- Cloud account passwords and session tokens are never stored in GitHub. The browser stores the signed-in session locally, while Supabase stores presets behind RLS. A publicly usable Supabase publishable key is not a service-role secret.
-- Preset cloud sharing between different user accounts is not enabled; users see only their own account's rows. Same account on any device sees the same presets.
-- Supabase Auth signup/confirmation email behavior depends on the connected project's Auth configuration and outgoing email provider/rate limits. Configure those in Supabase as necessary.
-- A Streamlit app must be re-run after setting secrets. Cloud sync cannot work until the key has been entered in Streamlit Cloud.
-- Browser-only local presets are not synced until explicitly uploaded.
-
-## Supabase security advisory (existing WXfusion tables)
-
-The connected Supabase project currently reports **RLS disabled** for these *pre-existing* public tables:
-`forecast_runs`, `forecast_daily`, `verification`, `custom_locations` and `wxfusion_schema_meta`.
-This may expose them to the project's anon/authenticated API roles. **Do not blindly turn on RLS for those tables:** existing WXfusion workflows might depend on their current permissions. Review their access patterns and appropriate policies separately. The new WX Studio presets table has its own RLS enabled and does not require altering the forecast tables.
-
-See [Supabase RLS documentation](https://supabase.com/docs/guides/database/postgres/row-level-security).
+- The user's deployed Streamlit Studio uses the new project automatically (no external Streamlit Secrets step).
+- Supabase Auth sign-up may require email confirmation and be subject to built-in rate limits; if sign-in fails after confirming, check the dedicated project's **Authentication** configuration in the Supabase dashboard.
+- Using a public Supabase publishable key is safe only with strict RLS. Keep every new Supabase table protected; **never** use a service-role / `sb_secret_` key in browser code.
+- User's original WXfusion Supabase project has five old public tables with RLS disabled (`forecast_runs`, `forecast_daily`, `verification`, `custom_locations`, `wxfusion_schema_meta`). Those are unrelated to WX Studio; we left them unchanged. This still merits separate security review, without blindly disabling existing integrations.
+- Test live signup, cloud Save/Load/Delete, local-preset upload and accessing saved presets from a second device. JS REST methods have unit tests, but real browser Auth flow requires user verification.
