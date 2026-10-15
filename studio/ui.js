@@ -619,7 +619,7 @@
   }
 
   function libraryPanel(p) {
-    p.append(h('div', { className: 'hint', text: 'Click an icon to place it (or swap the selected icon). All icons are animated and export to video.' }));
+    p.append(h('div', { className: 'hint', text: 'Click an icon to place it (or swap the selected icon). Animated icons export to video (the 7-Day builder uses these); Static copies are the same artwork frozen for other projects.' }));
     const cats = {}; g.Icons.list.forEach(i => (cats[i.cat] = cats[i.cat] || []).push(i));
     Object.keys(cats).forEach(c => { p.append(h('div', { className: 'h', text: c })); const gr = h('div', { className: 'igrid' }); cats[c].forEach(i => { const cv = h('canvas', { width: 120, height: 120 }); cv.dataset.icon = i.id; gr.append(h('div', { className: 'ic' + (S.opt.icon === i.id ? ' on' : ''), title: i.label, on: { click: () => { S.opt.icon = i.id; const o = selObj(); if (o && o.type === 'icon') { o.icon = i.id; commit(); } else setTool('icon'); renderPanels(); } } }, cv, h('div', { text: i.label }))); }); p.append(gr); });
   }

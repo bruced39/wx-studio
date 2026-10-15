@@ -162,6 +162,13 @@ A brand-new, ISOLATED Supabase project **WX Studio** was created under **Dave's 
 7. The previously discussed **Put Ocean/Land Over Added Layers** control was consciously deferred until the proper weather-data overlay stack exists. Do not mistakenly mark it complete.
 8. After a successful live visual test, correct confirmed issues in small commits, increment `VERSION` for application changes, and update this file.
 
+## v0.9.11 – HD animated weather icons (Claude)
+
+- Added `studio/icons_hd.js` + `studio/icons_hd_art.js` (user's own sun / cloud artwork embedded as data URIs; loaded right after `icons.js`). They extend `window.Icons`; `icons.js` itself is untouched.
+- Library now has **Animated** and **Static** categories (first in the list). Animated ids that match an original id (`sunny`, `partly-cloudy` = "Partly Sunny", `mostly-sunny`, `cloudy`, `rain`, `drizzle`, `heavy-rain`) replace the old icon of that name; new ids: `showers`, `heavy-rain-wind`, `mostly-sunny-rain`, `mostly-sunny-showers`. Static copies use id `<id>-static` and label "<name> (Static)". The 7-Day builder uses the same list, so animated icons are available there.
+- Only `studio/index.html` (two script tags) and the library hint text in `studio/ui.js` were touched in shared files. More icons will be appended to the `ICONS` array in `icons_hd.js` as the user approves them; originals not yet replaced still come from `icons.js`.
+- Verified in headless Chromium: library renders both categories with no script errors; live look inside the user's browser still to confirm.
+
 ## Rules for alternating between ChatGPT and Claude
 
 1. **Before editing:** read GitHub `main` HEAD, `VERSION`, recent commits, and `AI_HANDOFF.md`. Compare against your last known SHA; read changed files before touching them.
