@@ -540,7 +540,7 @@
           overlayLine('tz','Time Zone Boundaries','overlayTimeZones')
         ];
         const gridNodes=[
-          B('overlayLatLonMode','select',{label:'Lat / lon grid',rerender:true,options:[['off','Off'],['on','On (land + water)'],['ocean','Ocean Only']]})
+          B('overlayLatLonMode','select',{label:'Lat / lon grid',rerender:true,options:[['off','Off'],['on','On'],['ocean','Ocean Only']]})
         ];
         if(b.overlayLatLonMode!=='off'){
           gridNodes.push(B('overlayLatLonColor','color',{label:'Color'}));
