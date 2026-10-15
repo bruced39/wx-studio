@@ -461,6 +461,7 @@
     if(!map||cfg.mbStyle!=='broadcast')return;
     const layers=map.getStyle().layers||[];
     if(!map.__wdOriginalZoomRanges)map.__wdOriginalZoomRanges={};
+    if(!map.__wdOriginalRasterVisibility)map.__wdOriginalRasterVisibility={};
     for(const l of layers){
       const id=String(l.id||'').toLowerCase(),sl=String(l['source-layer']||'').toLowerCase(); if(id.startsWith('wd-'))continue;
       try{
@@ -498,11 +499,17 @@
           try{map.setLayoutProperty(l.id,'visibility','none');}catch(e){}
         }else if(l.type==='fill'&&(sl==='aeroway'||id.includes('runway')||id.includes('taxiway')||id.includes('aeroway'))){
           try{map.setLayoutProperty(l.id,'visibility','none');}catch(e){}
-        }else if(l.type==='raster'&&cfg.broadcastBase==='satellite'){
-          try{map.setPaintProperty(l.id,'raster-saturation',+cfg.broadcastSatelliteSaturation||0);}catch(e){}
-          try{map.setPaintProperty(l.id,'raster-contrast',+cfg.broadcastSatelliteContrast||0);}catch(e){}
-          try{map.setPaintProperty(l.id,'raster-brightness-min',Math.max(0,Math.min(1,+cfg.broadcastSatelliteShadowLift||0)));}catch(e){}
-          try{map.setPaintProperty(l.id,'raster-brightness-max',Math.max(.01,Math.min(1,+cfg.broadcastSatelliteHighlightCeiling||1)));}catch(e){}
+        }else if(l.type==='raster'){
+          if(!Object.prototype.hasOwnProperty.call(map.__wdOriginalRasterVisibility,l.id))
+            map.__wdOriginalRasterVisibility[l.id]=l.layout?.visibility||'visible';
+          map.setLayoutProperty(l.id,'visibility',
+            cfg.broadcastBase==='satellite'?map.__wdOriginalRasterVisibility[l.id]:'none');
+          if(cfg.broadcastBase==='satellite'){
+            try{map.setPaintProperty(l.id,'raster-saturation',+cfg.broadcastSatelliteSaturation||0);}catch(e){}
+            try{map.setPaintProperty(l.id,'raster-contrast',+cfg.broadcastSatelliteContrast||0);}catch(e){}
+            try{map.setPaintProperty(l.id,'raster-brightness-min',Math.max(0,Math.min(1,+cfg.broadcastSatelliteShadowLift||0)));}catch(e){}
+            try{map.setPaintProperty(l.id,'raster-brightness-max',Math.max(.01,Math.min(1,+cfg.broadcastSatelliteHighlightCeiling||1)));}catch(e){}
+          }
         }
       }catch(e){}
     }
@@ -555,7 +562,10 @@
   };
   MB.regionList = Object.keys(R).map(k => [k, R[k][0]]);
   MB.regionCam = key => Object.assign({ b: 0, p: 0 }, (R[key] || R.newengland)[1], { c: (R[key] || R.newengland)[1].c.slice() });
-  const styleOf = bg => { MB.ensureConfig(bg); return bg.mbStyle==='broadcast'?(bg.broadcastBase==='satellite'?'satellite-streets-v12':'outdoors-v12'):(bg.mbStyle||'streets-v12'); }, projOf = bg => (bg && bg.proj === 'globe') ? 'globe' : 'mercator';
+  // Use a single underlying Streets + Satellite vector-style source for
+  // all broadcast bases so coastline/settlement/road detail never changes
+  // merely because the imagery layer is turned off.
+  const styleOf = bg => { MB.ensureConfig(bg); return bg.mbStyle==='broadcast'?'satellite-streets-v12':(bg.mbStyle||'streets-v12'); }, projOf = bg => (bg && bg.proj === 'globe') ? 'globe' : 'mercator';
   const norm = cam => ({ c: [num(cam.c[0], 0), clampLat(num(cam.c[1], 0))], z: Math.max(0, Math.min(22, num(cam.z, 3))), b: num(cam.b, 0), p: Math.max(0, Math.min(75, num(cam.p, 0))) });
   const clampLat = v => Math.max(-85, Math.min(85, v));
   const cloneBg = bg => { MB.ensureConfig(bg); const o={mbStyle:bg.mbStyle,proj:bg.proj};Object.keys(WD_DEFAULTS).forEach(k=>o[k]=bg[k]);return o; };
@@ -621,7 +631,7 @@
   }
   async function setup(bg) {
     MB.ensureConfig(bg);const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
-    if(styleKey!==curStyleKey){D.setStyle('mapbox://styles/mapbox/'+st);await once(D,'style.load');curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;D.__wdOriginalZoomRanges={};}
+    if(styleKey!==curStyleKey){D.setStyle('mapbox://styles/mapbox/'+st);await once(D,'style.load');curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;D.__wdOriginalZoomRanges={};D.__wdOriginalRasterVisibility={};}
     if(pr!==curProj){D.setProjection(pr);curProj=pr;}
     fog(bg);applyTerrain(D,bg);
     if(bg.mbStyle==='broadcast'&&cfgKey!==curCfgKey){addBroadcastCartography(D,bg);curCfgKey=cfgKey;}
