@@ -5,6 +5,8 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const stage = $('#stage'), sctx = stage.getContext('2d'), ov = $('#overlay'), octx = ov.getContext('2d');
   const S = { show: null, si: 0, oid: null, tool: 'select', opt: { front: 'cold', icon: 'partly-cloudy', hl: 'H', storm: 'H', shape: 'round' }, mode: 'edit', T: 0, play: null, draft: null, editEnd: false, tab: 'scene', hist: [], hp: -1, drag: null, cursor: [0, 0], mapAcc: { sceneSettings: false, background: false, basic: true, base: false, land: false, labels: false, boundaries: false, roads: false, cameraMove: false, titleBanner: false, showBranding: false } };
+  const MS = {open:false,tab:'customize',scroll:0};
+  const MAP_STYLES_KEY = 'wx.studio.mapStylePresets.v1';
   const KEY = 'wx.studio.autosave.v1';
   const MAP_DEFAULT_KEY = 'wx.studio.defaultMap.v1';
   const cur = () => S.show.scenes[S.si];
@@ -600,7 +602,195 @@
 
   function setTab(t) { S.tab = t; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t)); renderPanels(); }
   document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
-  function renderPanels() { const p = $('#panels'), sy = p.scrollTop; p.innerHTML = ''; ({ scene: scenePanel, object: objectPanel, library: libraryPanel, media: mediaPanel })[S.tab](p); p.scrollTop = sy; }
+  function renderPanels() {
+    const p=$('#panels'),sy=p.scrollTop;
+    p.innerHTML='';
+    ({ scene: scenePanel, object: objectPanel, library: libraryPanel, media: mediaPanel })[S.tab](p);
+    // Map styling now lives in the Map Style flyout, not in Scene settings.
+    if(S.tab==='scene' && cur().bg.type==='mapbox'){
+      const moved=['Map + Camera','Weather Director Base','Land + Water','City + Town Labels','Boundaries','Transportation','Overlays'];
+      Array.from(p.children).forEach(e=>{
+        if(e.matches('details.mapacc')&&moved.includes(e.querySelector(':scope > summary')?.textContent))e.remove();
+      });
+      p.append(h('div',{className:'hint',text:'Map styling has moved to the camera / Map Style button in the top toolbar.'}),
+        h('div',{className:'btnrow'},h('button',{text:'▣ Open Map Style',on:{click:()=>openMapStyle()}})));
+    }
+    p.scrollTop=sy;
+    if(MS.open)renderMapStylePanel();
+  }
+
+  /* ---------- Aguacero-inspired floating Map Style panel ---------- */
+  function readMapStylePresets(){
+    try{const p=JSON.parse(localStorage.getItem(MAP_STYLES_KEY)||'[]');return Array.isArray(p)?p:[];}catch(e){return [];}
+  }
+  function saveMapStylePresets(p){try{localStorage.setItem(MAP_STYLES_KEY,JSON.stringify(p));}catch(e){toast('Cannot save styles: browser storage is unavailable');}}
+  function closeMapStyle(){
+    MS.open=false;
+    $('#mapStyleFlyout').classList.remove('open');
+    $('#bMapStyle').classList.remove('active');
+    $('#bMapStyle').setAttribute('aria-expanded','false');
+  }
+  function openMapStyle(){
+    if(MS.open){closeMapStyle();return;}
+    MS.open=true;MS.tab='customize';
+    $('#mapStyleFlyout').classList.add('open');
+    $('#bMapStyle').classList.add('active');
+    $('#bMapStyle').setAttribute('aria-expanded','true');
+    renderMapStylePanel(true);
+  }
+  function saveCurrentStyle(){
+    const b=cur().bg;
+    if(b.type!=='mapbox')return toast('Select a Mapbox background first');
+    const name=prompt('Save this map style as:', 'My Map Style');
+    if(!name||!name.trim())return;
+    const settings={};
+    g.MB.ensureConfig(b);
+    for(const k of Object.keys(g.MB.DEFAULTS))settings[k]=b[k];
+    settings.proj=b.proj;settings.mbStyle=b.mbStyle;
+    const list=readMapStylePresets(),item={name:name.trim(),settings,created:new Date().toISOString()};
+    const existing=list.findIndex(x=>x.name===item.name);
+    if(existing>=0){if(!confirm('Replace saved style "'+item.name+'"?'))return;list[existing]=item;}
+    else list.unshift(item);
+    saveMapStylePresets(list);toast('Map style saved');renderMapStylePanel();
+  }
+  function applySavedMapStyle(item){
+    const b=cur().bg;
+    if(!b||b.type!=='mapbox')return;
+    const cfg=item.settings||{};
+    for(const k of Object.keys(g.MB.DEFAULTS))if(Object.prototype.hasOwnProperty.call(cfg,k))b[k]=cfg[k];
+    if(cfg.proj==='globe'||cfg.proj==='mercator')b.proj=cfg.proj;
+    b.mbStyle='broadcast';g.MB.ensureConfig(b);
+    commit();renderPanels();toast('Map style loaded: '+item.name);
+  }
+  function mapStyleButton(label,fn,cls){return h('button',{text:label,className:cls||'',on:{click:fn}});}
+  function mapStyleCards(b){
+    const box=h('div',{className:'mapstyle-cards'});
+    const selected=b.broadcastBase==='dark'?'dark':b.broadcastBase==='satellite'?'satellite':'custom';
+    for(const [key,title,swatch] of [
+      ['custom','Custom Color','linear-gradient(135deg,#143550,#266c94)'],
+      ['dark','Dark','linear-gradient(135deg,#111219,#222e39)'],
+      ['satellite','Satellite','linear-gradient(145deg,#3a624a,#263f35 45%,#3c6c82 55%,#42573a)']
+    ]){
+      const btn=h('button',{className:'mapstyle-card'+(selected===key?' active':''),title:title+' map base',
+        on:{click:()=>{b.mbStyle='broadcast';b.broadcastBase=key;commit();renderPanels();}}},
+        h('span',{className:'swatch',style:'background:'+swatch}),
+        h('span',{className:'caption',text:title}));
+      box.append(btn);
+    }
+    return box;
+  }
+  function renderMapStylePanel(fresh){
+    if(!MS.open)return;
+    const scroll=$('#mapStyleScroll'),sy=fresh?0:scroll.scrollTop;
+    scroll.innerHTML='';
+    document.querySelectorAll('#mapStyleTabs button').forEach(btn=>btn.classList.toggle('on',btn.dataset.mt===MS.tab));
+    const sc=cur(),b=sc.bg;
+    if(MS.tab==='saved'){
+      const list=readMapStylePresets();
+      scroll.append(h('div',{className:'hint',text:'Saved styles include colors, labels, overlays, terrain and line settings. Camera location and scene objects remain unchanged.'}));
+      if(!list.length)scroll.append(h('div',{className:'hint',text:'No map styles saved yet. Customize a map and click Save Style.'}));
+      for(const item of list){
+        scroll.append(h('div',{className:'mapacc',style:'padding:10px'},
+          h('div',{style:'font-weight:700;margin-bottom:8px',text:item.name}),
+          h('div',{className:'btnrow'},
+            mapStyleButton('Apply',()=>applySavedMapStyle(item),'pri'),
+            mapStyleButton('Delete',()=>{
+              if(!confirm('Delete saved style "'+item.name+'"?'))return;
+              saveMapStylePresets(readMapStylePresets().filter(x=>x.name!==item.name));renderMapStylePanel();
+            },'dng'))));
+      }
+      scroll.scrollTop=sy;return;
+    }
+    if(b.type!=='mapbox'){
+      scroll.append(h('div',{className:'hint',text:'This scene is not using a Mapbox background.'}),
+        mapStyleButton('Use a Mapbox map',()=>{
+          b.type='mapbox';b.mbStyle='broadcast';b.view=null;b.view2=null;
+          g.MB.ensureConfig(b);commit();renderPanels();
+        },'pri'));
+      return;
+    }
+    g.MB.ensureConfig(b);
+    const B=(key,type,opt)=>bind(b,key,type,opt);
+    scroll.append(mapStyleButton('Reset all to defaults',()=>{
+      if(!confirm('Reset all map-style settings in this scene? The map camera and scene objects will be kept.'))return;
+      const keep={view:b.view,view2:b.view2,region:b.region,proj:b.proj};
+      Object.assign(b,JSON.parse(JSON.stringify(g.MB.DEFAULTS)),keep);
+      b.mbStyle='broadcast';commit();renderPanels();
+    }),mapStyleCards(b));
+    if(b.broadcastBase==='custom')scroll.append(B('broadcastCustomColor','color',{label:'Custom background color'}));
+    if(b.broadcastBase==='dark')scroll.append(B('broadcastDarkColor','color',{label:'Dark background color'}));
+    const proj=h('div',{className:'mapstyle-choices'});
+    for(const [key,label] of [['mercator','Mercator'],['globe','Globe']])
+      proj.append(mapStyleButton(label,()=>{b.proj=key;commit();renderPanels();},b.proj===key?'active':''));
+    scroll.append(proj,B('showZoomBadge','check',{label:'Show zoom'}));
+    const extras=h('div',{className:'mapstyle-actions'},
+      mapStyleButton('Mapbox Token / Quality…',mapboxSettings),
+      mapStyleButton('Save Default View',saveCurrentMapDefault));
+    scroll.append(extras);
+    const search=h('input',{type:'text',placeholder:'⌕ Search settings (water, roads, labels, zoom…)',style:'width:100%;margin:7px 0 8px'});
+    scroll.append(search);
+
+    // Reuse the studio's already functional settings controls. They keep the
+    // same saved keys and map render behavior instead of introducing clones.
+    const temp=h('div');scenePanel(temp);
+    const byTitle=title=>Array.from(temp.children).find(el=>el.matches('details.mapacc')&&el.querySelector(':scope > summary')?.textContent===title);
+    const addGroup=(title,display)=>{
+      const box=byTitle(title);
+      if(box){if(display)box.querySelector(':scope > summary').textContent=display;scroll.append(box);}
+    };
+    addGroup('Overlays');
+
+    scroll.append(mapAccordion('styleGlobe','Globe',[
+      B('globeAtmosphereEnabled','check',{label:'Atmosphere'}),
+      B('globeAtmosphereStrength','range',{label:'Atmosphere strength (%)',min:0,max:1,step:.01}),
+      B('globeStarsEnabled','check',{label:'Stars'}),
+      B('globeStarIntensity','range',{label:'Star intensity (%)',min:0,max:1,step:.01}),
+      B('globeBackgroundColor','color',{label:'Background color'})
+    ],false));
+    scroll.append(mapAccordion('styleSatellite','Satellite Imagery',[
+      B('broadcastSatelliteSaturation','range',{label:'Saturation',min:-1,max:1,step:.05}),
+      B('broadcastSatelliteContrast','range',{label:'Contrast',min:-1,max:1,step:.05}),
+      B('broadcastSatelliteShadowLift','range',{label:'Shadow lift',min:0,max:1,step:.01}),
+      B('broadcastSatelliteHighlightCeiling','range',{label:'Highlight ceiling',min:.01,max:1,step:.01})
+    ],false));
+    addGroup('Land + Water');
+    addGroup('Transportation');
+    addGroup('Boundaries');
+    scroll.append(mapAccordion('styleWaterFeatures','Water Features',[
+      B('waterwaysShow','check',{label:'Waterways',rerender:true}),
+      B('waterwaysColor','color',{label:'Color'}),
+      B('waterwaysWidth','range',{label:'Width (px)',min:.1,max:6,step:.1}),
+      B('waterwaysOpacity','range',{label:'Opacity (%)',min:0,max:1,step:.01}),
+      zoomRangeRow(b,'Waterways','waterwaysMinZoom','waterwaysMaxZoom',{min:0,max:24,step:.5})
+    ],false));
+    addGroup('City + Town Labels','Labels');
+    scroll.append(mapAccordion('styleTerrain','Terrain',[
+      B('terrain','check',{label:'Show Terrain'}),
+      B('terrainExaggeration','range',{label:'3D exaggeration (%)',min:0,max:3,step:.05}),
+      h('div',{className:'hint',text:'Mapbox terrain elevation follows the map when Show Terrain is enabled.'})
+    ],false));
+    addGroup('Map + Camera');
+
+    search.addEventListener('input',()=>{
+      const needle=search.value.trim().toLowerCase();
+      Array.from(scroll.children).filter(e=>e.matches('details.mapacc')).forEach(el=>{
+        const match=!needle||el.textContent.toLowerCase().includes(needle);
+        el.hidden=!match;
+        if(needle&&match)el.open=true;
+      });
+    });
+    scroll.scrollTop=sy;
+  }
+  $('#bMapStyle').onclick=openMapStyle;
+  $('#mapStyleClose').onclick=closeMapStyle;
+  $('#mapStyleSave').onclick=saveCurrentStyle;
+  document.querySelectorAll('#mapStyleTabs button').forEach(btn=>btn.onclick=()=>{
+    MS.tab=btn.dataset.mt;renderMapStylePanel(true);
+  });
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&MS.open){closeMapStyle();}
+  });
+
   function renderSceneList() {
     const l = $('#sceneList'); l.innerHTML = '';
     S.show.scenes.forEach((sc, i) => {
