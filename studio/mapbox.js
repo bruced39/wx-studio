@@ -160,6 +160,7 @@
    * Shared downloads are cached, keeping globe/map restyles inexpensive. */
   const NATURAL_EARTH_LINES={
     coast:{url:'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_coastline.geojson',source:'wd-ocean-coast-data'},
+    islands:{url:'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_minor_islands_coastline.geojson',source:'wd-minor-islands-data'},
     lakes:{url:'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_lakes.geojson',source:'wd-inland-lakes-data'},
     rivers:{url:'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_rivers_lake_centerlines.geojson',source:'wd-inland-rivers-data'}
   };
@@ -197,7 +198,7 @@
 
   function installBaseTints(map,cfg,source){
     ['wd-color-base','wd-land-tint','wd-water-tint','wd-coastline-outline','wd-flat-land-fill','wd-flat-coastline',
-      'wd-ocean-coastline','wd-inland-lakes-outline','wd-inland-rivers-outline']
+      'wd-ocean-coastline','wd-minor-island-coastline','wd-inland-lakes-outline','wd-inland-rivers-outline']
       .forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch(e){}});
     if(!source)return;
     const layers=map.getStyle().layers||[],before=(layers.find(l=>l.type==='symbol')||{}).id;
@@ -225,15 +226,17 @@
   function installSeparatedWaterOutlines(map,cfg,add){
     // Restore coastlines without tracing inland Mapbox water polygons.
     if(cfg.broadcastShowCoastline!==false){
-      const ocean=ensureNaturalEarthLines(map,'coast');
       const color=cfg.broadcastBase==='satellite'
         ?cfg.broadcastCoastlineColor
         :(cfg.broadcastCoastlineColor==='#050505'?'#e0e4eb':cfg.broadcastCoastlineColor);
-      if(ocean)add({id:'wd-ocean-coastline',type:'line',source:ocean,
-        layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':color||'#e0e4eb',
-          'line-width':Math.max(.25,Math.min(8,+cfg.broadcastCoastlineWidth||1.5)),
-          'line-opacity':1,'line-blur':0}});
+      const width=Math.max(.25,Math.min(8,+cfg.broadcastCoastlineWidth||1.5));
+      for(const [kind,id] of [['coast','wd-ocean-coastline'],['islands','wd-minor-island-coastline']]){
+        const ocean=ensureNaturalEarthLines(map,kind);
+        if(ocean)add({id,type:'line',source:ocean,
+          layout:{'line-cap':'round','line-join':'round'},
+          paint:{'line-color':color||'#e0e4eb',
+            'line-width':width,'line-opacity':1,'line-blur':0}});
+      }
     }
     // Deliberately OFF by default: only add inland outlines if enabled.
     // Lakes and rivers have their OWN datasets instead of a merged
