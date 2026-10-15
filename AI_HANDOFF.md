@@ -169,4 +169,4 @@ User requested map-view presets accessible from any computer, with Delete and fr
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.9 cloud presets code and per-user Supabase table implemented; Streamlit public publishable config must be set by user for live use. Cloud UI supports login, saved view load/edit, delete, sync old local presets.
+**Status at handoff:** v0.9.9 cloud code remains on a DEVELOPMENT BRANCH, NOT DEPLOYED. Existing WXfusion Supabase has 5 older public tables without RLS; do not inject that project's publishable key into WX Studio. Ask user to authorize an isolated Supabase project (organization/cost confirmation required). Then create schema there, update cloud setup, and deploy. Current main v0.9.8 remains unchanged.
