@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.4` (`VERSION`).
+- **Last reviewed application version:** `0.9.5` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -30,7 +30,8 @@ Core files: `studio/mapbox.js` (Mapbox backgrounds/cartography), `studio/ui.js` 
 | 0.9.1 | `e9650e0` | Lat/Lon grid modes Off / On / Ocean Only with water polygon clipping and legacy interval migration |
 | 0.9.2 | see Git log | Standalone Map Style toolbar popout; Custom/Dark/Satellite bases, saved styles, new Globe/Satellite/Waterways/Terrain options, Aguacero category ordering |
 | 0.9.3 | see Git log | Folded map icon before Redo, clearer popup typography; flat-mode hydrography hidden (subsequently corrected) |
-| 0.9.4 | see Git log | Dark/Custom land + ocean colors with vector coastlines, islands, water, roads and labels retained; sharp style preview cards; Map icon after Redo |
+| 0.9.4 | see Git log | Shared satellite basemap and independent land/water colors (later refined) |
+| 0.9.5 | see Git log | Clean Dark/Custom coastlines without inland lakes or roads; Ocean On/Off; county min zoom 6; stable Mapbox left-drag pan |
 
 In 0.8.9 the broadcast ocean/water color default is `#1d253a`; bathymetry color `#000000`; parks `#252525`; building footprint `#242424`. Preserve existing saved scenes/settings unless a migration is explicitly necessary.
 
@@ -85,6 +86,20 @@ Changes on `main`:
 - **Important testing limits:** JS parse and source invariants can be checked, but actual Mapbox browser-rendered coastlines/visibility, low zoom island coverage, satellite card image loading, Mercator/Globe appearance, and scene export have NOT been visually confirmed. Test around New England, Caribbean archipelago, worldwide globe and coastline at all zooms. Check that switching back to Satellite restores raster imagery.
 - Settings are the same objects/keys across all three bases. Preserve old shows/presets and do not overwrite any unrelated Scene/Claude code.
 
+## v0.9.5 — clean broadcast maps + pan repair
+
+User's 2026-10-15 screenshots clarify **Dark and Custom Color** map style:
+
+- Only continent/island ocean shorelines, country and state boundaries, geographic place labels, with optional county boundaries. **Do not show inland lakes, rivers, local roads, airport lines, water depth, parks or 3D buildings** on Dark/Custom. Satellite retains all its working layers/settings (including radar-data-compatible layering).
+- In Dark/Custom the default is **Show ocean color OFF**: land and ocean share the selected flat background, but coastline outlines stay on. If ocean is turned on, show a separate color picker and apply selected ocean color independently. Satellite unaffected. Setting keys: `broadcastOceanShow`, existing `broadcastWaterColor`, `broadcastCustomColor`, `broadcastDarkColor`.
+- Mapbox Streets v8's `water` vector polygons **combine inland water with ocean**, with no class to filter. To separate sea from lakes, the flat styles use Natural Earth's **10m land polygon** (`ne_10m_land.geojson`, CC0) fetched lazily from the public Natural Earth GitHub repository. The land polygons have interior holes (lakes) removed in-memory so lakes stay filled as land. A world background gets ocean color when enabled, otherwise land color. A line on this land source supplies continent and island coastlines. No external token needed for the land data. The URL is not a credential; if unavailable, map won't show the external coastline geometry—check browser console for loading errors. The geojson is global and high-detail; confirm load/performance before building more features on top.
+- **County boundaries On/Off and Min Zoom (default 6.0)** in Boundaries. The optional `wd-county-boundaries` layer filters Mapbox Streets v8 `admin_level=2` starting at `broadcastCountyMinZoom`; actual local coverage at particular zooms depends on Mapbox Streets data. Existing color and width controls preserved. County boundary defaults to Off.
+- Reworked left-drag pan in **Select** tool to compute a stable camera coordinate from pointer-down with `MB.panByPixels`, rather than accumulating per-move offsets. Right-drag tilt/rotate, mouse wheel zoom, and screenshot precision unaffected. Please test explicitly in Mercator and Globe.
+- Do not remove the working v0.9.1 grid choices Off/On/Ocean Only. The grid's own Ocean Only mode still uses Mapbox water geometry and was already confirmed working by the user. Do not confuse that with **Show ocean color**.
+- **Tests completed:** syntax of mapbox.js/ui.js, mocked style install for Ocean off/on/Satellite and Natural Earth polygon hole removal. **Untested in deployed browser:** GitHub-hosted Natural Earth data fetch/CORS, outlines and counties over New England/Caribbean, actual left-drag pan, performance and video export. Do not claim those tests were performed.
+- The toolbar still has Undo → Redo → folded Map Style icon; keep it.
+- Next: user live visual QA, then iterate only confirmed rendering issues and the full independent Labels parity list from `MAP_STYLE_REFERENCE.md`.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -109,4 +124,4 @@ Changes on `main`:
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.4 land/ocean differentiation, preserved satellite vector layers, sharp map-style previews and toolbar location. Next: live QA for coastlines, island detail, globe, and planned independent label controls from `MAP_STYLE_REFERENCE.md`. User confirmed v0.9.1 Lat/Lon lines work perfectly.
+**Status at handoff:** v0.9.5 clean coastline-only flat map, ocean toggle and county min zoom, stable pan code. Next: live QA; avoid regressions to Satellite, smooth globe/mercator movement and overlays. User confirmed v0.9.1 Lat/Lon lines work perfectly.
