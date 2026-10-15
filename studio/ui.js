@@ -115,7 +115,7 @@
     t.append(fs, h('button', { text: 'Delete', className: 'dng', on: { click: delObj } }), h('button', { text: 'Duplicate', on: { click: dupObj } }));
     setTool('select');
   }
-  function setTool(id) { finishDraft(); S.tool = id; document.querySelectorAll('#tools button[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === id)); ov.style.cursor = id === 'select' ? 'default' : 'crosshair'; }
+  function setTool(id) { finishDraft(); S.tool = id; document.querySelectorAll('#tools button[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === id)); ov.style.cursor = id === 'select' && cur()?.bg?.type==='mapbox' ? 'grab' : id === 'select' ? 'default' : 'crosshair'; }
   function finishDraft() {
     const d = S.draft; S.draft = null; if (!d) return;
     if (d.type === 'shape') { if (Math.abs(d.w) > 8 && Math.abs(d.h) > 8) addObject('shape', { shape: d.shape, x: d.x, y: d.y, w: d.w, h: d.h, fill: '#ffffff', opacity: 0.2, stroke: '#ffffff', lw: 4 }); }
@@ -155,7 +155,13 @@
         if (hd.resize && Math.hypot(hd.resize[0] - p[0], hd.resize[1] - p[1]) < 18) { S.drag = { k: 'resize', last: p, c: [hd.box.x + hd.box.w / 2, hd.box.y + hd.box.h / 2] }; return; } }
       const hit = E.hit(sc, editT(), p[0], p[1]);
       if (hit) { S.oid = hit.id; S.drag = { k: 'move', last: p, moved: false }; if (S.tab !== 'object') setTab('object'); else renderPanels(); }
-      else { S.oid = null; renderPanels(); if (xf.map) { if(xf.mb)g.MB.setInteractive(true); S.drag = { k: 'pan', last: p }; } }
+      else {
+        S.oid=null;renderPanels();
+        if(xf.map){
+          if(xf.mb){g.MB.setInteractive(true);e.preventDefault();ov.style.cursor='grabbing';}
+          S.drag={k:'pan',last:p,start:p,startCam:xf.mb?JSON.parse(JSON.stringify(mapView(sc))):null};
+        }
+      }
       return;
     }
     if (S.tool === 'pen') { S.draft = { type: 'pen', pts: [p] }; S.drag = { k: 'pen' }; return; }
@@ -191,13 +197,18 @@
       else { const r0 = Math.hypot(d.last[0] - d.c[0], d.last[1] - d.c[1]) || 1, r1 = Math.hypot(p[0] - d.c[0], p[1] - d.c[1]); o.size = clamp((o.size || 100) * r1 / r0, 20, 900); }
       d.last = p;
     }
-    else if (d.k === 'pan' && xf.mb) { const v = mapView(sc), q = xf.inv(W / 2 - (p[0] - d.last[0]), H / 2 - (p[1] - d.last[1])); if (q && isFinite(q[0]) && isFinite(q[1])) v.c = [q[0], Math.max(-85, Math.min(85, q[1]))]; d.last = p; }
+    else if(d.k==='pan'&&xf.mb){
+      const v=mapView(sc),deltaX=p[0]-d.start[0],deltaY=p[1]-d.start[1];
+      const q=g.MB.panByPixels(sc.bg,d.startCam,deltaX,deltaY);
+      if(q)v.c=q;
+      d.last=p;
+    }
     else if (d.k === 'pan') { const v = mapView(sc), kk = W / v.w; v.cx -= (p[0] - d.last[0]) / kk; v.cy -= (p[1] - d.last[1]) / kk; d.last = p; }
     else if (d.k === 'pen' && S.draft) { const l = S.draft.pts[S.draft.pts.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 3) S.draft.pts.push(p); }
     else if (d.k === 'shape' && S.draft) { S.draft.x = Math.min(d.o[0], p[0]); S.draft.y = Math.min(d.o[1], p[1]); S.draft.w = Math.abs(p[0] - d.o[0]); S.draft.h = Math.abs(p[1] - d.o[1]); }
   });
-  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; ov.style.cursor = ''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
-  ov.addEventListener('pointercancel', () => { const d=S.drag; S.drag = null; ov.style.cursor = ''; if(d&&(d.k==='orbit'||d.k==='pan'))g.MB.setInteractive(false); });
+  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; ov.style.cursor = S.tool==='select'&&cur().bg.type==='mapbox'?'grab':''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
+  ov.addEventListener('pointercancel', () => { const d=S.drag; S.drag = null; ov.style.cursor = S.tool==='select'&&cur().bg.type==='mapbox'?'grab':''; if(d&&(d.k==='orbit'||d.k==='pan'))g.MB.setInteractive(false); });
   ov.addEventListener('contextmenu', e => { if (cur().bg.type === 'mapbox') e.preventDefault(); });
   ov.addEventListener('dblclick', () => { if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); } });
   ov.addEventListener('wheel', e => { const sc = cur(); if (!isMap(sc.bg)) return; e.preventDefault(); backToEdit(); const p = pt(e);
@@ -400,7 +411,8 @@
         p.append(mapAccordion('base','Weather Director Base',base,false));
 
         const landWater=[
-          B('broadcastWaterColor','color',{label:'Ocean / lake color',after:()=>updateMapStyleCardPreviews(b)}),
+          B('broadcastWaterColor','color',{label:'Ocean color (when On)',after:()=>updateMapStyleCardPreviews(b)}),
+          B('broadcastOceanShow','check',{label:'Show ocean on flat maps',rerender:true}),
           B('showWaterDepth','check',{label:'Show water depth',rerender:true})
         ];
         landWater.push(B('waterDepthColor','color',{label:'Depth color'}));
@@ -454,7 +466,8 @@
           B('broadcastStateWidth','range',{label:'State width',min:.5,max:5,step:.25}),
           B('broadcastShowCountyBorders','check',{label:'County borders',rerender:true}),
           B('broadcastCountyColor','color',{label:'County color'}),
-          B('broadcastCountyWidth','range',{label:'County width (px)',min:.5,max:4,step:.25})
+          B('broadcastCountyWidth','range',{label:'County width (px)',min:.5,max:4,step:.25}),
+          B('broadcastCountyMinZoom','num',{label:'County min zoom',min:0,max:22,step:.5})
         ];
         p.append(mapAccordion('boundaries','Boundaries',boundaries,false));
 
@@ -753,7 +766,12 @@
     }),mapStyleCards(b));
     if(b.broadcastBase==='custom')scroll.append(B('broadcastCustomColor','color',{label:'Land color',after:()=>updateMapStyleCardPreviews(b)}));
     if(b.broadcastBase==='dark')scroll.append(B('broadcastDarkColor','color',{label:'Land color',after:()=>updateMapStyleCardPreviews(b)}));
-    if(b.broadcastBase!=='satellite')scroll.append(B('broadcastWaterColor','color',{label:'Ocean / lake color',after:()=>updateMapStyleCardPreviews(b)}));
+    if(b.broadcastBase!=='satellite'){
+      scroll.append(B('broadcastOceanShow','check',{label:'Show ocean color',rerender:true}));
+      if(b.broadcastOceanShow)
+        scroll.append(B('broadcastWaterColor','color',{label:'Ocean color',after:()=>updateMapStyleCardPreviews(b)}));
+      scroll.append(h('div',{className:'hint',text:'When ocean color is Off, land and ocean share one background color. Coastlines remain visible; inland lakes and rivers are hidden.'}));
+    }
     const proj=h('div',{className:'mapstyle-choices'});
     for(const [key,label] of [['mercator','Mercator'],['globe','Globe']])
       proj.append(mapStyleButton(label,()=>{b.proj=key;commit();renderPanels();},b.proj===key?'active':''));
