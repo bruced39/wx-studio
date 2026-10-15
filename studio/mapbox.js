@@ -7,7 +7,7 @@
 (function (g) {
   'use strict';
   const W = 1920, H = 1080, VER = 'v3.9.0';
-  const MB = { W, H, status: 'idle', err: '', scale: 1.5, last: null, onUpdate: null, cache: new Map() };
+  const MB = { W, H, status: 'idle', err: '', scale: 1.5, last: null, onUpdate: null, cache: new Map(), interacting: false };
   const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } } };
   const num = (v, d) => (typeof v === 'number' && isFinite(v)) ? v : d;
 
@@ -181,7 +181,7 @@
   MB.keyOf = keyOf;
 
   /* ---- library + maps ---- */
-  let D = null, P = null, host = null, initP = null, curStyle = null, curStyleKey = null, curCfgKey = null, curProj = null, pProj = null, pKey = null;
+  let D = null, P = null, host = null, initP = null, curStyle = null, curStyleKey = null, curCfgKey = null, curProj = null, pProj = null, pKey = null, liveKey = null, renderGeneration = 0;
   function loadLib() {
     if (g.mapboxgl) return Promise.resolve();
     return new Promise((res, rej) => {
@@ -211,7 +211,7 @@
     })();
     return initP;
   };
-  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = null; MB.cache.clear(); MB.last = null; MB.status = 'idle'; MB.err = ''; MB.queue = Promise.resolve(); };
+  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); MB.last = null; MB.status = 'idle'; MB.err = ''; MB.queue = Promise.resolve(); };
   MB.setToken = function (t) { ls.set('wx.mapbox.token', String(t || '').trim()); MB.reset(); };
   MB.setScale = function (s) { MB.scale = s; ls.set('wx.mapbox.scale', String(s)); MB.reset(); };
 
@@ -223,35 +223,83 @@
     fog(bg);applyTerrain(D,bg);
     if(bg.mbStyle==='broadcast'&&cfgKey!==curCfgKey){addBroadcastCartography(D,bg);curCfgKey=cfgKey;}
   }
-  function settle(m) {
+  function settle(m, generation) {
     return new Promise(res => {
       let ok = 0; const t0 = performance.now();
       const step = () => {
-        if (performance.now() - t0 > 20000) return res();
+        if (generation !== renderGeneration || MB.interacting) return res(false);
+        if (performance.now() - t0 > 20000) return res(true);
         m.triggerRepaint();
-        m.once('render', () => { let done = false; try { done = m.loaded() && !m.isMoving(); } catch (e) { done = true; } if (done) { ok++; if (ok >= 2) return res(); } else ok = 0; setTimeout(step, 16); });
+        m.once('render', () => {
+          if (generation !== renderGeneration || MB.interacting) return res(false);
+          let done = false; try { done = m.loaded() && !m.isMoving(); } catch (e) { done = true; }
+          if (done) { ok++; if (ok >= 2) return res(true); } else ok = 0;
+          setTimeout(step, 16);
+        });
       };
       step();
     });
   }
+
+  function visualConfigReady(bg){
+    if(!D||MB.status!=='ready')return false;
+    MB.ensureConfig(bg);
+    const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
+    return styleKey===curStyleKey && pr===curProj && (bg.mbStyle!=='broadcast'||cfgKey===curCfgKey);
+  }
+
+  function liveCanvas(bg,cam){
+    if(!visualConfigReady(bg))return null;
+    const k=norm(cam), key=[k.c[0].toFixed(6),k.c[1].toFixed(6),k.z.toFixed(4),k.b.toFixed(3),k.p.toFixed(3)].join('|');
+    if(key!==liveKey){
+      D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
+      D.triggerRepaint();
+      liveKey=key;
+    }
+    return D.getCanvas();
+  }
+
+  MB.setInteractive = function(active){
+    active=!!active;
+    if(MB.interacting===active)return;
+    MB.interacting=active;
+    renderGeneration++;
+    want=null;
+    if(!active)liveKey=null;
+    if(MB.onUpdate)MB.onUpdate();
+  };
+
   MB.queue = Promise.resolve();
   async function doSnap(bg, cam, key) {
     await MB.init(); if (MB.cache.has(key)) return MB.cache.get(key);
-    await setup(bg); const k = norm(cam);
-    D.jumpTo({ center: k.c, zoom: k.z, bearing: k.b, pitch: k.p }); await settle(D);
+    if(MB.interacting)return null;
+    await setup(bg); const k = norm(cam), generation=renderGeneration;
+    D.jumpTo({ center: k.c, zoom: k.z, bearing: k.b, pitch: k.p }); liveKey=null;
+    const settled=await settle(D,generation);
+    if(!settled||generation!==renderGeneration||MB.interacting)return null;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.getContext('2d').drawImage(D.getCanvas(), 0, 0, W, H);
     MB.cache.set(key, cv); if (MB.cache.size > 14) MB.cache.delete(MB.cache.keys().next().value); MB.last = cv; return cv;
   }
   MB.snap = function (bg, cam) { const key = keyOf(bg, cam), b = cloneBg(bg); if (MB.cache.has(key)) return Promise.resolve(MB.cache.get(key)); const p = MB.queue.then(() => doSnap(b, cam, key)); MB.queue = p.catch(() => { }); return p; };
-  /* synchronous accessor for the live preview: returns the right frame if cached, else asks for it and returns the last one */
+
+  /* Live editor preview: while the user is moving the camera, use Mapbox's
+     current WebGL canvas directly instead of waiting for settled snapshots. */
   let busy = false, want = null;
   function pump() {
-    if (busy || !want) return; busy = true; const w = want; want = null;
+    if (busy || !want || MB.interacting) return;
+    busy = true; const w = want; want = null;
     MB.snap(w.bg, w.cam).catch(() => { }).then(() => { busy = false; if (MB.onUpdate) MB.onUpdate(); pump(); });
   }
   MB.frame = function (bg, cam) {
-    if (!MB.hasToken()) return null; const key = keyOf(bg, cam), c = MB.cache.get(key); if (c) return c;
-    want = { bg: cloneBg(bg), cam: norm(cam) }; pump(); return MB.last;
+    if (!MB.hasToken()) return null;
+    const key = keyOf(bg, cam), c = MB.cache.get(key); if (c) return c;
+    if(MB.interacting){
+      const live=liveCanvas(bg,cam);
+      if(live)return live;
+      return MB.last;
+    }
+    want = { bg: cloneBg(bg), cam: norm(cam) }; pump();
+    return MB.last || liveCanvas(bg,cam);
   };
 
   /* ---- lng/lat <-> 1920x1080 screen pixels ---- */

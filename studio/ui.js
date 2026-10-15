@@ -139,6 +139,7 @@
     const p = pt(e), sc = cur();
     if (e.button === 2 && sc.bg.type === 'mapbox') {
       e.preventDefault(); backToEdit(); ov.setPointerCapture(e.pointerId);
+      g.MB.setInteractive(true);
       S.drag = { k: 'orbit', last: p, moved: false };
       ov.style.cursor = 'grabbing';
       return;
@@ -152,7 +153,7 @@
         if (hd.resize && Math.hypot(hd.resize[0] - p[0], hd.resize[1] - p[1]) < 18) { S.drag = { k: 'resize', last: p, c: [hd.box.x + hd.box.w / 2, hd.box.y + hd.box.h / 2] }; return; } }
       const hit = E.hit(sc, editT(), p[0], p[1]);
       if (hit) { S.oid = hit.id; S.drag = { k: 'move', last: p, moved: false }; if (S.tab !== 'object') setTab('object'); else renderPanels(); }
-      else { S.oid = null; renderPanels(); if (xf.map) S.drag = { k: 'pan', last: p }; }
+      else { S.oid = null; renderPanels(); if (xf.map) { if(xf.mb)g.MB.setInteractive(true); S.drag = { k: 'pan', last: p }; } }
       return;
     }
     if (S.tool === 'pen') { S.draft = { type: 'pen', pts: [p] }; S.drag = { k: 'pen' }; return; }
@@ -173,10 +174,10 @@
     const o = selObj();
     if (d.k === 'orbit' && sc.bg.type === 'mapbox') {
       const v = mapView(sc), dx = p[0] - d.last[0], dy = p[1] - d.last[1];
-      let bearing = (v.b || 0) + dx * 0.12;
+      let bearing = (v.b || 0) + dx * 0.18;
       bearing = ((bearing + 180) % 360 + 360) % 360 - 180;
       v.b = bearing;
-      v.p = clamp((v.p || 0) - dy * 0.08, 0, 70);
+      v.p = clamp((v.p || 0) - dy * 0.12, 0, 70);
       d.last = p; d.moved = d.moved || Math.abs(dx) + Math.abs(dy) > 0.5;
     }
     else if (d.k === 'move' && o) { E.move(o, p[0] - d.last[0], p[1] - d.last[1], xf); d.last = p; d.moved = true; }
@@ -193,12 +194,12 @@
     else if (d.k === 'pen' && S.draft) { const l = S.draft.pts[S.draft.pts.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 3) S.draft.pts.push(p); }
     else if (d.k === 'shape' && S.draft) { S.draft.x = Math.min(d.o[0], p[0]); S.draft.y = Math.min(d.o[1], p[1]); S.draft.w = Math.abs(p[0] - d.o[0]); S.draft.h = Math.abs(p[1] - d.o[1]); }
   });
-  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; ov.style.cursor = ''; if (!d) return; if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
-  ov.addEventListener('pointercancel', () => { S.drag = null; ov.style.cursor = ''; });
+  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; ov.style.cursor = ''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
+  ov.addEventListener('pointercancel', () => { const d=S.drag; S.drag = null; ov.style.cursor = ''; if(d&&(d.k==='orbit'||d.k==='pan'))g.MB.setInteractive(false); });
   ov.addEventListener('contextmenu', e => { if (cur().bg.type === 'mapbox') e.preventDefault(); });
   ov.addEventListener('dblclick', () => { if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); } });
   ov.addEventListener('wheel', e => { const sc = cur(); if (!isMap(sc.bg)) return; e.preventDefault(); backToEdit(); const p = pt(e);
-    if (sc.bg.type === 'mapbox') { const v = mapView(sc), ll = E.xf(sc, editT()).inv(p[0], p[1]); v.z = clamp(v.z - e.deltaY * 0.0015, 0, 20); const l2 = E.xf(sc, editT()).inv(p[0], p[1]); if (isFinite(ll[0]) && isFinite(l2[0])) v.c = [v.c[0] + ll[0] - l2[0], Math.max(-85, Math.min(85, v.c[1] + ll[1] - l2[1]))]; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); return; }
+    if (sc.bg.type === 'mapbox') { g.MB.setInteractive(true); const v = mapView(sc), ll = E.xf(sc, editT()).inv(p[0], p[1]); v.z = clamp(v.z - e.deltaY * 0.0025, 0, 20); const l2 = E.xf(sc, editT()).inv(p[0], p[1]); if (isFinite(ll[0]) && isFinite(l2[0])) v.c = [v.c[0] + ll[0] - l2[0], Math.max(-85, Math.min(85, v.c[1] + ll[1] - l2[1]))]; clearTimeout(ov._wt); ov._wt = setTimeout(()=>{g.MB.setInteractive(false);commit();},180); return; }
     const v = mapView(sc), k = W / v.w, P = [v.cx + (p[0] - W / 2) / k, v.cy + (p[1] - H / 2) / k]; v.w = clamp(v.w * Math.exp(e.deltaY * 0.0012), 18, 1700); const k2 = W / v.w; v.cx = P[0] - (p[0] - W / 2) / k2; v.cy = P[1] - (p[1] - H / 2) / k2; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); }, { passive: false });
   ['dragover', 'dragenter'].forEach(ev => stage.parentElement.addEventListener(ev, e => { e.preventDefault(); }));
   stage.parentElement.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], e.shiftKey ? 'bg' : 'obj'); });
@@ -232,7 +233,7 @@
   /* ---------- render loop ---------- */
   let last = 0;
   function loop(ts) {
-    requestAnimationFrame(loop); if (ts - last < 30) return; last = ts;
+    requestAnimationFrame(loop); const frameMs=(g.MB&&g.MB.interacting)?15:30; if (ts - last < frameMs) return; last = ts;
     try {
       if (S.mode === 'edit') { E.renderScene(sctx, S.show, cur(), clock(), { editing: true, camT: editT() }); drawOverlay(); }
       else {
@@ -378,7 +379,7 @@
           h('button', { text: '★ Save Current as Default', title: 'Use the current map and map settings as the starting default', on: { click: saveCurrentMapDefault } })
         ),
         h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } })),
-        h('div', { className: 'hint', text: b.mbStyle==='broadcast'?'Mouse: left-drag empty map to pan · right-drag to rotate/tilt · wheel to zoom. WXfusion Weather Director broadcast cartography is active.':'Mouse: left-drag empty map to pan · right-drag to rotate/tilt · wheel to zoom.' })
+        h('div', { className: 'hint', text: b.mbStyle==='broadcast'?'Mouse: left-drag to pan · right-drag to rotate/tilt · wheel to zoom. Live Mapbox navigation uses the fast preview path; WXfusion Weather Director cartography remains active.':'Mouse: left-drag empty map to pan · right-drag to rotate/tilt · wheel to zoom.' })
       ];
       p.append(mapAccordion('basic','Map + Camera',basic,true));
 
