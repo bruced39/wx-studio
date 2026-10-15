@@ -45,14 +45,18 @@ if _tok.startswith("pk."):
 # Publishable Supabase keys are intended for browser usage. Never send a
 # service-role or secret key to the iframe, and do not bake API keys into Git.
 def _cloud_config() -> dict:
+    # This is the dedicated, isolated WX Studio Supabase project's PUBLIC
+    # publishable key. It is safe to expose client-side, unlike secret keys.
+    # RLS ensures that signed-in users can access only their own presets.
+    endpoint = "https://lcujugmyyuumrshdasla.supabase.co"
+    pub_key = "sb_publishable_BTjp74AA-GqP2kGKUM6i0w_EDuIw8EN"
     try:
-        endpoint = str(st.secrets.get("WX_SUPABASE_URL", "")).strip()
-        pub_key = str(st.secrets.get("WX_SUPABASE_PUBLISHABLE_KEY", "")).strip()
-        if (endpoint.startswith("https://") and
-            pub_key.startswith("sb_publishable_")):
-            return {"url": endpoint, "publishableKey": pub_key}
+        endpoint = str(st.secrets.get("WX_SUPABASE_URL", endpoint)).strip()
+        pub_key = str(st.secrets.get("WX_SUPABASE_PUBLISHABLE_KEY", pub_key)).strip()
     except Exception:
         pass
+    if endpoint.startswith("https://") and pub_key.startswith("sb_publishable_"):
+        return {"url": endpoint, "publishableKey": pub_key}
     return {}
 
 _cloud = _cloud_config()
