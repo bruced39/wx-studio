@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.12` (`VERSION`).
+- **Last reviewed application version:** `0.9.13` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -163,6 +163,16 @@ On Oct 15, 2026, user reported that Show Zoom off continued displaying a badge, 
 - **Live browser QA required**: dark/custom vs satellite, low/high zoom detail/line colors, county coverage, toggle Show Zoom off, right/left pan immediately after changing border sliders, no icon/scene/cloud regressions. Original color choices preserved: user may need to change dark black borders to a light color for Satellite contrast. The slide renderer uses its native 1920x1080 pixel scale, so thin strokes can appear narrower in resized preview.
 - Claude published v0.9.11 HD animated weather icons; preserved **all Claude changes** by branching from v0.9.11 main commit `fc526f5`. Only mapbox.js/ui.js (plus VERSION/handoff) changed here.
 
+## v0.9.13 — live, continuously updating zoom readout
+
+User reported that in v0.9.12, unchecking Show Zoom hid the zoom badge correctly, but zooming after rechecking left the displayed number frozen until toggling the checkbox off/on again.
+
+- Moved ONLY the zoom badge out of the shared drawing canvas into its own absolutely positioned, SVG-backed overlay in `studio/index.html` (`#mapZoomBadge`, text `#mapZoomValue`). SVG retains the old badge's relative size, colors, outline, and placement on the 1920×1080 stage; `pointer-events:none` preserves map panning, selection and weather-object interactions.
+- `studio/ui.js` `updateZoomBadge()` reads the **active scene camera** via `E.viewAt(scene,editT())` on every rendered editor animation frame independently of Mapbox tile/background rendering. It updates only if text changes and hides unless the scene is a Mapbox background and `showZoomBadge===true` and edit mode. A mouse wheel zoom also updates it directly in the same event; zoom slider and Show Zoom checkboxes call it immediately.
+- Removed the legacy 2D-canvas badge draw so no stale/duplicate badge can be left behind. Playback and presentation still hide this editor-only readout.
+- **Tests:** JavaScript parsing; mocked DOM/state camera changes from 6.8 → 7.3 → 9.55 with checkbox untouched, off/on behavior, scene change and playback state. Checked SVG/CSS and live render callback presence. Still requires user live Streamlit verification that zoom readout follows zoom input and doesn't obscure the map or intercept pointer events.
+- Preserves v0.9.12 border fixes, Pan Map, named cloud presets and all Claude v0.9.11 HD animated icon features. Do not regress or modify those.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -194,4 +204,4 @@ On Oct 15, 2026, user reported that Show Zoom off continued displaying a badge, 
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.12 targeted boundary/zoom/pan improvements staged or deployed; waiting for user live screenshot/QA. Cloud preset authentication and Claude's HD weather icons retained.
+**Status at handoff:** v0.9.13 fixes the stuck zoom number with an independent, frame-synchronized SVG readout. Awaiting user live test; Claude's v0.9.11 changes, v0.9.12 border work, map presets and cloud storage preserved.
