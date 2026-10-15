@@ -851,6 +851,7 @@
   }
   function renderMapStylePanel(fresh){
     if(!MS.open)return;
+    $('#mapStyleSave').textContent=cloudEnabled()&&CLOUD().user()?'Save to Cloud':'Save Style';
     const scroll=$('#mapStyleScroll'),sy=fresh?0:scroll.scrollTop;
     scroll.innerHTML='';
     document.querySelectorAll('#mapStyleTabs button').forEach(btn=>btn.classList.toggle('on',btn.dataset.mt===MS.tab));
