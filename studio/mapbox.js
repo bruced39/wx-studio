@@ -775,16 +775,31 @@
   // applying tiny center offsets repeatedly, this remains predictable at
   // low zoom and on a globe as tiles and labels are being redrawn.
   MB.panByPixels = function(bg,startCam,dx,dy){
-    if(!P||MB.status!=='ready')return null;
-    const k=norm(startCam),s=MB.scale,pr=projOf(bg);
-    try{
-      if(pProj!==pr){P.setProjection(pr);pProj=pr;}
-      P.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
-      pKey=null; // E.xf must resynchronize projector after panning.
-      const q=P.unproject([(W/2-dx)/s,(H/2-dy)/s]);
-      if(!q||!Number.isFinite(q.lng)||!Number.isFinite(q.lat))return null;
-      return [((q.lng+180)%360+360)%360-180,Math.max(-85,Math.min(85,q.lat))];
-    }catch(e){return null;}
+    if(!Number.isFinite(dx)||!Number.isFinite(dy))return null;
+    const k=norm(startCam),s=MB.scale||1,pr=projOf(bg);
+    if(P&&MB.status==='ready'){
+      try{
+        if(pProj!==pr){P.setProjection(pr);pProj=pr;}
+        P.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
+        // Mapbox's native pixel pan accounts for pitch, bearing and globe.
+        P.panBy([dx/s,dy/s],{duration:0});
+        pKey=null;
+        const c=P.getCenter();
+        if(c&&Number.isFinite(c.lng)&&Number.isFinite(c.lat))
+          return [((c.lng+180)%360+360)%360-180,Math.max(-85,Math.min(85,c.lat))];
+      }catch(e){pKey=null;}
+    }
+    // Fallback for Mercator if the offscreen projector isn't ready.
+    if(pr!=='mercator')return null;
+    const world=512*Math.pow(2,k.z),rad=Math.PI/180,angle=k.b*rad;
+    const east=Math.cos(angle)*dx-Math.sin(angle)*dy;
+    const south=Math.sin(angle)*dx+Math.cos(angle)*dy;
+    const wrap=lon=>((lon+180)%360+360)%360-180;
+    const lat=Math.max(-85,Math.min(85,k.c[1]));
+    const y0=(1-Math.log(Math.tan(Math.PI/4+lat*rad/2))/Math.PI)/2;
+    const y1=Math.max(1e-6,Math.min(1-1e-6,y0-south/world));
+    const lat1=Math.atan(Math.sinh(Math.PI*(1-2*y1)))/rad;
+    return [wrap(k.c[0]-east*360/world),Math.max(-85,Math.min(85,lat1))];
   };
   MB.xf = function (bg, cam) {
     if (!P || MB.status !== 'ready') return null;
