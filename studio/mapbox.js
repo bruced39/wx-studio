@@ -39,6 +39,7 @@
     broadcastLabelColor:'#ffffff', broadcastLabelHaloColor:'#101820', broadcastLabelHaloWidth:2,
     broadcastShowPOI:false, broadcastShowRoadLabels:false, broadcastShowNaturalLabels:false,
     broadcastShowCoastline:true, broadcastCoastlineColor:'#050505', broadcastCoastlineWidth:1.5,
+    broadcastInlandWaterOutlines:false, broadcastInlandWaterOutlineColor:'#050505', broadcastInlandWaterOutlineWidth:1,
     broadcastShowCountryBorders:true, broadcastCountryColor:'#101010', broadcastCountryWidth:2.5,
     broadcastShowStateBorders:true, broadcastStateColor:'#171717', broadcastStateWidth:2,
     broadcastShowCountyBorders:false, broadcastCountyColor:'#89939d', broadcastCountyWidth:1, broadcastCountyMinZoom:6,
@@ -151,8 +152,52 @@
       }catch(e){console.warn('WX Studio coastline update',e);}
     });
   }
+  /* Ocean coastline is NOT the Mapbox Streets "water" polygon boundary:
+   * Streets v8 merges ocean, rivers and every inland lake into one polygon
+   * per tile, so drawing its line cannot separate the two groups.
+   * Natural Earth 10m coastline is ocean/island shoreline only. Lakes and
+   * rivers use independent physical datasets, loaded only if enabled.
+   * Shared downloads are cached, keeping globe/map restyles inexpensive. */
+  const NATURAL_EARTH_LINES={
+    coast:{url:'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_coastline.geojson',source:'wd-ocean-coast-data'},
+    lakes:{url:'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_lakes.geojson',source:'wd-inland-lakes-data'},
+    rivers:{url:'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_rivers_lake_centerlines.geojson',source:'wd-inland-rivers-data'}
+  };
+  const naturalEarthLineCache={};
+  function ensureNaturalEarthLines(map,kind){
+    const spec=NATURAL_EARTH_LINES[kind];if(!spec)return null;
+    const entry=naturalEarthLineCache[kind]||(naturalEarthLineCache[kind]={data:null,promise:null});
+    try{if(!map.getSource(spec.source))map.addSource(spec.source,{type:'geojson',data:entry.data||flatLandEmpty()});}
+    catch(e){console.warn('WX Studio natural earth source',kind,e);return null;}
+    if(entry.data)return spec.source;
+    if(!entry.promise){
+      entry.promise=fetch(spec.url,{cache:'force-cache'})
+        .then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json();})
+        .then(data=>{
+          if(!data||data.type!=='FeatureCollection'||!Array.isArray(data.features))
+            throw Error('Invalid Natural Earth '+kind+' geometry');
+          entry.data=data;return data;
+        }).catch(e=>{
+          entry.promise=null;
+          console.warn('WX Studio '+kind+' geometry unavailable',e);
+          return null;
+        });
+    }
+    entry.promise.then(data=>{
+      if(!data)return;
+      try{
+        const src=map.getSource(spec.source);
+        if(src&&src.setData)src.setData(data);
+        MB.cache.clear();
+        if(MB.onUpdate&&!MB.interacting)MB.onUpdate();
+      }catch(e){console.warn('WX Studio '+kind+' data update',e);}
+    });
+    return spec.source;
+  }
+
   function installBaseTints(map,cfg,source){
-    ['wd-color-base','wd-land-tint','wd-water-tint','wd-coastline-outline','wd-flat-land-fill','wd-flat-coastline']
+    ['wd-color-base','wd-land-tint','wd-water-tint','wd-coastline-outline','wd-flat-land-fill','wd-flat-coastline',
+      'wd-ocean-coastline','wd-inland-lakes-outline','wd-inland-rivers-outline']
       .forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch(e){}});
     if(!source)return;
     const layers=map.getStyle().layers||[],before=(layers.find(l=>l.type==='symbol')||{}).id;
@@ -165,12 +210,7 @@
         paint:{'fill-color':ocean||land||'#151a21','fill-opacity':1}});
       if(!map.getSource('wd-flat-land-data'))map.addSource('wd-flat-land-data',{type:'geojson',data:flatLandData||flatLandEmpty()});
       add({id:'wd-flat-land-fill',type:'fill',source:'wd-flat-land-data',paint:{'fill-color':land||'#151a21','fill-opacity':1}});
-      if(cfg.broadcastShowCoastline!==false){
-        const c=cfg.broadcastCoastlineColor==='#050505'?'#e0e4eb':cfg.broadcastCoastlineColor;
-        add({id:'wd-flat-coastline',type:'line',source:'wd-flat-land-data',
-          layout:{'line-join':'round','line-cap':'round'},
-          paint:{'line-color':c||'#e0e4eb','line-width':Math.max(.3,+cfg.broadcastCoastlineWidth||1)}});
-      }
+      installSeparatedWaterOutlines(map,cfg,add);
       loadFlatLand(map);
       return;
     }
@@ -180,12 +220,34 @@
     if(+cfg.broadcastWaterTintOpacity>0)
       add({id:'wd-water-tint',type:'fill',source,'source-layer':'water',
         paint:{'fill-color':cfg.broadcastWaterColor,'fill-opacity':Math.max(0,Math.min(.8,+cfg.broadcastWaterTintOpacity))}});
+    installSeparatedWaterOutlines(map,cfg,add);
+  }
+  function installSeparatedWaterOutlines(map,cfg,add){
+    // Restore coastlines without tracing inland Mapbox water polygons.
     if(cfg.broadcastShowCoastline!==false){
-      const w=Math.max(.5,+cfg.broadcastCoastlineWidth||1.5);
-      add({id:'wd-coastline-outline',type:'line',source,'source-layer':'water',
-        layout:{'line-join':'round','line-cap':'round'},
-        paint:{'line-color':cfg.broadcastCoastlineColor||'#050505',
-          'line-width':['interpolate',['linear'],['zoom'],3,w*.7,7,w,11,w*1.35]}});
+      const ocean=ensureNaturalEarthLines(map,'coast');
+      const color=cfg.broadcastBase==='satellite'
+        ?cfg.broadcastCoastlineColor
+        :(cfg.broadcastCoastlineColor==='#050505'?'#e0e4eb':cfg.broadcastCoastlineColor);
+      if(ocean)add({id:'wd-ocean-coastline',type:'line',source:ocean,
+        layout:{'line-cap':'round','line-join':'round'},
+        paint:{'line-color':color||'#e0e4eb',
+          'line-width':Math.max(.25,Math.min(8,+cfg.broadcastCoastlineWidth||1.5)),
+          'line-opacity':1,'line-blur':0}});
+    }
+    // Deliberately OFF by default: only add inland outlines if enabled.
+    // Lakes and rivers have their OWN datasets instead of a merged
+    // world-ocean water source. This is independent of water fill colors.
+    if(cfg.broadcastInlandWaterOutlines===true){
+      const color=cfg.broadcastInlandWaterOutlineColor||'#050505',
+        width=Math.max(.25,Math.min(8,+cfg.broadcastInlandWaterOutlineWidth||1));
+      for(const [kind,id] of [['lakes','wd-inland-lakes-outline'],
+                              ['rivers','wd-inland-rivers-outline']]){
+        const src=ensureNaturalEarthLines(map,kind);
+        if(src)add({id,type:'line',source:src,
+          layout:{'line-cap':'round','line-join':'round'},
+          paint:{'line-color':color,'line-width':width,'line-opacity':1,'line-blur':0}});
+      }
     }
   }
 
