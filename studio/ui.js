@@ -679,6 +679,27 @@
     }
     return box;
   }
+  function addMapStyleValues(scroll){
+    // Keep the native range inputs while displaying Aguacero-style units.
+    scroll.querySelectorAll('.row input[type="range"]').forEach(input=>{
+      const row=input.closest('.row'),key=(row?.querySelector('label')?.textContent||'').toLowerCase();
+      if(!row||input.parentElement?.classList.contains('mapstyle-slider'))return;
+      const holder=h('div',{className:'mapstyle-slider'});
+      input.replaceWith(holder);holder.append(input);
+      const value=h('span',{className:'mapstyle-slider-value'});holder.append(value);
+      const percent=/opacity|intensity|strength|density|saturation|contrast|lift|ceiling/i.test(key) &&
+        +input.max<=1;
+      const pctScale=/3d exaggeration/i.test(key);
+      const pixels=/width|size|offset|halo/i.test(key);
+      const show=()=>{
+        const v=+input.value;
+        value.textContent=percent||pctScale?Math.round(v*(pctScale?100:100))+'%':
+          pixels?(+v.toFixed(2))+'px':(+v.toFixed(2)).toString();
+      };
+      input.addEventListener('input',show);
+      show();
+    });
+  }
   function renderMapStylePanel(fresh){
     if(!MS.open)return;
     const scroll=$('#mapStyleScroll'),sy=fresh?0:scroll.scrollTop;
@@ -779,6 +800,7 @@
         if(needle&&match)el.open=true;
       });
     });
+    addMapStyleValues(scroll);
     scroll.scrollTop=sy;
   }
   $('#bMapStyle').onclick=openMapStyle;
