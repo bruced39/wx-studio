@@ -115,7 +115,7 @@
     t.append(fs, h('button', { text: 'Delete', className: 'dng', on: { click: delObj } }), h('button', { text: 'Duplicate', on: { click: dupObj } }));
     setTool('select');
   }
-  function setTool(id) { finishDraft(); S.tool = id; document.querySelectorAll('#tools button[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === id)); ov.style.cursor = id === 'select' && cur()?.bg?.type==='mapbox' ? 'grab' : id === 'select' ? 'default' : 'crosshair'; }
+  function setTool(id) { finishDraft(); S.tool = id; document.querySelectorAll('#tools button[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === id)); ov.style.cursor = id === 'select' && S.show?.scenes?.[S.si]?.bg?.type==='mapbox' ? 'grab' : id === 'select' ? 'default' : 'crosshair'; }
   function finishDraft() {
     const d = S.draft; S.draft = null; if (!d) return;
     if (d.type === 'shape') { if (Math.abs(d.w) > 8 && Math.abs(d.h) > 8) addObject('shape', { shape: d.shape, x: d.x, y: d.y, w: d.w, h: d.h, fill: '#ffffff', opacity: 0.2, stroke: '#ffffff', lw: 4 }); }
