@@ -5,7 +5,8 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const stage = $('#stage'), sctx = stage.getContext('2d'), ov = $('#overlay'), octx = ov.getContext('2d');
   const S = { show: null, si: 0, oid: null, tool: 'select', opt: { front: 'cold', icon: 'partly-cloudy', hl: 'H', storm: 'H', shape: 'round' }, mode: 'edit', T: 0, play: null, draft: null, editEnd: false, tab: 'scene', hist: [], hp: -1, drag: null, cursor: [0, 0], mapAcc: { sceneSettings: false, background: false, basic: true, base: false, land: false, labels: false, boundaries: false, roads: false, cameraMove: false, titleBanner: false, showBranding: false } };
-  const MS = {open:false,tab:'customize',scroll:0};
+  const MS = {open:false,tab:'customize',scroll:0,cloudChecked:false,cloudReady:false,
+    cloudLoaded:false,cloudLoading:false,cloudBusy:false,cloudPresets:[],cloudMessage:''};
   const MAP_STYLES_KEY = 'wx.studio.mapStylePresets.v1';
   const KEY = 'wx.studio.autosave.v1';
   const MAP_DEFAULT_KEY = 'wx.studio.defaultMap.v1';
@@ -654,6 +655,71 @@
     try{const p=JSON.parse(localStorage.getItem(MAP_STYLES_KEY)||'[]');return Array.isArray(p)?p:[];}catch(e){return [];}
   }
   function saveMapStylePresets(p){try{localStorage.setItem(MAP_STYLES_KEY,JSON.stringify(p));}catch(e){toast('Cannot save styles: browser storage is unavailable');}}
+  const CLOUD=()=>g.WXCloudPresets;
+  const cloudEnabled=()=>!!CLOUD()?.configured();
+  function cloudError(err){return String(err?.message||err||'Unknown error');}
+  async function loadCloudPresets(){
+    if(!cloudEnabled()||!CLOUD().user()||MS.cloudLoading)return;
+    MS.cloudLoading=true;MS.cloudMessage='';if(MS.open)renderMapStylePanel();
+    try{
+      MS.cloudPresets=await CLOUD().list();
+      MS.cloudLoaded=true;
+    }catch(e){MS.cloudMessage='Could not load cloud presets: '+cloudError(e);MS.cloudLoaded=false;}
+    finally{MS.cloudLoading=false;if(MS.open)renderMapStylePanel();}
+  }
+  async function cloudAccountAction(kind,email,password){
+    if(MS.cloudBusy)return;
+    if(!email||!email.includes('@')||password.length<8){
+      MS.cloudMessage='Enter a valid email and a password of at least 8 characters.';
+      renderMapStylePanel();return;
+    }
+    MS.cloudBusy=true;MS.cloudMessage='';
+    try{
+      if(kind==='signup'){
+        const result=await CLOUD().signUp(email,password);
+        if(result.confirmationRequired){
+          MS.cloudMessage='Account created. Check your email for a confirmation link, then sign in here. If the link opens another page, return to WX Studio afterward.';
+        }else{
+          MS.cloudMessage='Cloud account ready.';
+          await loadCloudPresets();
+        }
+      }else{
+        await CLOUD().signIn(email,password);
+        MS.cloudPresets=[];MS.cloudLoaded=false;
+        await loadCloudPresets();
+        MS.cloudMessage='Signed in. Your presets are available on this device.';
+      }
+    }catch(e){MS.cloudMessage='Cloud sign-in: '+cloudError(e);}
+    finally{MS.cloudBusy=false;if(MS.open)renderMapStylePanel();}
+  }
+  async function cloudSignOut(){
+    if(MS.cloudBusy)return;
+    MS.cloudBusy=true;
+    try{await CLOUD().signOut();MS.cloudPresets=[];MS.cloudLoaded=false;MS.cloudMessage='Signed out of cloud sync.';}
+    catch(e){MS.cloudMessage='Sign-out issue: '+cloudError(e);}
+    finally{MS.cloudBusy=false;renderMapStylePanel();}
+  }
+  async function uploadLocalPresets(){
+    const local=readMapStylePresets();
+    if(!local.length||!cloudEnabled()||!CLOUD().user())return;
+    if(!confirm('Upload '+local.length+' local preset(s) to your private cloud account? Cloud presets with the same names will be replaced. Your browser copies will be kept.'))return;
+    if(MS.cloudBusy)return;MS.cloudBusy=true;
+    let count=0;
+    try{
+      for(const item of local){await CLOUD().save(item);count++;}
+      MS.cloudMessage='Uploaded '+count+' local presets. Browser copies were kept.';
+      MS.cloudLoaded=false;await loadCloudPresets();
+    }catch(e){MS.cloudMessage='Uploaded '+count+' preset(s) before error: '+cloudError(e);}
+    finally{MS.cloudBusy=false;if(MS.open)renderMapStylePanel();}
+  }
+  async function deleteCloudPreset(item){
+    if(MS.cloudBusy||!confirm('Delete the cloud preset "'+item.name+'"? This cannot be undone.'))return;
+    MS.cloudBusy=true;
+    try{await CLOUD().remove(item.id);MS.cloudMessage='Deleted cloud preset: '+item.name;
+      MS.cloudPresets=MS.cloudPresets.filter(p=>p.id!==item.id);
+    }catch(e){MS.cloudMessage='Cloud delete failed: '+cloudError(e);}
+    finally{MS.cloudBusy=false;if(MS.open)renderMapStylePanel();}
+  }
   function closeMapStyle(){
     MS.open=false;
     $('#mapStyleFlyout').classList.remove('open');
@@ -683,13 +749,23 @@
     const camera=JSON.parse(JSON.stringify({
       c:active.c,z:active.z,b:active.b||0,p:active.p||0
     }));
-    const list=readMapStylePresets(),item={
-      name:name.trim(),settings,camera,created:new Date().toISOString()
-    };
+    const item={name:name.trim(),settings,camera,created:new Date().toISOString()};
+    if(cloudEnabled()&&CLOUD().user()){
+      if(MS.cloudPresets.some(p=>p.name===item.name) &&
+         !confirm('Replace existing cloud preset "'+item.name+'"?'))return;
+      CLOUD().save(item).then(()=>{
+        toast('Saved "'+item.name+'" in your cloud account');
+        MS.cloudLoaded=false;loadCloudPresets();
+      }).catch(e=>toast('Cloud save failed: '+cloudError(e)));
+      return;
+    }
+    const list=readMapStylePresets();
     const existing=list.findIndex(x=>x.name===item.name);
     if(existing>=0){if(!confirm('Replace saved style "'+item.name+'"?'))return;list[existing]=item;}
     else list.unshift(item);
-    saveMapStylePresets(list);toast('Named map view and style saved');renderMapStylePanel();
+    saveMapStylePresets(list);
+    toast('Saved in this browser (sign in under Saved Styles for cloud sync)');
+    renderMapStylePanel();
   }
   function applySavedMapStyle(item){
     const b=cur().bg;
@@ -780,24 +856,65 @@
     document.querySelectorAll('#mapStyleTabs button').forEach(btn=>btn.classList.toggle('on',btn.dataset.mt===MS.tab));
     const sc=cur(),b=sc.bg;
     if(MS.tab==='saved'){
-      const list=readMapStylePresets();
-      scroll.append(h('div',{className:'hint',text:'Save and load named map views: location, zoom, rotation, tilt, map colors, labels, boundaries and overlays. Existing weather graphics stay in the scene. Presets are stored in this browser.'}));
-      if(!list.length)scroll.append(h('div',{className:'hint',text:'No presets saved yet. Set your map view and style, then click Save Style.'}));
-      for(const item of list){
+      const local=readMapStylePresets();
+      const description=item=>
+        item.camera&&Number.isFinite(item.camera.z)
+          ? 'Zoom '+item.camera.z.toFixed(1)+' · '+(item.settings?.proj==='globe'?'Globe':'Mercator')+
+            ' · '+(item.settings?.broadcastBase||'Satellite')
+          : 'Style-only preset (location unchanged)';
+      const card=(item,isCloud)=>{
         scroll.append(h('div',{className:'mapacc',style:'padding:10px'},
           h('div',{style:'font-weight:700;margin-bottom:4px',text:item.name}),
-          h('div',{className:'hint',style:'margin-bottom:8px',text:
-            item.camera&&Number.isFinite(item.camera.z)
-              ? 'Zoom '+item.camera.z.toFixed(1)+' · '+(item.settings?.proj==='globe'?'Globe':'Mercator')+
-                ' · '+(item.settings?.broadcastBase||'Satellite')
-              : 'Style-only preset (saved before map views were added)'}),
+          h('div',{className:'hint',style:'margin-bottom:8px',text:description(item)}),
           h('div',{className:'btnrow'},
             mapStyleButton('Load Preset',()=>applySavedMapStyle(item),'pri'),
-            mapStyleButton('Delete',()=>{
-              if(!confirm('Delete saved style "'+item.name+'"?'))return;
-              saveMapStylePresets(readMapStylePresets().filter(x=>x.name!==item.name));renderMapStylePanel();
-            },'dng'))));
+            mapStyleButton('Delete',()=>isCloud?deleteCloudPreset(item):(()=>{
+              if(!confirm('Delete local preset "'+item.name+'"?'))return;
+              saveMapStylePresets(readMapStylePresets().filter(x=>x.name!==item.name));
+              renderMapStylePanel();
+            })(),'dng'))));
+      };
+      scroll.append(h('div',{className:'hint',text:'Presets restore a starting location, zoom, map colors and overlays. You can pan, zoom and edit freely afterward; the saved preset does not change.'}));
+      scroll.append(h('div',{style:'font-size:15px;font-weight:700;margin:14px 0 7px',text:'Cloud Presets'}));
+      if(!cloudEnabled()){
+        scroll.append(h('div',{className:'hint',text:'Cloud sync is awaiting the Streamlit Supabase URL and publishable key in app secrets. Your local presets below still work.'}));
+      }else{
+        if(!MS.cloudChecked){
+          MS.cloudChecked=true;
+          CLOUD().initialize().then(()=>{
+            MS.cloudReady=true;
+            if(CLOUD().user())loadCloudPresets();
+            else if(MS.open)renderMapStylePanel();
+          }).catch(e=>{MS.cloudMessage='Cloud setup: '+cloudError(e);
+            MS.cloudReady=true;if(MS.open)renderMapStylePanel();});
+        }
+        if(!MS.cloudReady)scroll.append(h('div',{className:'hint',text:'Checking saved cloud sign-in…'}));
+        else if(CLOUD().user()){
+          scroll.append(h('div',{className:'hint',text:'Signed in as '+(CLOUD().user()?.email||'cloud user')}));
+          scroll.append(h('div',{className:'btnrow'},
+            mapStyleButton('Refresh Cloud',()=>loadCloudPresets()),
+            mapStyleButton('Sign Out',cloudSignOut)));
+          if(MS.cloudLoading)scroll.append(h('div',{className:'hint',text:'Loading cloud presets…'}));
+          else if(!MS.cloudLoaded)scroll.append(h('div',{className:'hint',text:'Cloud presets not loaded. Click Refresh Cloud to retry.'}));
+          else if(!MS.cloudPresets.length)scroll.append(h('div',{className:'hint',text:'No cloud presets yet. Set your view and click Save Style.'}));
+          if(MS.cloudLoaded)MS.cloudPresets.forEach(item=>card(item,true));
+          if(local.length)scroll.append(h('div',{className:'btnrow'},
+            mapStyleButton('Upload Local Presets to Cloud',uploadLocalPresets,'pri')));
+        }else{
+          scroll.append(h('div',{className:'hint',text:'Sign in on each device with the same account to access private synced presets. Use Create Account once; a confirmation email may be required.'}));
+          const email=h('input',{type:'email',placeholder:'Email address',autocomplete:'email',
+            style:'margin-bottom:7px;width:100%'});
+          const password=h('input',{type:'password',placeholder:'Password (8+ characters)',autocomplete:'current-password',
+            style:'margin-bottom:7px;width:100%'});
+          scroll.append(email,password,h('div',{className:'btnrow'},
+            mapStyleButton('Sign In',()=>cloudAccountAction('login',email.value.trim(),password.value),'pri'),
+            mapStyleButton('Create Account',()=>cloudAccountAction('signup',email.value.trim(),password.value))));
+        }
+        if(MS.cloudMessage)scroll.append(h('div',{className:'hint',style:'margin:8px 0',text:MS.cloudMessage}));
       }
+      scroll.append(h('div',{style:'font-size:15px;font-weight:700;margin:16px 0 7px',text:'This Browser — Local Presets'}));
+      if(!local.length)scroll.append(h('div',{className:'hint',text:'No browser-only presets saved.'}));
+      local.forEach(item=>card(item,false));
       scroll.scrollTop=sy;return;
     }
     if(b.type!=='mapbox'){
