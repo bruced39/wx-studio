@@ -33,3 +33,7 @@ This is a structured, non-video record of the user-supplied 93.4-second vertical
 
 ## Explicit non-goals
 The screenshot's toolbar includes many unrelated aviation/radar/weather icons. Only the Map Style icon is requested now. More top-level tools will be added later, one at a time. Do not reproduce the reference application's branding/icons verbatim.
+
+## Follow-up clarification (v0.9.4)
+
+Dark and Custom Color are **not** flat silhouettes. They must retain the entire Satellite map's vector detail (roads, labels, boundary and coastline polygons, islands, inland water), using a separately selected solid **land** color and **ocean/lake** color, and no satellite imagery raster. Keep the three cards legible/crisp; use @2x Mapbox thumbnail for satellite. The folded map button belongs **after Redo** in the top toolbar.
