@@ -130,8 +130,13 @@
       }
       if(cfg.broadcastBase==='satellite'&&+cfg.broadcastLandTintOpacity>0){const l={id:'wd-land-tint',type:'fill',source:'wd-world-tint',paint:{'fill-color':cfg.broadcastLandColor,'fill-opacity':Math.max(0,Math.min(.6,+cfg.broadcastLandTintOpacity))}};before?map.addLayer(l,before):map.addLayer(l);}
     }catch(e){}
-    try{if(+cfg.broadcastWaterTintOpacity>0){const l={id:'wd-water-tint',type:'fill',source,'source-layer':'water',paint:{'fill-color':cfg.broadcastWaterColor,'fill-opacity':cfg.broadcastBase==='satellite'?Math.max(0,Math.min(.8,+cfg.broadcastWaterTintOpacity)):1}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
-    try{if(cfg.broadcastShowCoastline!==false){const w=Math.max(.5,+cfg.broadcastCoastlineWidth||1.5),l={id:'wd-coastline-outline',type:'line',source,'source-layer':'water',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':cfg.broadcastCoastlineColor||'#050505','line-width':['interpolate',['linear'],['zoom'],3,w*.7,7,w,11,w*1.35]}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
+    // Dark / Custom Color should remain one continuous map color over land,
+    // ocean, lakes and rivers in both Mercator and Globe. User-configured
+    // satellite water colors and coastline lines remain unchanged.
+    if(cfg.broadcastBase==='satellite'){
+      try{if(+cfg.broadcastWaterTintOpacity>0){const l={id:'wd-water-tint',type:'fill',source,'source-layer':'water',paint:{'fill-color':cfg.broadcastWaterColor,'fill-opacity':Math.max(0,Math.min(.8,+cfg.broadcastWaterTintOpacity))}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
+      try{if(cfg.broadcastShowCoastline!==false){const w=Math.max(.5,+cfg.broadcastCoastlineWidth||1.5),l={id:'wd-coastline-outline',type:'line',source,'source-layer':'water',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':cfg.broadcastCoastlineColor||'#050505','line-width':['interpolate',['linear'],['zoom'],3,w*.7,7,w,11,w*1.35]}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
+    }
   }
   function installHillshade(map,cfg){
     try{if(map.getLayer('wd-terrain-hillshade'))map.removeLayer('wd-terrain-hillshade');}catch(e){}
@@ -194,7 +199,7 @@
     const layers=map.getStyle().layers||[], before=(layers.find(l=>l.type==='symbol')||{}).id;
     const add=l=>{try{before?map.addLayer(l,before):map.addLayer(l);}catch(e){}};
 
-    if(cfg.showWaterDepth){
+    if(cfg.broadcastBase==='satellite'&&cfg.showWaterDepth){
       try{
         if(!map.getSource('wd-bathymetry'))map.addSource('wd-bathymetry',{type:'vector',url:'mapbox://mapbox.mapbox-bathymetry-v2'});
         add({id:'wd-water-depth',type:'fill',source:'wd-bathymetry','source-layer':'depth',
@@ -204,7 +209,7 @@
       }catch(e){}
     }
 
-    if(cfg.showNationalParks){
+    if(cfg.broadcastBase==='satellite'&&cfg.showNationalParks){
       add({id:'wd-national-parks',type:'fill',source,'source-layer':'landuse_overlay',
         minzoom:Math.max(0,+cfg.nationalParkMinZoom||0),maxzoom:Math.max((+cfg.nationalParkMinZoom||0)+.01,+cfg.nationalParkMaxZoom||24),
         filter:['==',['get','class'],'national_park'],
@@ -254,7 +259,7 @@
     }
 
     try{if(map.getLayer('wd-waterways'))map.removeLayer('wd-waterways');}catch(e){}
-    if(cfg.waterwaysShow){
+    if(cfg.broadcastBase==='satellite'&&cfg.waterwaysShow){
       add({id:'wd-waterways',type:'line',source,'source-layer':'waterway',
         minzoom:Math.max(0,+cfg.waterwaysMinZoom||0),maxzoom:Math.max((+cfg.waterwaysMinZoom||0)+.01,+cfg.waterwaysMaxZoom||24),
         layout:{'line-join':'round','line-cap':'round'},
@@ -462,7 +467,7 @@
             if(vis&&shield){const d=Math.max(1,Math.min(5,+cfg.broadcastRoadShieldDensity||3)),sp=[900,700,520,350,220][d-1],sz=Math.max(.6,Math.min(2,+cfg.broadcastRoadShieldSize||1));try{map.setLayoutProperty(l.id,'symbol-spacing',sp);}catch(e){}try{map.setLayoutProperty(l.id,'icon-size',sz);}catch(e){}}
             else if(vis&&!shield){try{map.setLayoutProperty(l.id,'text-font',wdFontStack(cfg.broadcastLabelFont));}catch(e){}try{map.setPaintProperty(l.id,'text-color',cfg.broadcastLabelColor);}catch(e){}try{map.setPaintProperty(l.id,'text-halo-color',cfg.broadcastLabelHaloColor);}catch(e){}}
           }else if(poi)map.setLayoutProperty(l.id,'visibility',cfg.broadcastShowPOI?'visible':'none');
-          else if(natural)map.setLayoutProperty(l.id,'visibility',cfg.broadcastShowNaturalLabels?'visible':'none');
+          else if(natural)map.setLayoutProperty(l.id,'visibility',cfg.broadcastBase==='satellite'&&cfg.broadcastShowNaturalLabels?'visible':'none');
           else map.setLayoutProperty(l.id,'visibility','none');
         }else if(l.type==='line'){
           const road=sl==='road'||id.includes('road')||id.includes('street')||id.includes('motorway'),aeroway=sl==='aeroway'||id.includes('runway')||id.includes('taxiway')||id.includes('aeroway'),boundary=sl==='admin'||id.includes('boundary')||id.includes('admin');
@@ -474,6 +479,12 @@
             const color=country?cfg.broadcastCountryColor:county?cfg.broadcastCountyColor:cfg.broadcastStateColor,width=country?+cfg.broadcastCountryWidth:county?+cfg.broadcastCountyWidth:+cfg.broadcastStateWidth;
             map.setLayoutProperty(l.id,'visibility',vis?'visible':'none');if(vis){try{map.setPaintProperty(l.id,'line-color',color);}catch(e){}try{map.setPaintProperty(l.id,'line-width',Math.max(.5,width||1));}catch(e){}}
           }
+        }else if(cfg.broadcastBase!=='satellite'&&
+          ((l.type==='fill'&&(sl==='water'||sl==='waterway'||id.includes('water-fill')||id.includes('waterway-fill')))||
+           (l.type==='line'&&(sl==='waterway'||id.includes('waterway'))))){
+          // Hide stock Mapbox hydrographics in flat-color maps; restore
+          // naturally when the satellite Mapbox style is selected again.
+          try{map.setLayoutProperty(l.id,'visibility','none');}catch(e){}
         }else if((l.type==='fill'||l.type==='fill-extrusion')&&(sl==='building'||id.includes('building'))){
           try{map.setLayoutProperty(l.id,'visibility','none');}catch(e){}
         }else if(l.type==='fill'&&(sl==='aeroway'||id.includes('runway')||id.includes('taxiway')||id.includes('aeroway'))){
