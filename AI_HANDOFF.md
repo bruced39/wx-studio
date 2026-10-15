@@ -192,6 +192,7 @@ User reported that in v0.9.12, unchecking Show Zoom hid the zoom badge correctly
 - v0.9.14: added animated/static **Flurries** (`flurries`, snowflake generator `snow()` in `icons_hd.js`; replaces the original `flurries` entry in the library).
 - v0.9.15: added animated/static **Light Snow** (`light-snow`, new addition; no original id).
 - v0.9.16: added animated/static **Moderate Snow** (`moderate-snow`, new addition).
+- v0.9.17: the v0.9.16 "Moderate Snow" entry was renamed to **Snow** (`snow`, replaces the original `snow`); added animated/static **Heavy Snow** (`heavy-snow`, replaces the original).
 - Verified in headless Chromium: library renders both categories with no script errors; live look inside the user's browser still to confirm.
 
 ## Rules for alternating between ChatGPT and Claude
