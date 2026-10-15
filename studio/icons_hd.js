@@ -114,6 +114,7 @@
     { id: 'heavy-rain', k: 1.18, label: 'Heavy Rain', oy: 300, fn: (c, ph) => { rain(c, ph, P_HEAVY); cloudImg(c, 200, 232, ph); } },
     { id: 'heavy-rain-wind', k: 1.18, label: 'Heavy Rain & Wind', oy: 300, fn: (c, ph) => { windRain(c, ph); cloudImg(c, 200, 232, ph); } },
     { id: 'flurries', k: 1.18, label: 'Flurries', oy: 300, fn: (c, ph) => { snow(c, ph, { seed: 14, n: 5, s0: 10, s1: 10, r0: 6.5, r1: 2 }); cloudImg(c, 200, 232, ph); } },
+    { id: 'light-snow', k: 1.18, label: 'Light Snow', oy: 300, fn: (c, ph) => { snow(c, ph, { seed: 16363, n: 10, s0: 6, s1: 8, r0: 8.5, r1: 3.5 }); cloudImg(c, 200, 232, ph); } },
     { id: 'mostly-sunny-rain', label: 'Mostly Sunny/Rain', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({})); } },
     { id: 'mostly-sunny-showers', label: 'Mostly Sunny/Showers', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 })); } }
   ];

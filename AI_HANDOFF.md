@@ -190,6 +190,7 @@ User reported that in v0.9.12, unchecking Show Zoom hid the zoom badge correctly
 - Library now has **Animated** and **Static** categories (first in the list). Animated ids that match an original id (`sunny`, `partly-cloudy` = "Partly Sunny", `mostly-sunny`, `cloudy`, `rain`, `drizzle`, `heavy-rain`) replace the old icon of that name; new ids: `showers`, `heavy-rain-wind`, `mostly-sunny-rain`, `mostly-sunny-showers`. Static copies use id `<id>-static` and label "<name> (Static)". The 7-Day builder uses the same list, so animated icons are available there.
 - Only `studio/index.html` (two script tags) and the library hint text in `studio/ui.js` were touched in shared files. More icons will be appended to the `ICONS` array in `icons_hd.js` as the user approves them; originals not yet replaced still come from `icons.js`.
 - v0.9.14: added animated/static **Flurries** (`flurries`, snowflake generator `snow()` in `icons_hd.js`; replaces the original `flurries` entry in the library).
+- v0.9.15: added animated/static **Light Snow** (`light-snow`, new addition; no original id).
 - Verified in headless Chromium: library renders both categories with no script errors; live look inside the user's browser still to confirm.
 
 ## Rules for alternating between ChatGPT and Claude
