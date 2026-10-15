@@ -27,7 +27,7 @@
     overlayFireZones:false, overlayFireZonesColor:'#e17f30', overlayFireZonesLineType:'solid', overlayFireZonesWidth:1, overlayFireZonesOpacity:1, overlayFireZonesMinZoom:4, overlayFireZonesMaxZoom:16,
     overlayMarineZones:false, overlayMarineZonesColor:'#67a8df', overlayMarineZonesLineType:'solid', overlayMarineZonesWidth:1.2, overlayMarineZonesOpacity:1, overlayMarineZonesMinZoom:3, overlayMarineZonesMaxZoom:16,
     overlayTimeZones:false, overlayTimeZonesColor:'#209e84', overlayTimeZonesLineType:'solid', overlayTimeZonesWidth:1.2, overlayTimeZonesOpacity:1, overlayTimeZonesMinZoom:2, overlayTimeZonesMaxZoom:8,
-    overlayLatLonMode:'off', overlayLatLonColor:'#b9b9b9', overlayLatLonWidth:.75, overlayLatLonOpacity:.45, overlayLatLonAutoSpacing:true,
+    overlayLatLonMode:'off', overlayLatLonColor:'#b9b9b9', overlayLatLonWidth:.75, overlayLatLonOpacity:.45, overlayLatLonAutoSpacing:true, overlayLatLonManualSpacing:5,
     broadcastSatelliteSaturation:0, broadcastSatelliteContrast:.15,
     broadcastShowCities:true, broadcastUppercaseLabels:true, broadcastPlaceDensity:'towns', broadcastKeepMajorCities:true, broadcastMajorCityRank:9,
     broadcastLabelFont:'DIN Pro Bold', broadcastLabelDensity:'normal', broadcastLabelOpacity:1, broadcastLabelSpacing:1.25,
@@ -60,6 +60,15 @@
   MB.DEFAULTS = WD_DEFAULTS;
   MB.ensureConfig = bg => {
     bg = bg || {};
+    // Existing saved shows may store a degree interval in the old mode selector.
+    // Convert that to On and retain its fixed spacing when Auto spacing is disabled.
+    if(bg.overlayLatLonMode != null && !['off','on','ocean'].includes(String(bg.overlayLatLonMode))){
+      const legacy=+bg.overlayLatLonMode;
+      if([.5,1,2,5,10,15,30].includes(legacy)){
+        if(bg.overlayLatLonManualSpacing==null)bg.overlayLatLonManualSpacing=legacy;
+        bg.overlayLatLonMode='on';
+      }else bg.overlayLatLonMode='off';
+    }
     Object.keys(WD_DEFAULTS).forEach(k => { if (bg[k] == null) bg[k] = WD_DEFAULTS[k]; });
     if (!bg.mbStyle) bg.mbStyle = 'broadcast';
     return bg;
@@ -231,7 +240,7 @@
   const NWS_REF='https://mapservices.weather.noaa.gov/static/rest/services/nws_reference_maps/nws_reference_map/MapServer';
   const TZ_QUERY='https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/NTAD_Time_Zones/FeatureServer/0/query?where=1%3D1&outFields=zone&returnGeometry=true&outSR=4326&f=geojson';
   const emptyFC=()=>({type:'FeatureCollection',features:[]});
-  let overlayRefreshTimer=null, activeOverlayCfg=null;
+  let overlayRefreshTimer=null, activeOverlayCfg=null, oceanWaterTilesChanged=false;
 
   function lineDash(type){
     return type==='dashed'?[4,3]:type==='dotted'?[1,2]:[1,0];
@@ -269,13 +278,64 @@
   }
 
   function gridSpacing(cfg,map){
-    if(!cfg.overlayLatLonAutoSpacing&&cfg.overlayLatLonMode!=='off')return +cfg.overlayLatLonMode||5;
+    if(!cfg.overlayLatLonAutoSpacing)return Math.max(.5,Math.min(30,+cfg.overlayLatLonManualSpacing||5));
     const z=map.getZoom();
     if(z<2.5)return 30;if(z<4)return 15;if(z<5.5)return 10;if(z<7)return 5;if(z<8.5)return 2;if(z<10)return 1;return .5;
+  }
+  // Intersect a parallel or meridian with Mapbox Streets water polygons.
+  // Outer rings add water; interior rings (islands) remove it. This keeps
+  // ocean-mode lines off land without painting over the satellite basemap.
+  function waterGridIntervals(water,coord,meridian,low,high){
+    const events=[],axis=meridian?0:1,other=meridian?1:0;
+    for(const feat of water){
+      const geom=feat.geometry||{};
+      const polygons=geom.type==='Polygon'?[geom.coordinates]:geom.type==='MultiPolygon'?geom.coordinates:[];
+      for(const polygon of polygons)for(let ri=0;ri<polygon.length;ri++){
+        const ring=polygon[ri],cuts=[];
+        for(let j=0;j<ring.length;j++){
+          const a=ring[j],b=ring[(j+1)%ring.length],p=a[axis],q=b[axis];
+          if((p<=coord&&q>coord)||(q<=coord&&p>coord))
+            cuts.push(a[other]+(coord-p)*(b[other]-a[other])/(q-p));
+        }
+        cuts.sort((a,b)=>a-b);
+        const sign=ri===0?1:-1;
+        for(let i=0;i+1<cuts.length;i+=2)events.push([cuts[i],sign],[cuts[i+1],-sign]);
+      }
+    }
+    events.sort((a,b)=>a[0]-b[0]);
+    const intervals=[];let count=0,last=null;
+    for(const [at,delta] of events){
+      if(last!==null&&count>0){
+        const a=Math.max(low,last),b=Math.min(high,at);
+        if(b-a>1e-7)intervals.push([a,b]);
+      }
+      count+=delta;last=at;
+    }
+    return intervals;
   }
   function gridGeoJSON(cfg,map){
     if(cfg.overlayLatLonMode==='off')return emptyFC();
     const s=gridSpacing(cfg,map),features=[];
+    if(cfg.overlayLatLonMode==='ocean'){
+      // Query the loaded, viewport-local Streets water tiles. The source-data
+      // listener below recalculates if the tiles are still loading.
+      let water=[];
+      try{
+        const source=streetsSource(map);
+        if(source)water=map.querySourceFeatures(source,{sourceLayer:'water'});
+      }catch(e){}
+      if(!water.length)return emptyFC();
+      const bounds=map.getBounds(),
+        west=Math.max(-180,bounds.getWest()-s),east=Math.min(180,bounds.getEast()+s),
+        south=Math.max(-80,bounds.getSouth()-s),north=Math.min(80,bounds.getNorth()+s);
+      for(let lon=Math.ceil(west/s)*s;lon<=east;lon+=s)
+        for(const [a,b] of waterGridIntervals(water,lon,true,south,north))
+          features.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[lon,a],[lon,b]]}});
+      for(let lat=Math.ceil(south/s)*s;lat<=north;lat+=s)
+        for(const [a,b] of waterGridIntervals(water,lat,false,west,east))
+          features.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[a,lat],[b,lat]]}});
+      return {type:'FeatureCollection',features};
+    }
     for(let lon=Math.ceil(-180/s)*s;lon<=180;lon+=s)features.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[lon,-85],[lon,85]]}});
     for(let lat=Math.ceil(-80/s)*s;lat<=80;lat+=s)features.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[-180,lat],[180,lat]]}});
     return {type:'FeatureCollection',features};
@@ -333,7 +393,14 @@
         [cfg.overlayFireZones,'wd-nws-fire',9],[cfg.overlayMarineZones,'wd-nws-marine',5]
       ];
       tasks.forEach(([show,id,layer])=>{if(show&&map.getSource(id))fetchOverlayGeo(id,nwsGeoUrl(layer,map),map);});
-      if(cfg.overlayLatLonMode!=='off'&&map.getSource('wd-latlon-grid'))map.getSource('wd-latlon-grid').setData(gridGeoJSON(cfg,map));
+      if(cfg.overlayLatLonMode!=='off'&&map.getSource('wd-latlon-grid')){
+        map.getSource('wd-latlon-grid').setData(gridGeoJSON(cfg,map));
+        if(cfg.overlayLatLonMode==='ocean'&&oceanWaterTilesChanged){
+          oceanWaterTilesChanged=false;
+          MB.cache.clear();
+          if(MB.onUpdate&&!MB.interacting)MB.onUpdate();
+        }
+      }
       if(cfg.overlayDayNight&&map.getSource('wd-day-night'))map.getSource('wd-day-night').setData(nightGeoJSON());
     },220);
   }
@@ -448,6 +515,15 @@
         P = new g.mapboxgl.Map({ container: pe, style: { version: 8, sources: {}, layers: [] }, center: c0.c, zoom: c0.z, interactive: false, attributionControl: false, trackResize: false, projection: 'mercator' });
         D.on('error', e => { const m = e && e.error && e.error.message; if (m && /401|403|token|Unauthorized/i.test(m)) { MB.err = 'Mapbox rejected the token (' + m + ')'; MB.status = 'error'; } });
         D.on('moveend',()=>refreshDynamicOverlays(D));
+        D.on('sourcedata',e=>{
+          if(activeOverlayCfg?.overlayLatLonMode!=='ocean'||!e.isSourceLoaded)return;
+          try{
+            if(e.sourceId===streetsSource(D)){
+              oceanWaterTilesChanged=true;
+              refreshDynamicOverlays(D);
+            }
+          }catch(err){}
+        });
         await Promise.all([once(D, 'load'), once(P, 'load')]);
         curStyle = 'streets-v12'; curStyleKey='stock|streets-v12'; curCfgKey=null; curProj = 'mercator'; pProj = 'mercator'; MB.status = 'ready';
       } catch (e) { MB.status = 'error'; MB.err = e.message || String(e); initP = null; throw e; }
