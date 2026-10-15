@@ -574,7 +574,7 @@
         const minz=Math.max(0,Math.min(22,Number.isFinite(minZoom)?minZoom:0));
         const layer={id:'wd-admin-'+name,type:'line',source,'source-layer':'admin',
           minzoom:minz,maxzoom:24,
-          filter:['all',['==',['get','admin_level'],level],['!=',['get','maritime'],true]],
+          filter:['all',['==',['get','admin_level'],level],['!=',['get','maritime'],'true']],
           layout:{'line-cap':'round','line-join':'round','visibility':'visible'},
           paint:{'line-color':color||'#e0e4eb',
             'line-width':Math.max(.25,Math.min(8,+width||1)),
