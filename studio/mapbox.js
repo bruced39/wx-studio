@@ -14,7 +14,10 @@
   /* WXfusion Weather Director broadcast-map defaults. These extend Claude's
      Mapbox renderer without changing the studio's stage/layout/render pipeline. */
   const WD_DEFAULTS = {
-    broadcastBase:'satellite', atmosphere:'broadcast', terrain:false, terrainExaggeration:1,
+    broadcastBase:'satellite', broadcastDarkColor:'#151a21', broadcastCustomColor:'#18304a',
+    atmosphere:'broadcast', terrain:false, terrainExaggeration:1, globeAtmosphereEnabled:true, globeAtmosphereStrength:.1, globeStarsEnabled:true, globeStarIntensity:.6, globeBackgroundColor:'#000000',
+    broadcastSatelliteShadowLift:0, broadcastSatelliteHighlightCeiling:1,
+    waterwaysShow:true, waterwaysColor:'#a9dbec', waterwaysWidth:.7, waterwaysOpacity:1, waterwaysMinZoom:8, waterwaysMaxZoom:24,
     broadcastWaterColor:'#1d253a', broadcastLandColor:'#27452d', broadcastWaterTintOpacity:1, broadcastLandTintOpacity:.15,
     showWaterDepth:false, waterDepthColor:'#000000', waterDepthMinZoom:0, waterDepthMaxZoom:24,
     showNationalParks:false, nationalParkColor:'#252525', nationalParkMinZoom:0, nationalParkMaxZoom:24,
@@ -114,14 +117,19 @@
     return layer;
   }
   function installBaseTints(map,cfg,source){
-    ['wd-land-tint','wd-water-tint','wd-coastline-outline'].forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch{}});
+    ['wd-color-base','wd-land-tint','wd-water-tint','wd-coastline-outline'].forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch{}});
     if(!source)return;
     const layers=map.getStyle().layers||[],before=(layers.find(l=>l.type==='symbol')||{}).id;
     try{
       if(!map.getSource('wd-world-tint'))map.addSource('wd-world-tint',{type:'geojson',data:{type:'FeatureCollection',features:[{type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[[[-180,-85],[180,-85],[180,85],[-180,85],[-180,-85]]]}}]}});
-      if(+cfg.broadcastLandTintOpacity>0){const l={id:'wd-land-tint',type:'fill',source:'wd-world-tint',paint:{'fill-color':cfg.broadcastLandColor,'fill-opacity':Math.max(0,Math.min(.6,+cfg.broadcastLandTintOpacity))}};before?map.addLayer(l,before):map.addLayer(l);}
+      if(cfg.broadcastBase==='dark'||cfg.broadcastBase==='custom'){
+        const color=cfg.broadcastBase==='dark'?cfg.broadcastDarkColor:cfg.broadcastCustomColor;
+        const flat={id:'wd-color-base',type:'fill',source:'wd-world-tint',paint:{'fill-color':color||'#151a21','fill-opacity':1}};
+        before?map.addLayer(flat,before):map.addLayer(flat);
+      }
+      if(cfg.broadcastBase==='satellite'&&+cfg.broadcastLandTintOpacity>0){const l={id:'wd-land-tint',type:'fill',source:'wd-world-tint',paint:{'fill-color':cfg.broadcastLandColor,'fill-opacity':Math.max(0,Math.min(.6,+cfg.broadcastLandTintOpacity))}};before?map.addLayer(l,before):map.addLayer(l);}
     }catch(e){}
-    try{if(+cfg.broadcastWaterTintOpacity>0){const l={id:'wd-water-tint',type:'fill',source,'source-layer':'water',paint:{'fill-color':cfg.broadcastWaterColor,'fill-opacity':Math.max(0,Math.min(.8,+cfg.broadcastWaterTintOpacity))}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
+    try{if(+cfg.broadcastWaterTintOpacity>0){const l={id:'wd-water-tint',type:'fill',source,'source-layer':'water',paint:{'fill-color':cfg.broadcastWaterColor,'fill-opacity':cfg.broadcastBase==='satellite'?Math.max(0,Math.min(.8,+cfg.broadcastWaterTintOpacity)):1}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
     try{if(cfg.broadcastShowCoastline!==false){const w=Math.max(.5,+cfg.broadcastCoastlineWidth||1.5),l={id:'wd-coastline-outline',type:'line',source,'source-layer':'water',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':cfg.broadcastCoastlineColor||'#050505','line-width':['interpolate',['linear'],['zoom'],3,w*.7,7,w,11,w*1.35]}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
   }
   function applyTerrain(map,cfg){
@@ -228,6 +236,13 @@
       }
     }
 
+    try{if(map.getLayer('wd-waterways'))map.removeLayer('wd-waterways');}catch(e){}
+    if(cfg.waterwaysShow){
+      add({id:'wd-waterways',type:'line',source,'source-layer':'waterway',
+        minzoom:Math.max(0,+cfg.waterwaysMinZoom||0),maxzoom:Math.max((+cfg.waterwaysMinZoom||0)+.01,+cfg.waterwaysMaxZoom||24),
+        layout:{'line-join':'round','line-cap':'round'},
+        paint:{'line-color':cfg.waterwaysColor,'line-width':Math.max(.1,+cfg.waterwaysWidth||.7),'line-opacity':Math.max(0,Math.min(1,+cfg.waterwaysOpacity))}});
+    }
     if(cfg.airportRunwaysShow!==false){
       const minz=Math.max(0,+cfg.airportRunwaysMinZoom||0),maxz=Math.max(minz+.01,+cfg.airportRunwaysMaxZoom||24);
       add({id:'wd-airport-runways',type:'line',source,'source-layer':'aeroway',minzoom:minz,maxzoom:maxz,
@@ -449,6 +464,8 @@
         }else if(l.type==='raster'&&cfg.broadcastBase==='satellite'){
           try{map.setPaintProperty(l.id,'raster-saturation',+cfg.broadcastSatelliteSaturation||0);}catch(e){}
           try{map.setPaintProperty(l.id,'raster-contrast',+cfg.broadcastSatelliteContrast||0);}catch(e){}
+          try{map.setPaintProperty(l.id,'raster-brightness-min',Math.max(0,Math.min(1,+cfg.broadcastSatelliteShadowLift||0)));}catch(e){}
+          try{map.setPaintProperty(l.id,'raster-brightness-max',Math.max(.01,Math.min(1,+cfg.broadcastSatelliteHighlightCeiling||1)));}catch(e){}
         }
       }catch(e){}
     }
@@ -534,7 +551,18 @@
   MB.setToken = function (t) { ls.set('wx.mapbox.token', String(t || '').trim()); MB.reset(); };
   MB.setScale = function (s) { MB.scale = s; ls.set('wx.mapbox.scale', String(s)); MB.reset(); };
 
-  function fog(bg) { try { D.setFog(atmosphereFor(bg.mbStyle==='broadcast'?(bg.atmosphere||'broadcast'):(projOf(bg)==='globe'?'natural':'none'))); } catch (e) { /* ignore */ } }
+  function fog(bg) {
+    try{
+      if(bg.mbStyle==='broadcast'&&bg.globeAtmosphereEnabled===false){D.setFog(null);return;}
+      const fog=atmosphereFor(bg.mbStyle==='broadcast'?(bg.atmosphere||'broadcast'):(projOf(bg)==='globe'?'natural':'none'));
+      if(fog&&bg.mbStyle==='broadcast'){
+        fog['star-intensity']=bg.globeStarsEnabled===false?0:Math.max(0,Math.min(1,+bg.globeStarIntensity||0));
+        fog['horizon-blend']=Math.max(0,Math.min(.2,(+bg.globeAtmosphereStrength||0)*.3));
+        fog['space-color']=bg.globeBackgroundColor||'#000000';
+      }
+      D.setFog(fog);
+    }catch(e){}
+  }
   async function setup(bg) {
     MB.ensureConfig(bg);const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
     if(styleKey!==curStyleKey){D.setStyle('mapbox://styles/mapbox/'+st);await once(D,'style.load');curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;D.__wdOriginalZoomRanges={};}
