@@ -789,11 +789,17 @@
           return [((c.lng+180)%360+360)%360-180,Math.max(-85,Math.min(85,c.lat))];
       }catch(e){pKey=null;}
     }
-    // Fallback for Mercator if the offscreen projector isn't ready.
-    if(pr!=='mercator')return null;
+    // Fallback while the projector isn't ready, for both flat and globe
+    // maps. Globe is approximate here; the native pan above is precise.
     const world=512*Math.pow(2,k.z),rad=Math.PI/180,angle=k.b*rad;
     const east=Math.cos(angle)*dx-Math.sin(angle)*dy;
     const south=Math.sin(angle)*dx+Math.cos(angle)*dy;
+    if(pr==='globe'){
+      const cosLat=Math.max(.18,Math.cos(k.c[1]*rad));
+      const wrap=lon=>((lon+180)%360+360)%360-180;
+      return [wrap(k.c[0]-east*360/world/cosLat),
+        Math.max(-85,Math.min(85,k.c[1]+south*360/world))];
+    }
     const wrap=lon=>((lon+180)%360+360)%360-180;
     const lat=Math.max(-85,Math.min(85,k.c[1]));
     const y0=(1-Math.log(Math.tan(Math.PI/4+lat*rad/2))/Math.PI)/2;
