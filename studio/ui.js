@@ -397,12 +397,34 @@
         }
         p.append(mapAccordion('base','Weather Director Base',base,false));
 
-        p.append(mapAccordion('land','Land + Water',[
-          B('broadcastWaterColor','color',{label:'Water tint'}),
-          B('broadcastWaterTintOpacity','range',{label:'Water opacity',min:0,max:.8,step:.05}),
-          B('broadcastLandColor','color',{label:'Land tint'}),
-          B('broadcastLandTintOpacity','range',{label:'Land opacity',min:0,max:.6,step:.05})
-        ],false));
+        const landWater=[
+          B('broadcastWaterColor','color',{label:'Water color'}),
+          B('showWaterDepth','check',{label:'Show water depth',rerender:true})
+        ];
+        if(b.showWaterDepth){
+          landWater.push(B('waterDepthColor','color',{label:'Depth color'}));
+          landWater.push(zoomRangeRow(b,'Water depth','waterDepthMinZoom','waterDepthMaxZoom',{min:0,max:24,step:.5}));
+        }
+
+        const parkNodes=[B('showNationalParks','check',{label:'National parks',rerender:true})];
+        if(b.showNationalParks){
+          parkNodes.push(B('nationalParkColor','color',{label:'Color'}));
+          parkNodes.push(zoomRangeRow(b,'National parks','nationalParkMinZoom','nationalParkMaxZoom',{min:0,max:24,step:.5}));
+        }
+        landWater.push(mapAccordion('nationalParks','National Parks',parkNodes,false));
+
+        const buildingNodes=[
+          B('showBuildingFootprints','check',{label:'Building footprints',rerender:true})
+        ];
+        if(b.showBuildingFootprints)buildingNodes.push(B('buildingFootprintColor','color',{label:'Footprint color'}));
+        buildingNodes.push(B('show3DBuildings','check',{label:'3D buildings',rerender:true}));
+        if(b.show3DBuildings){
+          buildingNodes.push(B('buildingFootprintColor','color',{label:'3D color'}));
+          buildingNodes.push(B('building3DHeight','num',{label:'3D height',min:0,max:3,step:.1}));
+        }
+        landWater.push(mapAccordion('buildings','Buildings',buildingNodes,false));
+        landWater.push(h('div',{className:'hint',text:'Water depth uses Mapbox Bathymetry v2. National parks and buildings use Mapbox Streets data.'}));
+        p.append(mapAccordion('land','Land + Water',landWater,false));
 
         p.append(mapAccordion('labels','City + Town Labels',[
           B('broadcastShowCities','check',{label:'Show places'}),
