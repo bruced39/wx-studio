@@ -37,3 +37,7 @@ The screenshot's toolbar includes many unrelated aviation/radar/weather icons. O
 ## Follow-up clarification (v0.9.4)
 
 Dark and Custom Color are **not** flat silhouettes. They must retain the entire Satellite map's vector detail (roads, labels, boundary and coastline polygons, islands, inland water), using a separately selected solid **land** color and **ocean/lake** color, and no satellite imagery raster. Keep the three cards legible/crisp; use @2x Mapbox thumbnail for satellite. The folded map button belongs **after Redo** in the top toolbar.
+
+## Follow-up v0.9.5: flat map should resemble Aguacero's black broadcast maps
+
+The supplied screenshots show continent/island coastline outlines, state/country borders and place labels on a near-black solid map, plus county lines only if explicitly enabled starting at zoom 6.0. Hide rivers, inland lakes, roads, parks and other satellite-specific detail from Dark/Custom. Allow Ocean On/Off, Off sharing the land color, and On using the dedicated ocean color. Maintain full Satellite detail and undo/redo/map icon ordering. Map pan must work via left drag with Select tool; right drag rotates/tilts and wheel zooms.
