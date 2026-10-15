@@ -1,24 +1,26 @@
+> **ACTIVATION BLOCKED — SECURITY REVIEW REQUIRED.** Do NOT add a publishable key from the existing `wxfusion` Supabase project to Streamlit. Its five older public forecast tables lack RLS. Prefer a dedicated, isolated Supabase project for cloud presets; ask the project owner to approve its cost and organization first. Update this guide with the NEW project's URL afterward.
+
 # WX Studio Cloud Map Presets — Setup
 
-**Status:** the dedicated `public.wx_studio_map_presets` table has already been created in the connected **wxfusion** Supabase project and verified with row-level security (RLS). No forecast tables were changed.
+**Status:** An empty, RLS-protected table was created in the existing `wxfusion` project, but we are NOT activating it because other WXfusion forecast tables remain accessible to its anonymous API role. A separate Supabase project with this same schema is the recommended deployment target. No forecast tables were changed.
 
 ## One-time Streamlit secrets configuration
 
 Open the WX Studio application in Streamlit Community Cloud, go to **Manage app → Settings → Secrets** (wording can vary), and add:
 
 ```toml
-WX_SUPABASE_URL = "https://caszmwcapacaofvcrzli.supabase.co"
+WX_SUPABASE_URL = "https://YOUR_NEW_ISOLATED_PROJECT.supabase.co"
 WX_SUPABASE_PUBLISHABLE_KEY = "YOUR_REAL_SB_PUBLISHABLE_KEY"
 ```
 
-Find the value under **Supabase Dashboard → project `wxfusion` → Settings → API Keys → Publishable key**. Use only an `sb_publishable_` key (the application deliberately rejects legacy JWT keys to prevent accidentally exposing service-role credentials). **NEVER use a `service_role` or `sb_secret_` key.** Do not commit keys or passwords to GitHub or this file.
+Find the value under **Supabase Dashboard → your NEW dedicated WX Studio project → Settings → API Keys → Publishable key**. Use only an `sb_publishable_` key (the application deliberately rejects legacy JWT keys to prevent accidentally exposing service-role credentials). **NEVER use a `service_role` or `sb_secret_` key.** Do not commit keys or passwords to GitHub or this file.
 
 After saving Streamlit secrets and redeploying/rerunning the app, refresh WX Studio and open **Map Style → Saved Styles**.
 
 ## Using it
 
 1. Under **Cloud Presets**, create a cloud account with your email and a unique password, or sign in with an existing Supabase Auth account for this project.
-2. Depending on the project's authentication configuration, you may need to click a confirmation link sent to your email, return to WX Studio, then **Sign In**. This Supabase project is shared with WXfusion: **do not change its existing Auth Site URL** just for WX Studio, since other flows may depend on it. If email confirmation redirects need adjustment, review the existing settings and add the WX Studio URL to allowed redirect URLs without replacing the existing Site URL.
+2. Depending on the project's authentication configuration, you may need to click a confirmation link sent to your email, return to WX Studio, then **Sign In**. For a dedicated WX Studio Supabase project, set the Auth Site URL/allowed redirects to the WX Studio app after reviewing email confirmation behavior.
 3. Set up the map (center, zoom, pitch, bearing, colors, borders, overlays, etc.), and click **Save to Cloud**. Enter a preset name.
 4. On any device, open WX Studio, sign in using the same email/password, open **Saved Styles** and click **Load Preset**.
 5. Loading a preset changes the *current scene's* map view and settings only. You can then pan, zoom and edit the map without changing the stored preset. Objects/other scenes are preserved.
