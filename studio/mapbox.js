@@ -18,6 +18,7 @@
     atmosphere:'broadcast', terrain:false, terrainExaggeration:1, globeAtmosphereEnabled:true, globeAtmosphereStrength:.1, globeStarsEnabled:true, globeStarIntensity:.6, globeBackgroundColor:'#000000',
     broadcastSatelliteShadowLift:0, broadcastSatelliteHighlightCeiling:1,
     waterwaysShow:true, waterwaysColor:'#a9dbec', waterwaysWidth:.7, waterwaysOpacity:1, waterwaysMinZoom:8, waterwaysMaxZoom:24,
+    terrainHillshadeShow:false, terrainHillshadeIntensity:.2, terrainHillshadeShadow:'#000000', terrainHillshadeHighlight:'#ffffff', terrainHillshadeAccent:'#000000',
     broadcastWaterColor:'#1d253a', broadcastLandColor:'#27452d', broadcastWaterTintOpacity:1, broadcastLandTintOpacity:.15,
     showWaterDepth:false, waterDepthColor:'#000000', waterDepthMinZoom:0, waterDepthMaxZoom:24,
     showNationalParks:false, nationalParkColor:'#252525', nationalParkMinZoom:0, nationalParkMaxZoom:24,
@@ -131,6 +132,22 @@
     }catch(e){}
     try{if(+cfg.broadcastWaterTintOpacity>0){const l={id:'wd-water-tint',type:'fill',source,'source-layer':'water',paint:{'fill-color':cfg.broadcastWaterColor,'fill-opacity':cfg.broadcastBase==='satellite'?Math.max(0,Math.min(.8,+cfg.broadcastWaterTintOpacity)):1}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
     try{if(cfg.broadcastShowCoastline!==false){const w=Math.max(.5,+cfg.broadcastCoastlineWidth||1.5),l={id:'wd-coastline-outline',type:'line',source,'source-layer':'water',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':cfg.broadcastCoastlineColor||'#050505','line-width':['interpolate',['linear'],['zoom'],3,w*.7,7,w,11,w*1.35]}};before?map.addLayer(l,before):map.addLayer(l);}}catch(e){}
+  }
+  function installHillshade(map,cfg){
+    try{if(map.getLayer('wd-terrain-hillshade'))map.removeLayer('wd-terrain-hillshade');}catch(e){}
+    if(!cfg.terrainHillshadeShow)return;
+    try{
+      if(!map.getSource('wd-terrain-dem'))map.addSource('wd-terrain-dem',{type:'raster-dem',url:'mapbox://mapbox.mapbox-terrain-dem-v1',tileSize:512,maxzoom:14});
+      const firstSymbol=(map.getStyle().layers||[]).find(l=>l.type==='symbol')?.id;
+      const layer={id:'wd-terrain-hillshade',type:'hillshade',source:'wd-terrain-dem',
+        paint:{
+          'hillshade-exaggeration':Math.max(0,Math.min(1,+cfg.terrainHillshadeIntensity||0)),
+          'hillshade-shadow-color':cfg.terrainHillshadeShadow||'#000000',
+          'hillshade-highlight-color':cfg.terrainHillshadeHighlight||'#ffffff',
+          'hillshade-accent-color':cfg.terrainHillshadeAccent||'#000000'
+        }};
+      firstSymbol?map.addLayer(layer,firstSymbol):map.addLayer(layer);
+    }catch(e){console.warn('WX Studio hillshade',e);}
   }
   function applyTerrain(map,cfg){
     try{
@@ -469,7 +486,7 @@
         }
       }catch(e){}
     }
-    const source=streetsSource(map);installBaseTints(map,cfg,source);installLandWaterFeatures(map,cfg,source);installTransportation(map,cfg,source);installOverlays(map,cfg);
+    const source=streetsSource(map);installBaseTints(map,cfg,source);installHillshade(map,cfg);installLandWaterFeatures(map,cfg,source);installTransportation(map,cfg,source);installOverlays(map,cfg);
     ['wd-major-city-labels','wd-city-labels','wd-town-labels','wd-small-place-labels'].forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch{}});
     if(source&&cfg.broadcastShowCities!==false){
       const d=cfg.broadcastPlaceDensity||'towns',cityMin=Math.max(0,+cfg.broadcastCityMinZoom||3),add=l=>{try{map.addLayer(l);}catch(e){}};
