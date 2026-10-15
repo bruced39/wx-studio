@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.7` (`VERSION`).
+- **Last reviewed application version:** `0.9.8` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -121,6 +121,16 @@ User reported on Oct 15, 2026 that left-mouse panning still did not work after v
 - **Important:** Never dereference `cur()` during pre-show `buildTools()`; the v0.9.6 blank-screen fix remains. Do not replace saved user map settings with defaults other than explicitly selecting Satellite as requested.
 - Development is still pending full Aguacero label parity, further QA of clean coastline land source, and camera smoothness.
 
+## v0.9.8 — pan direction and named view+style presets (2026-10-15)
+
+- User confirmed v0.9.7 **pan motion was reversed**: dragging right sent the visible map left, and dragging up sent the visible map down. Fixed only the native Mapbox projector call: `P.panBy([-dx/s,-dy/s],{duration:0})`. The existing Mercator/globe mathematical fallback already moved the content with the cursor; its signs are unchanged. Tests simulated all four directions with the observed Mapbox center behavior.
+- The **Map Style > Saved Styles** section already had named, browser-local, style-only presets. New saves now include `camera:{c:[lon,lat],z,b,p}` from `E.viewAt(cur(),editT())` in addition to all Mapbox defaults/settings and projection. Name entered through prompt when clicking **Save Style**. The Saved Styles tab now shows a brief zoom/projection/base descriptor and **Load Preset** action; applying it restores both settings and camera in the current scene, clears prior camera animation `view2/camDur/camDelay`, and sets `S.editEnd=false`. Existing user-created weather objects and other scenes are not touched.
+- **Legacy saved styles without a camera are supported**: applying them changes only settings and leaves the current camera in place. Existing preset names remain, and saving a duplicate name asks to replace it. No migration/deletion of the browser storage key `wx.studio.mapStylePresets.v1`.
+- IMPORTANT: Presets currently live in **browser localStorage**. They are not saved to GitHub/cloud or embedded in downloaded `.wxshow.json` shows; changing browser/device or deleting site data could lose them. If cloud-synced preset library is wanted, build it as a separate feature later.
+- The separate **Save Default View** feature is unchanged; loading a preset does not automatically make it the default starting map. To use a preset as the default, load it and click Save Default View.
+- Focused V8 tests passed for named preset saving/restoration (including location, zoom, pitch, bearing, overlays, and projection), legacy style-only compatibility, and right/left/up/down pan directions. Full Streamlit + Firefox browser interactions still need the user's visual verification.
+- Do not regress v0.9.6 safe startup or v0.9.7 dedicated Pan Map tool. Next: user verifies drag direction and presets, then continue any remaining Aguacero parity work.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -145,4 +155,4 @@ User reported on Oct 15, 2026 that left-mouse panning still did not work after v
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.7 stages/publishes Pan Map native drag and Satellite startup using saved default camera. Pending user live validation of drag, camera defaults, and continued v0.9.5 flat-map coastline QA.
+**Status at handoff:** v0.9.8 corrects inverted Pan Map movement and saves/loads named camera+style presets, retaining legacy style-only presets. Awaiting deployed browser confirmation.
