@@ -14,7 +14,7 @@
   /* WXfusion Weather Director broadcast-map defaults. These extend Claude's
      Mapbox renderer without changing the studio's stage/layout/render pipeline. */
   const WD_DEFAULTS = {
-    broadcastBase:'satellite', broadcastDarkColor:'#151a21', broadcastCustomColor:'#18304a', broadcastOceanShow:true,
+    broadcastBase:'satellite', broadcastDarkColor:'#151a21', broadcastCustomColor:'#18304a', broadcastOceanShow:false,
     atmosphere:'broadcast', terrain:false, terrainExaggeration:1, globeAtmosphereEnabled:true, globeAtmosphereStrength:.1, globeStarsEnabled:true, globeStarIntensity:.6, globeBackgroundColor:'#000000',
     broadcastSatelliteShadowLift:0, broadcastSatelliteHighlightCeiling:1,
     waterwaysShow:true, waterwaysColor:'#a9dbec', waterwaysWidth:.7, waterwaysOpacity:1, waterwaysMinZoom:8, waterwaysMaxZoom:24,
@@ -555,7 +555,7 @@
     const source=streetsSource(map);installBaseTints(map,cfg,source);
     try{if(map.getLayer('wd-county-boundaries'))map.removeLayer('wd-county-boundaries');}catch(e){}
     if(source&&cfg.broadcastShowCountyBorders){
-      const minz=Math.max(0,Math.min(22,+cfg.broadcastCountyMinZoom||6));
+      const minz=Math.max(0,Math.min(22,cfg.broadcastCountyMinZoom==null?6:+cfg.broadcastCountyMinZoom));
       const layer={id:'wd-county-boundaries',type:'line',source,'source-layer':'admin',minzoom:minz,maxzoom:24,
         filter:['all',['==',['get','admin_level'],2],['!=',['get','maritime'],true]],
         layout:{'line-cap':'round','line-join':'round'},
@@ -769,6 +769,21 @@
   };
 
   /* ---- lng/lat <-> 1920x1080 screen pixels ---- */
+  // Stable, absolute pan calculation from the camera at pointer-down. Unlike
+  // applying tiny center offsets repeatedly, this remains predictable at
+  // low zoom and on a globe as tiles and labels are being redrawn.
+  MB.panByPixels = function(bg,startCam,dx,dy){
+    if(!P||MB.status!=='ready')return null;
+    const k=norm(startCam),s=MB.scale,pr=projOf(bg);
+    try{
+      if(pProj!==pr){P.setProjection(pr);pProj=pr;}
+      P.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
+      pKey=null; // E.xf must resynchronize projector after panning.
+      const q=P.unproject([(W/2-dx)/s,(H/2-dy)/s]);
+      if(!q||!Number.isFinite(q.lng)||!Number.isFinite(q.lat))return null;
+      return [((q.lng+180)%360+360)%360-180,Math.max(-85,Math.min(85,q.lat))];
+    }catch(e){return null;}
+  };
   MB.xf = function (bg, cam) {
     if (!P || MB.status !== 'ready') return null;
     const s = MB.scale, k = norm(cam), pr = projOf(bg), key = pr + '|' + k.c[0] + '|' + k.c[1] + '|' + k.z + '|' + k.b + '|' + k.p;
