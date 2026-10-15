@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.6` (`VERSION`).
+- **Last reviewed application version:** `0.9.7` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -109,6 +109,18 @@ On Oct 15, 2026 the user reported v0.9.5 loaded an empty black stage, empty left
 - v0.9.5 map changes are retained; still need live browser validation. Next ask user to refresh and confirm tools, scene panel and map return before further map changes.
 - This is a startup hotfix, not verification of third-party Natural Earth coastline loading or browser pan behavior.
 
+## v0.9.7 — Pan Map and Satellite startup default
+
+User reported on Oct 15, 2026 that left-mouse panning still did not work after v0.9.6 and the studio started in a non-Satellite map, ignoring the previously saved default camera.
+
+- Added **✋ Pan Map** to the left tools and select it by default after the Mapbox show is initialized. Left-drag moves the map even when weather objects cover the background; users may choose **⌖ Select** to edit graphics. Right-drag orbit and mouse wheel zoom retain previous behavior. Select still pans when clicking an empty map.
+- Replaced projector-based inverse-coordinate pan with native `P.panBy([dx/MB.scale,dy/MB.scale],{duration:0})`, starting from a fixed pointer-down camera, and retrieving `P.getCenter()`. Added mathematical pan fallbacks for Mercator and Globe if the off-screen projector is temporarily unavailable. Pan uses cumulative drag offsets from pointer-down, avoiding drift.
+- The startup map now uses **Satellite** and **the saved default map camera** (stored under `wx.studio.defaultMap.v1`) even if an autosaved show is restored. To protect existing user work, only the FIRST scene background is replaced by the saved default; all scene objects, subsequent scenes, and other settings in the show are retained. Saved camera zoom, center, bearing, pitch and overlays remain. If no saved-default entry exists in this browser, the autosaved map camera stays in place but Satellite becomes the active base.
+- New Show and Default View already use `defaultMapBg()`, which now opens saved defaults with Satellite. Saving a new default still records the map's current camera and settings; boot normalizes the base to Satellite.
+- **Tests:** JS parse, saved-default vs restored-session precedence with an in-memory localStorage mock, absence of a saved default, preservation of weather objects, null-show tool initialization, Pan method mocked against native Mapbox methods, Mercator and globe fallback. **Not tested in deployed browser:** real Firefox/Mapbox/Streamlit drag events, actual persisted localStorage entries on user's machine, simultaneous scene objects, Mapbox camera at high pitch. User to verify after redeploy.
+- **Important:** Never dereference `cur()` during pre-show `buildTools()`; the v0.9.6 blank-screen fix remains. Do not replace saved user map settings with defaults other than explicitly selecting Satellite as requested.
+- Development is still pending full Aguacero label parity, further QA of clean coastline land source, and camera smoothness.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -133,4 +145,4 @@ On Oct 15, 2026 the user reported v0.9.5 loaded an empty black stage, empty left
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.6 emergency startup fix restores safe initialization of Select tool; user must verify the deployed app boots. v0.9.5 map changes remain in place pending live QA.
+**Status at handoff:** v0.9.7 stages/publishes Pan Map native drag and Satellite startup using saved default camera. Pending user live validation of drag, camera defaults, and continued v0.9.5 flat-map coastline QA.
