@@ -775,9 +775,13 @@
     ],false));
     addGroup('City + Town Labels','Labels');
     scroll.append(mapAccordion('styleTerrain','Terrain',[
-      B('terrain','check',{label:'Show Terrain'}),
+      B('terrainHillshadeShow','check',{label:'Show Terrain / hillshade'}),
+      B('terrainHillshadeIntensity','range',{label:'Intensity (%)',min:0,max:1,step:.01}),
+      B('terrain','check',{label:'3D Terrain'}),
       B('terrainExaggeration','range',{label:'3D exaggeration (%)',min:0,max:3,step:.05}),
-      h('div',{className:'hint',text:'Mapbox terrain elevation follows the map when Show Terrain is enabled.'})
+      B('terrainHillshadeShadow','color',{label:'Shadow color'}),
+      B('terrainHillshadeHighlight','color',{label:'Highlight color'}),
+      B('terrainHillshadeAccent','color',{label:'Accent color'})
     ],false));
     addGroup('Map + Camera');
 
