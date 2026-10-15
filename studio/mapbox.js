@@ -32,7 +32,18 @@
     broadcastStateRoadMinZoom:5, broadcastStateRoadMaxZoom:24,
     broadcastOtherRoadMinZoom:7, broadcastOtherRoadMaxZoom:24,
     broadcastShowRoadShields:false, broadcastRoadShieldDensity:3, broadcastRoadShieldSize:1, broadcastRoadShieldMinZoom:7, broadcastRoadShieldMaxZoom:24,
-    broadcastRoadLabelMinZoom:3, broadcastRoadLabelMaxZoom:16
+    broadcastRoadLabelMinZoom:3, broadcastRoadLabelMaxZoom:16,
+
+    /* AguaceroWX-style transportation */
+    roadInterstateShow:true, roadInterstateColor:'#e5e5e5', roadInterstateWidth:2.2, roadInterstateOpacity:.75, roadInterstateOutline:true, roadInterstateOutlineColor:'#000000', roadInterstateOutlineWidth:.5, roadInterstateMinZoom:5, roadInterstateMaxZoom:22,
+    roadMajorShow:true, roadMajorColor:'#cacaca', roadMajorWidth:1.8, roadMajorOpacity:.75, roadMajorOutline:true, roadMajorOutlineColor:'#000000', roadMajorOutlineWidth:.5, roadMajorMinZoom:6, roadMajorMaxZoom:22,
+    roadStateShow:true, roadStateColor:'#a4a4a4', roadStateWidth:1.2, roadStateOpacity:.65, roadStateOutline:true, roadStateOutlineColor:'#000000', roadStateOutlineWidth:.3, roadStateMinZoom:7, roadStateMaxZoom:22,
+    roadCountyShow:true, roadCountyColor:'#7e7e7e', roadCountyWidth:.8, roadCountyOpacity:.55, roadCountyOutline:false, roadCountyOutlineColor:'#000000', roadCountyOutlineWidth:.3, roadCountyMinZoom:9.5, roadCountyMaxZoom:22,
+    roadLocalPavedShow:true, roadLocalPavedColor:'#888888', roadLocalPavedWidth:.7, roadLocalPavedOpacity:.45, roadLocalPavedOutline:false, roadLocalPavedOutlineColor:'#000000', roadLocalPavedOutlineWidth:.3, roadLocalPavedMinZoom:10.5, roadLocalPavedMaxZoom:22,
+    roadLocalUnpavedShow:true, roadLocalUnpavedColor:'#887d73', roadLocalUnpavedWidth:.5, roadLocalUnpavedOpacity:.40, roadLocalUnpavedOutline:false, roadLocalUnpavedOutlineColor:'#000000', roadLocalUnpavedOutlineWidth:.3, roadLocalUnpavedMinZoom:11.5, roadLocalUnpavedMaxZoom:22,
+    roadResidentialShow:true, roadResidentialColor:'#747474', roadResidentialWidth:.3, roadResidentialOpacity:.20, roadResidentialOutline:false, roadResidentialOutlineColor:'#000000', roadResidentialOutlineWidth:.3, roadResidentialMinZoom:13, roadResidentialMaxZoom:22,
+    roadServiceShow:true, roadServiceColor:'#5e5e5e', roadServiceWidth:.3, roadServiceOpacity:.30, roadServiceOutline:false, roadServiceOutlineColor:'#000000', roadServiceOutlineWidth:.3, roadServiceMinZoom:14, roadServiceMaxZoom:22,
+    airportRunwaysShow:true, airportRunwaysColor:'#b3b3b3', airportRunwaysWidth:.6, airportRunwaysMinZoom:0, airportRunwaysMaxZoom:24
   };
   MB.DEFAULTS = WD_DEFAULTS;
   MB.ensureConfig = bg => {
@@ -100,6 +111,66 @@
       }else if(map.setTerrain)map.setTerrain(null);
     }catch(e){}
   }
+
+  const UNPAVED_SURFACES=['unpaved','gravel','dirt','earth','ground','sand','grass','compacted','fine_gravel','pebblestone'];
+  const classMatch=vals=>['match',['get','class'],vals,true,false];
+  const surfaceIsUnpaved=()=>['match',['coalesce',['get','surface'],''],UNPAVED_SURFACES,true,false];
+
+  const TRANSPORT_SPECS=[
+    {id:'service',prefix:'roadService',classes:['service','minor','path']},
+    {id:'residential',prefix:'roadResidential',classes:['street','street_limited','pedestrian']},
+    {id:'local-unpaved',prefix:'roadLocalUnpaved',filter:['any',['all',classMatch(['tertiary','tertiary_link']),surfaceIsUnpaved()],classMatch(['track'])]},
+    {id:'local-paved',prefix:'roadLocalPaved',filter:['all',classMatch(['tertiary','tertiary_link']),['match',['coalesce',['get','surface'],''],UNPAVED_SURFACES,false,true]]},
+    {id:'county',prefix:'roadCounty',classes:['secondary','secondary_link']},
+    {id:'state',prefix:'roadState',classes:['primary','primary_link']},
+    {id:'major',prefix:'roadMajor',classes:['trunk','trunk_link']},
+    {id:'interstate',prefix:'roadInterstate',classes:['motorway','motorway_link']}
+  ];
+
+  function removeTransportationLayers(map){
+    const ids=[];
+    for(const s of TRANSPORT_SPECS){ids.push('wd-road-'+s.id+'-casing','wd-road-'+s.id);}
+    ids.push('wd-airport-runways');
+    ids.forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch(e){}});
+  }
+
+  function transportValue(cfg,prefix,suffix,fallback){
+    const v=cfg[prefix+suffix]; return v==null?fallback:v;
+  }
+
+  function installTransportation(map,cfg,source){
+    removeTransportationLayers(map);
+    if(!source)return;
+    const layers=map.getStyle().layers||[], before=(layers.find(l=>l.type==='symbol')||{}).id;
+    const add=l=>{try{before?map.addLayer(l,before):map.addLayer(l);}catch(e){}};
+
+    if(cfg.broadcastShowRoads!==false){
+      for(const spec of TRANSPORT_SPECS){
+        const p=spec.prefix, show=transportValue(cfg,p,'Show',true); if(!show)continue;
+        const width=Math.max(.05,+transportValue(cfg,p,'Width',1)||1), opacity=Math.max(0,Math.min(1,+transportValue(cfg,p,'Opacity',1))),
+          color=transportValue(cfg,p,'Color','#888888'), minz=Math.max(0,+transportValue(cfg,p,'MinZoom',0)||0), maxz=Math.max(minz+.01,+transportValue(cfg,p,'MaxZoom',22)||22),
+          filter=spec.filter||classMatch(spec.classes||[]);
+        const outline=!!transportValue(cfg,p,'Outline',false), ow=Math.max(0,+transportValue(cfg,p,'OutlineWidth',0)||0);
+        if(outline&&ow>0){
+          add({id:'wd-road-'+spec.id+'-casing',type:'line',source,'source-layer':'road',minzoom:minz,maxzoom:maxz,filter,
+            layout:{'line-cap':'round','line-join':'round'},
+            paint:{'line-color':transportValue(cfg,p,'OutlineColor','#000000'),'line-width':width+ow*2,'line-opacity':1}});
+        }
+        add({id:'wd-road-'+spec.id,type:'line',source,'source-layer':'road',minzoom:minz,maxzoom:maxz,filter,
+          layout:{'line-cap':'round','line-join':'round'},
+          paint:{'line-color':color,'line-width':width,'line-opacity':opacity}});
+      }
+    }
+
+    if(cfg.airportRunwaysShow!==false){
+      const minz=Math.max(0,+cfg.airportRunwaysMinZoom||0),maxz=Math.max(minz+.01,+cfg.airportRunwaysMaxZoom||24);
+      add({id:'wd-airport-runways',type:'line',source,'source-layer':'aeroway',minzoom:minz,maxzoom:maxz,
+        filter:['any',['==',['get','type'],'runway'],['==',['get','class'],'runway']],
+        layout:{'line-cap':'round','line-join':'round'},
+        paint:{'line-color':cfg.airportRunwaysColor||'#b3b3b3','line-width':Math.max(.05,+cfg.airportRunwaysWidth||.6),'line-opacity':1}});
+    }
+  }
+
   function addBroadcastCartography(map,cfg){
     if(!map||cfg.mbStyle!=='broadcast')return;
     const layers=map.getStyle().layers||[];
@@ -128,30 +199,24 @@
           else if(natural)map.setLayoutProperty(l.id,'visibility',cfg.broadcastShowNaturalLabels?'visible':'none');
           else map.setLayoutProperty(l.id,'visibility','none');
         }else if(l.type==='line'){
-          const road=sl==='road'||id.includes('road')||id.includes('street')||id.includes('motorway'),boundary=sl==='admin'||id.includes('boundary')||id.includes('admin');
-          if(road){
-            const vis=cfg.broadcastShowRoads!==false;map.setLayoutProperty(l.id,'visibility',vis?'visible':'none');
-            if(!map.__wdOriginalZoomRanges[l.id])map.__wdOriginalZoomRanges[l.id]={min:+l.minzoom||0,max:l.maxzoom==null?24:+l.maxzoom};
-            const zr=map.__wdOriginalZoomRanges[l.id],sig=(id+' '+JSON.stringify(l.filter||[])).toLowerCase(),tier=(sig.includes('motorway')||sig.includes('trunk')||sig.includes('freeway'))?'main':(sig.includes('primary')||sig.includes('secondary'))?'state':'other';
-            const min=tier==='main'?+cfg.broadcastMainRoadMinZoom:tier==='state'?+cfg.broadcastStateRoadMinZoom:+cfg.broadcastOtherRoadMinZoom;
-            const requestedMax=tier==='main'?+cfg.broadcastMainRoadMaxZoom:tier==='state'?+cfg.broadcastStateRoadMaxZoom:+cfg.broadcastOtherRoadMaxZoom;
-            const max=Math.min(zr.max,Math.max((min||0)+.5,requestedMax||24));
-            try{map.setLayerZoomRange(l.id,Math.max(zr.min,min||0),Math.max(Math.max(zr.min,min||0)+.01,max));}catch(e){}
-            if(vis){try{map.setPaintProperty(l.id,'line-color',cfg.broadcastRoadColor);}catch(e){}try{map.setPaintProperty(l.id,'line-opacity',Math.max(0,Math.min(1,+cfg.broadcastRoadOpacity)));}catch(e){}
-              const s=Math.max(.25,+cfg.broadcastRoadWidth||1);try{map.setPaintProperty(l.id,'line-width',['interpolate',['linear'],['zoom'],3,.8*s,5,1.2*s,7,1.8*s,9,2.8*s,11,4.2*s]);}catch(e){}}
+          const road=sl==='road'||id.includes('road')||id.includes('street')||id.includes('motorway'),aeroway=sl==='aeroway'||id.includes('runway')||id.includes('taxiway')||id.includes('aeroway'),boundary=sl==='admin'||id.includes('boundary')||id.includes('admin');
+          if(road||aeroway){
+            map.setLayoutProperty(l.id,'visibility','none');
           }else if(boundary){
             const country=id.includes('admin-0')||id.includes('country')||id.includes('national'),county=id.includes('admin-2')||id.includes('county');
             const vis=country?cfg.broadcastShowCountryBorders!==false:county?!!cfg.broadcastShowCountyBorders:cfg.broadcastShowStateBorders!==false;
             const color=country?cfg.broadcastCountryColor:county?cfg.broadcastCountyColor:cfg.broadcastStateColor,width=country?+cfg.broadcastCountryWidth:county?+cfg.broadcastCountyWidth:+cfg.broadcastStateWidth;
             map.setLayoutProperty(l.id,'visibility',vis?'visible':'none');if(vis){try{map.setPaintProperty(l.id,'line-color',color);}catch(e){}try{map.setPaintProperty(l.id,'line-width',Math.max(.5,width||1));}catch(e){}}
           }
+        }else if(l.type==='fill'&&(sl==='aeroway'||id.includes('runway')||id.includes('taxiway')||id.includes('aeroway'))){
+          try{map.setLayoutProperty(l.id,'visibility','none');}catch(e){}
         }else if(l.type==='raster'&&cfg.broadcastBase==='satellite'){
           try{map.setPaintProperty(l.id,'raster-saturation',+cfg.broadcastSatelliteSaturation||0);}catch(e){}
           try{map.setPaintProperty(l.id,'raster-contrast',+cfg.broadcastSatelliteContrast||0);}catch(e){}
         }
       }catch(e){}
     }
-    const source=streetsSource(map);installBaseTints(map,cfg,source);
+    const source=streetsSource(map);installBaseTints(map,cfg,source);installTransportation(map,cfg,source);
     ['wd-major-city-labels','wd-city-labels','wd-town-labels','wd-small-place-labels'].forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch{}});
     if(source&&cfg.broadcastShowCities!==false){
       const d=cfg.broadcastPlaceDensity||'towns',cityMin=Math.max(0,+cfg.broadcastCityMinZoom||3),add=l=>{try{map.addLayer(l);}catch(e){}};

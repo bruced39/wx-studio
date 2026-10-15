@@ -443,26 +443,60 @@
         }
         p.append(mapAccordion('boundaries','Boundaries',boundaries,false));
 
+        const roadStyle=(key,title,subtitle,prefix)=>{
+          const nodes=[
+            h('div',{className:'hint',text:subtitle}),
+            B(prefix+'Show','check',{label:'Enabled',rerender:true})
+          ];
+          if(b[prefix+'Show']!==false){
+            nodes.push(B(prefix+'Color','color',{label:'Color'}));
+            nodes.push(B(prefix+'Width','num',{label:'Width (px)',min:.05,max:8,step:.1}));
+            nodes.push(B(prefix+'Opacity','num',{label:'Opacity',min:0,max:1,step:.05}));
+            nodes.push(B(prefix+'Outline','check',{label:'Outline',rerender:true}));
+            if(b[prefix+'Outline']){
+              nodes.push(B(prefix+'OutlineColor','color',{label:'Outline color'}));
+              nodes.push(B(prefix+'OutlineWidth','num',{label:'Outline width',min:0,max:4,step:.1}));
+            }
+            nodes.push(zoomRangeRow(b,'Zoom range',prefix+'MinZoom',prefix+'MaxZoom',{min:0,max:24,step:.5}));
+          }
+          return mapAccordion(key,title,nodes,false);
+        };
+
         const roads=[
-          B('broadcastShowRoads','check',{label:'Show roads'}),
-          B('broadcastRoadColor','color',{label:'Road color'}),
-          B('broadcastRoadOpacity','num',{label:'Road opacity',min:0,max:1,step:.05}),
-          B('broadcastRoadWidth','num',{label:'Road width',min:.25,max:3,step:.05}),
-          zoomRangeRow(b,'Major roads','broadcastMainRoadMinZoom','broadcastMainRoadMaxZoom',{min:0,max:24,step:.5}),
-          zoomRangeRow(b,'State / primary','broadcastStateRoadMinZoom','broadcastStateRoadMaxZoom',{min:0,max:24,step:.5}),
-          zoomRangeRow(b,'Other roads','broadcastOtherRoadMinZoom','broadcastOtherRoadMaxZoom',{min:0,max:24,step:.5}),
-          B('broadcastShowRoadShields','check',{label:'Road shields',rerender:true})
+          B('broadcastShowRoads','check',{label:'Roads',rerender:true})
         ];
-        if(b.broadcastShowRoadShields){
-          roads.push(B('broadcastRoadShieldDensity','num',{label:'Shield density',min:1,max:5,step:1}));
-          roads.push(B('broadcastRoadShieldSize','num',{label:'Shield size',min:.6,max:2,step:.1}));
-          roads.push(zoomRangeRow(b,'Road shields','broadcastRoadShieldMinZoom','broadcastRoadShieldMaxZoom',{min:0,max:24,step:.5}));
+        if(b.broadcastShowRoads!==false){
+          roads.push(h('div',{className:'hint',text:'AguaceroWX road styling · exact colors, widths, opacities and zoom thresholds from your screenshots.'}));
+          roads.push(roadStyle('roadInterstate','Interstates','Motorway','roadInterstate'));
+          roads.push(roadStyle('roadMajor','Major Highways','Trunk','roadMajor'));
+          roads.push(roadStyle('roadState','State Highways','Primary','roadState'));
+          roads.push(roadStyle('roadCounty','County & Regional','Secondary','roadCounty'));
+          roads.push(roadStyle('roadLocalPaved','Local (Paved)','Tertiary paved','roadLocalPaved'));
+          roads.push(roadStyle('roadLocalUnpaved','Local (Unpaved)','Tertiary unpaved / track','roadLocalUnpaved'));
+          roads.push(roadStyle('roadResidential','Residential & Minor','Street','roadResidential'));
+          roads.push(roadStyle('roadService','Alleys & Service','Service / minor','roadService'));
+          roads.push(B('broadcastShowRoadShields','check',{label:'Road shields',rerender:true}));
+          if(b.broadcastShowRoadShields){
+            roads.push(B('broadcastRoadShieldDensity','num',{label:'Shield density',min:1,max:5,step:1}));
+            roads.push(B('broadcastRoadShieldSize','num',{label:'Shield size',min:.6,max:2,step:.1}));
+            roads.push(zoomRangeRow(b,'Road shields','broadcastRoadShieldMinZoom','broadcastRoadShieldMaxZoom',{min:0,max:24,step:.5}));
+          }
+          roads.push(B('broadcastShowRoadLabels','check',{label:'Road names',rerender:true}));
+          if(b.broadcastShowRoadLabels)roads.push(zoomRangeRow(b,'Road names','broadcastRoadLabelMinZoom','broadcastRoadLabelMaxZoom',{min:0,max:24,step:.5}));
         }
-        roads.push(B('broadcastShowRoadLabels','check',{label:'Road names',rerender:true}));
-        if(b.broadcastShowRoadLabels)roads.push(zoomRangeRow(b,'Road names','broadcastRoadLabelMinZoom','broadcastRoadLabelMaxZoom',{min:0,max:24,step:.5}));
+
+        const airportNodes=[
+          B('airportRunwaysShow','check',{label:'Airports',rerender:true})
+        ];
+        if(b.airportRunwaysShow!==false){
+          airportNodes.push(B('airportRunwaysColor','color',{label:'Runway color'}));
+          airportNodes.push(B('airportRunwaysWidth','num',{label:'Runway width',min:.05,max:8,step:.1}));
+          airportNodes.push(zoomRangeRow(b,'Airport runways','airportRunwaysMinZoom','airportRunwaysMaxZoom',{min:0,max:24,step:.5}));
+        }
+        roads.push(mapAccordion('airports','Airports',airportNodes,false));
         roads.push(B('broadcastShowPOI','check',{label:'POI labels'}));
         roads.push(B('broadcastShowNaturalLabels','check',{label:'Natural labels'}));
-        p.append(mapAccordion('roads','Roads',roads,false));
+        p.append(mapAccordion('roads','Transportation',roads,false));
       }
     }
 
