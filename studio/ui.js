@@ -298,7 +298,7 @@
     if (o && !d) { const so = E.toScreen(o, xf), hd = handles(so), b = hd.box; octx.strokeStyle = '#2f9bff'; octx.setLineDash([10, 7]); octx.strokeRect(b.x, b.y, b.w, b.h); octx.setLineDash([]); octx.fillStyle = '#fff'; octx.strokeStyle = '#2f9bff';
       if (hd.verts) hd.verts.forEach(v => { octx.beginPath(); octx.arc(v[0], v[1], 9, 0, 6.3); octx.fill(); octx.stroke(); });
       if (hd.resize) { octx.fillRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); octx.strokeRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); } }
-    if (sc.bg.type === 'mapbox' && sc.bg.showZoomBadge !== false) {
+    if (sc.bg.type === 'mapbox' && sc.bg.showZoomBadge === true) {
       const zv=E.viewAt(sc,editT()), txt='ZOOM '+Number(zv.z||0).toFixed(1), x=W-178, y=22, w=154, hh=44;
       octx.save(); E.rrect(octx,x,y,w,hh,8); octx.fillStyle='rgba(8,20,38,.88)'; octx.fill();
       octx.strokeStyle='rgba(100,180,255,.75)'; octx.lineWidth=2; octx.stroke();
@@ -483,19 +483,22 @@
           B('broadcastVillageMinZoom','range',{label:'Village min zoom',min:0,max:16,step:.5})
         ],false));
 
+        // All four boundary width sliders share ONE physical pixel scale.
+        // A thumb at the same position always means exactly the same width.
+        const bw={min:0.25,max:8,step:0.05};
         const boundaries=[
           B('broadcastShowCoastline','check',{label:'Coastline'}),
           B('broadcastCoastlineColor','color',{label:'Coastline color'}),
-          B('broadcastCoastlineWidth','range',{label:'Coastline width',min:.5,max:5,step:.25}),
+          B('broadcastCoastlineWidth','range',{label:'Coastline width (px)',...bw}),
           B('broadcastShowCountryBorders','check',{label:'Country borders'}),
           B('broadcastCountryColor','color',{label:'Country color'}),
-          B('broadcastCountryWidth','range',{label:'Country width',min:.5,max:5,step:.25}),
+          B('broadcastCountryWidth','range',{label:'Country width (px)',...bw}),
           B('broadcastShowStateBorders','check',{label:'State borders'}),
           B('broadcastStateColor','color',{label:'State color'}),
-          B('broadcastStateWidth','range',{label:'State width',min:.5,max:5,step:.25}),
+          B('broadcastStateWidth','range',{label:'State width (px)',...bw}),
           B('broadcastShowCountyBorders','check',{label:'County borders',rerender:true}),
           B('broadcastCountyColor','color',{label:'County color'}),
-          B('broadcastCountyWidth','range',{label:'County width (px)',min:.5,max:4,step:.25}),
+          B('broadcastCountyWidth','range',{label:'County width (px)',...bw}),
           B('broadcastCountyMinZoom','num',{label:'County min zoom',min:0,max:22,step:.5})
         ];
         p.append(mapAccordion('boundaries','Boundaries',boundaries,false));
@@ -945,7 +948,7 @@
     const proj=h('div',{className:'mapstyle-choices'});
     for(const [key,label] of [['mercator','Mercator'],['globe','Globe']])
       proj.append(mapStyleButton(label,()=>{b.proj=key;commit();renderPanels();},b.proj===key?'active':''));
-    scroll.append(proj,B('showZoomBadge','check',{label:'Show zoom'}));
+    scroll.append(proj,B('showZoomBadge','check',{label:'Show zoom',after:()=>drawOverlay()}));
     const extras=h('div',{className:'mapstyle-actions'},
       mapStyleButton('Mapbox Token / Quality…',mapboxSettings),
       mapStyleButton('Save Default View',saveCurrentMapDefault));
