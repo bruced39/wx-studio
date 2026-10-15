@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.13` (`VERSION`).
+- **Last reviewed application version:** `0.9.19` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -173,6 +173,16 @@ User reported that in v0.9.12, unchecking Show Zoom hid the zoom badge correctly
 - **Tests:** JavaScript parsing; mocked DOM/state camera changes from 6.8 → 7.3 → 9.55 with checkbox untouched, off/on behavior, scene change and playback state. Checked SVG/CSS and live render callback presence. Still requires user live Streamlit verification that zoom readout follows zoom input and doesn't obscure the map or intercept pointer events.
 - Preserves v0.9.12 border fixes, Pan Map, named cloud presets and all Claude v0.9.11 HD animated icon features. Do not regress or modify those.
 
+## v0.9.19 — ocean-only coastlines versus inland water outlines (2026-10-15)
+
+User reported satellite maps at regional zoom showed many unintended black irregular lines running through states. They were outlines around inland water features caused by `wd-coastline-outline` using the Mapbox Streets v8 `water` polygons (merged oceans, lakes, rivers and reservoirs). They asked to distinguish **Ocean & Island Coastlines** and **Inland Water Outlines**, with inland outlines **OFF by default**. This update implements that without losing ocean coasts or changing the satellite imagery/background.
+
+- `studio/mapbox.js` keeps existing `broadcastShowCoastline` / `broadcastCoastlineColor` / `broadcastCoastlineWidth` setting keys, but **replaces the old merged Streets `water` line**, for both satellite and flat-color maps. The new `wd-ocean-coastline` line uses Natural Earth `ne_10m_coastline.geojson` (continent and major-island ocean shorelines), and `wd-minor-island-coastline` uses `ne_10m_minor_islands_coastline.geojson` for small ocean islands. Both draw clean, solid, antialiased strokes with the user's existing coastline color/width. The old `wd-coastline-outline` and `wd-flat-coastline` layers are removed during restyling; the old Streets `water` outline is no longer created.
+- Added `broadcastInlandWaterOutlines:false`, `broadcastInlandWaterOutlineColor:'#050505'`, `broadcastInlandWaterOutlineWidth:1` defaults. If user opts IN, lazily load Natural Earth `ne_10m_lakes.geojson` and `ne_10m_rivers_lake_centerlines.geojson` to draw `wd-inland-lakes-outline` and `wd-inland-rivers-outline` independently of coastline outlines. On first load, empty GeoJSON placeholders are used, then the async fetched geometry is installed and map preview cache invalidated. Data requests and parsed geometry are cached across restyles. Standard satellite water tint and all unrelated Mapbox layers remain unchanged.
+- `studio/ui.js` **Map Style → Boundaries** controls are now **Ocean & island coastlines** (toggle), **Ocean coastline color**, **Ocean coastline width (px)**, then **Inland water outlines** (toggle, Off by default), **Inland outline color** and **Inland outline width (px)**, followed by the existing country/state/county controls. Both widths share the v0.9.12 common 0.25–8 px scale. Existing saved presets continue to work because original coastline keys are unchanged, and new keys use WD_DEFAULTS migration.
+- **Tests completed:** parsed both JS files; mocked map layer stack verified ocean+minor islands present and inland outlines absent by default, inland outlines added when requested, independent toggles, line width, old merged water line not recreated. **Not browser-tested:** runtime fetches of 10m Natural Earth geometry from public GitHub; line alignment against Mapbox imagery at high zoom; data download performance; Globe projection; live cloud preset loading. User must confirm in Streamlit before claiming final visual parity. The Natural Earth coastline is generalized, so it will not have the same sub-meter detail as Mapbox raster satellite at extreme zoom.
+- Preserved all concurrent Claude additions in **v0.9.14–v0.9.18** (snow, heavy snow, Blizzard and other animated/static weather icons); this patch updates only `studio/mapbox.js`, `studio/ui.js`, VERSION and this handoff, branching from Claude's main commit `6a8b363`. Do not inadvertently overwrite Claude commits or reset their app VERSION.
+
 ## Next work / QA priorities
 
 1. Open the deployed Studio and visually test the 0.9.0 Overlays panel using the user's AguaceroWX screenshots, with priority on exact settings hierarchy, label legibility and fine line styling.
@@ -209,4 +219,4 @@ User reported that in v0.9.12, unchecking Show Zoom hid the zoom badge correctly
 
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
-**Status at handoff:** v0.9.13 fixes the stuck zoom number with an independent, frame-synchronized SVG readout. Awaiting user live test; Claude's v0.9.11 changes, v0.9.12 border work, map presets and cloud storage preserved.
+**Status at handoff:** v0.9.19 separates ocean/island shorelines from optional inland-water outlines (off by default) on both Satellite and flat maps, preserving Claude's v0.9.18 code and cloud presets. Awaiting browser shoreline/line-performance QA.
