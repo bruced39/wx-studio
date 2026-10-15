@@ -499,9 +499,12 @@
         // A thumb at the same position always means exactly the same width.
         const bw={min:0.25,max:8,step:0.05};
         const boundaries=[
-          B('broadcastShowCoastline','check',{label:'Coastline'}),
-          B('broadcastCoastlineColor','color',{label:'Coastline color'}),
-          B('broadcastCoastlineWidth','range',{label:'Coastline width (px)',...bw}),
+          B('broadcastShowCoastline','check',{label:'Ocean & island coastlines'}),
+          B('broadcastCoastlineColor','color',{label:'Ocean coastline color'}),
+          B('broadcastCoastlineWidth','range',{label:'Ocean coastline width (px)',...bw}),
+          B('broadcastInlandWaterOutlines','check',{label:'Inland water outlines',rerender:true}),
+          B('broadcastInlandWaterOutlineColor','color',{label:'Inland outline color'}),
+          B('broadcastInlandWaterOutlineWidth','range',{label:'Inland outline width (px)',...bw}),
           B('broadcastShowCountryBorders','check',{label:'Country borders'}),
           B('broadcastCountryColor','color',{label:'Country color'}),
           B('broadcastCountryWidth','range',{label:'Country width (px)',...bw}),
