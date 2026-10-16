@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.42` (`VERSION`).
+- **Last reviewed application version:** `0.9.48` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -311,3 +311,15 @@ After publishing the v0.9.42 cloud Assets feature, identified a failed cloud lis
 
 ## v0.9.47 – No zip: Export image saves plain PNG/JPG; MP4 auto-saves (Claude)
 - Removed the zip writer. "All scenes" now saves one PNG/JPG per scene. Image and MP4 exports download automatically when finished (MP4 dialog keeps a "Download again" button). ui.js only; ChatGPT files untouched.
+
+## v0.9.48 — low-zoom city visibility and label zoom windows (ChatGPT, 2026-10-16)
+
+**Starting main:** Claude's v0.9.47 commit `2928f77`. User reported city/town place labels disappear when zooming out below ~6 with no matching min/max settings visible.
+
+- Mapbox Streets v8 `place_label` has a dynamic, zoom-dependent `filterrank` (0–5) and stable `symbolrank` (1–19). WX Studio's custom major-city fallback previously required **both** filterrank density and symbolrank prominence; when the data's filterrank changed at overview zoom, it could hide all cities. Now the fallback tests **symbolrank alone**, and the main city layer keeps a city when it meets either the configured density filter **or**, if Keep major cities is enabled, the stable major-city rank. Mapbox's original place-label layers remain hidden to avoid double labels.
+- Added `broadcastCityMaxZoom`, `broadcastTownMaxZoom`, `broadcastVillageMaxZoom` defaulting to 24 and `broadcastMajorCityMinZoom` defaulting to 0; the older city/town/village **minimum** settings/defaults are preserved. `Map Style → City + Town Labels` now shows min and max sliders for each city/town/village tier and a **Major-city minimum zoom** control with a brief hint. The major-city fallback fills 0 (or configured minimum) up to the city's configurable minimum with no gap; the regular city layer takes over above City min zoom.
+- Corrected `+cfg.broadcastCityMinZoom||3` to honor an explicitly selected min zoom of **0**. Added bound checks so min/max windows remain valid. Existing map preset settings and saved shows are merged with defaults via `MB.ensureConfig`, so the additional keys remain backward-compatible.
+- New `tests/map_city_labels.test.js` (Node built-in test runner) tests custom symbol-rank filters, coverage across zooms 0–20 when City min zoom = 6, user-disabled major labels, correct town/village zoom windows and presence of all controls.
+- Source syntax and mocked Mapbox label-layer/zoom tests passed. Live Mapbox tile data/layout collision behaviour still needs user confirmation, particularly at zoom 2–6.
+- **Claude overlap:** touched `studio/ui.js` with a targeted change limited to City + Town Labels controls. Did **not** alter Claude's v0.9.44–0.9.47 Layer Style, banners, templates, image export, `studio/engine.js`, `studio/index.html`, or cloud presets/assets. Changed `studio/mapbox.js`, `studio/ui.js`, `VERSION`, `AI_HANDOFF.md` and one file under `tests/`.
+
