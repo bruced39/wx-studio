@@ -259,3 +259,9 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.37 – Drop shadows on every object
 - New per-object `shadow` ({on, blur, dist, alpha}); default ON (blur 12, dist 7, opacity 0.6) for all types except `shape` and `image`. Composited in engine.js `drawShadowed` (object drawn to a scratch canvas then blitted with a canvas shadow, so existing glows still work). Object panel has a Shadow section (checkbox, Softness, Distance, Opacity). Files: studio/engine.js, studio/ui.js. No ChatGPT-modified files touched (mapbox.js untouched).
+
+## v0.9.38 – Assets tab: Banners & Graphics overlays (transparent PNGs)
+- "Backgrounds" tab renamed **Assets** with sub-tabs Backgrounds | Banners | Graphics. Banners/Graphics keep PNG transparency (IndexedDB `wxstudio-bgs`, records have `kind`; asset ids `ov_<id>`; autosave strips library assets that exist in IndexedDB and `reattachLib()` restores them on load; Save Show files still embed them).
+- Click an item (or drag it onto the stage) to add an image object at Upper left/right, Lower left/right, Top/Bottom center or Center (safe margin `S.show.safe`, default 48px), sizes Original/75/50/33/20% of frame width, entrance Automatic (from nearest edge) or fixed. Object panel for images has Position buttons. Image resize handle now keeps aspect ratio (Shift = free).
+- New entrance animations in engine.js: in-left/in-right/in-top/in-bottom (slide from the frame edge).
+- NOT done: cloud sync of banners (needs a new Supabase table/storage bucket + RLS; existing cloud presets are in cloud_presets.js by ChatGPT). Files: studio/engine.js, studio/ui.js, studio/index.html. mapbox.js / cloud_presets.js untouched.

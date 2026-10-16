@@ -17,7 +17,7 @@
   /* ---------- model ---------- */
   E.GRADS = { sky: ['#0e2f5e', '#2a73c2'], clear: ['#1d6fd6', '#8fd0ff'], dusk: ['#1b1a4a', '#d9694a'], storm: ['#171f2b', '#4b5566'], night: ['#050b1a', '#17294d'], sunrise: ['#2a3b7a', '#ffb36b'], graphite: ['#12161c', '#2b323c'] };
   E.TRANSITIONS = [['cut', 'Cut'], ['dissolve', 'Dissolve'], ['fade-black', 'Fade through black'], ['swipe', 'Broadcast swipe'], ['wipe-right', 'Wipe →'], ['wipe-left', 'Wipe ←'], ['wipe-up', 'Wipe ↑'], ['push-left', 'Push ←'], ['push-right', 'Push →'], ['zoom', 'Zoom through'], ['iris', 'Iris']];
-  E.ANIMS = [['none', 'None (appear)'], ['fade', 'Fade in'], ['pop', 'Pop in'], ['slide-up', 'Slide up'], ['slide-left', 'Slide from right'], ['zoom', 'Zoom in'], ['draw', 'Draw on (lines / fronts / H-L)']];
+  E.ANIMS = [['none', 'None (appear)'], ['fade', 'Fade in'], ['pop', 'Pop in'], ['slide-up', 'Slide up'], ['slide-left', 'Slide from right'], ['in-left', 'Slide in from left edge'], ['in-right', 'Slide in from right edge'], ['in-top', 'Slide in from top edge'], ['in-bottom', 'Slide in from bottom edge'], ['zoom', 'Zoom in'], ['draw', 'Draw on (lines / fronts / H-L)']];
 
   E.newScene = function (o) {
     o = o || {};
@@ -212,11 +212,15 @@
     if (mode === 'draw' && PATHY[o.type]) { const o2 = Object.assign({}, o, { animMode: 'draw' }); drawShadowed(c, o2, o0, t, ease.out(p), show); c.restore(); return; }
     const pe = mode === 'none' ? 1 : ease.out(p);
     if (mode === 'fade' || mode === 'draw') c.globalAlpha *= pe;
-    else if (mode === 'pop' || mode === 'zoom' || mode === 'slide-up' || mode === 'slide-left') {
+    else if (mode === 'pop' || mode === 'zoom' || mode === 'slide-up' || mode === 'slide-left' || mode === 'in-left' || mode === 'in-right' || mode === 'in-top' || mode === 'in-bottom') {
       const b = E.bounds(o), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
       if (mode === 'pop') { const s = 0.4 + 0.6 * ease.back(p); c.globalAlpha *= clamp(p * 3, 0, 1); c.translate(cx, cy); c.scale(s, s); c.translate(-cx, -cy); }
       else if (mode === 'zoom') { const s = 1.7 - 0.7 * pe; c.globalAlpha *= pe; c.translate(cx, cy); c.scale(s, s); c.translate(-cx, -cy); }
       else if (mode === 'slide-up') { c.globalAlpha *= pe; c.translate(0, (1 - pe) * 70); }
+      else if (mode === 'in-left') c.translate(-(1 - pe) * (b.x + b.w + 20), 0);
+      else if (mode === 'in-right') c.translate((1 - pe) * (W - b.x + 20), 0);
+      else if (mode === 'in-top') c.translate(0, -(1 - pe) * (b.y + b.h + 20));
+      else if (mode === 'in-bottom') c.translate(0, (1 - pe) * (H - b.y + 20));
       else { c.globalAlpha *= pe; c.translate((1 - pe) * 120, 0); }
     }
     drawShadowed(c, o, o0, t, 1, show); c.restore();

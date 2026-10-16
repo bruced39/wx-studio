@@ -26,7 +26,8 @@
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
   function ensureBG(sh) { if (g.WX_BGDEFAULT && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bgdefault')) { sh.assets = sh.assets || {}; sh.assets.bgdefault = g.WX_BGDEFAULT; } if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } }
-  function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show, (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT)) ? undefined : v)); } catch (e) { /* quota or blocked */ } }
+  const libHas = (k, v) => { try { return bgList.some(b => b.asset === k && b.data === v); } catch (e) { return false; } };
+  function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show, (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v)); } catch (e) { /* quota or blocked */ } }
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
   function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
   function builtInDefaultMapBg(){
@@ -223,7 +224,8 @@
     else if (d.k === 'vert' && o) { const k = (o.geo && xf.map) ? xf.k : 1, q = o.geo && xf.map ? xf.inv(p[0], p[1]) : p; o.pts[d.i] = [q[0], q[1]]; }
     else if (d.k === 'resize' && o) {
       const so = E.toScreen(o, xf), k = (o.geo && xf.map) ? (xf.kOf ? xf.kOf(o) : xf.k) : 1;
-      if (o.type === 'shape' || o.type === 'image') { o.w += (p[0] - d.last[0]) / k; o.h += (p[1] - d.last[1]) / k; if (o.type === 'image' && e.shiftKey === false) { /* free resize */ } }
+      if (o.type === 'image') { const r = (o.h / o.w) || 1; o.w = Math.max(20, o.w + (p[0] - d.last[0]) / k); if (e.shiftKey) o.h = Math.max(20, o.h + (p[1] - d.last[1]) / k); else o.h = o.w * r; }
+      else if (o.type === 'shape') { o.w += (p[0] - d.last[0]) / k; o.h += (p[1] - d.last[1]) / k; }
       else if (o.type === 'text') o.size = clamp(o.size + (p[1] - d.last[1]) * 0.6, 12, 400);
       else { const r0 = Math.hypot(d.last[0] - d.c[0], d.last[1] - d.c[1]) || 1, r1 = Math.hypot(p[0] - d.c[0], p[1] - d.c[1]); o.size = clamp((o.size || 100) * r1 / r0, 20, 900); }
       d.last = p;
@@ -246,7 +248,7 @@
     if (sc.bg.type === 'mapbox') { g.MB.setInteractive(true); const v = mapView(sc), ll = E.xf(sc, editT()).inv(p[0], p[1]); v.z = clamp(v.z - e.deltaY * 0.0025, 0, 20); const l2 = E.xf(sc, editT()).inv(p[0], p[1]); if (isFinite(ll[0]) && isFinite(l2[0])) v.c = [v.c[0] + ll[0] - l2[0], Math.max(-85, Math.min(85, v.c[1] + ll[1] - l2[1]))]; updateZoomBadge(); clearTimeout(ov._wt); ov._wt = setTimeout(()=>{g.MB.setInteractive(false);commit();},180); return; }
     const v = mapView(sc), k = W / v.w, P = [v.cx + (p[0] - W / 2) / k, v.cy + (p[1] - H / 2) / k]; v.w = clamp(v.w * Math.exp(e.deltaY * 0.0012), 18, 1700); const k2 = W / v.w; v.cx = P[0] - (p[0] - W / 2) / k2; v.cy = P[1] - (p[1] - H / 2) / k2; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); }, { passive: false });
   ['dragover', 'dragenter'].forEach(ev => stage.parentElement.addEventListener(ev, e => { e.preventDefault(); }));
-  stage.parentElement.addEventListener('drop', e => { e.preventDefault(); const ic = e.dataTransfer && e.dataTransfer.getData('application/x-wx-icon'); if (ic) { const p = pt(e); addObject('icon', { x: p[0], y: p[1], icon: ic }); setTool('select'); const o = selObj(); if (o) { S.oid = o.id; } refreshAll(); return; } if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], e.shiftKey ? 'bg' : 'obj'); });
+  stage.parentElement.addEventListener('drop', e => { e.preventDefault(); const ovid = e.dataTransfer && e.dataTransfer.getData('application/x-wx-overlay'); if (ovid) { const b = bgList.find(x => x.id === ovid); if (b) { addOverlay(b, pt(e)); setTool('select'); } return; } const ic = e.dataTransfer && e.dataTransfer.getData('application/x-wx-icon'); if (ic) { const p = pt(e); addObject('icon', { x: p[0], y: p[1], icon: ic }); setTool('select'); const o = selObj(); if (o) { S.oid = o.id; } refreshAll(); return; } if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], e.shiftKey ? 'bg' : 'obj'); });
   document.addEventListener('keydown', e => {
     const tg = e.target.tagName; if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
     const mod = e.ctrlKey || e.metaKey;
@@ -369,7 +371,7 @@
     if (T === 'line') { B('color', 'color'); B('width', 'range', { min: 2, max: 40 }); B('style', 'select', { options: [['solid', 'Solid'], ['dash', 'Dashed'], ['flow', 'Animated flow']] }); B('closed', 'check', { label: 'Closed loop' }); B('label', 'text', { label: 'Label (e.g. 1008)' }); }
     if (T === 'pen') { B('color', 'color'); B('width', 'range', { min: 2, max: 50 }); }
     if (T === 'shape') { B('shape', 'select', { options: [['rect', 'Rectangle'], ['round', 'Rounded'], ['ellipse', 'Oval']] }); B('fill', 'color'); B('opacity', 'range', { min: 0, max: 1, step: 0.05 }); B('stroke', 'color'); B('lw', 'range', { min: 0, max: 24, label: 'Outline' }); B('radius', 'range', { min: 0, max: 120 }); }
-    if (T === 'image') { B('opacity', 'range', { min: 0, max: 1, step: 0.05 }); p.append(h('div', { className: 'btnrow' }, h('button', { text: 'Fit to screen', on: { click: () => { const im = new Image(); im.onload = () => { const k = Math.min(W / im.width, H / im.height); Object.assign(o, { x: (W - im.width * k) / 2, y: (H - im.height * k) / 2, w: im.width * k, h: im.height * k, geo: false }); commit(); }; im.src = S.show.assets[o.asset]; } } }), h('button', { text: 'Use as background', on: { click: () => { cur().bg.type = 'image'; cur().bg.asset = o.asset; delObj(); } } }))); }
+    if (T === 'image') { B('opacity', 'range', { min: 0, max: 1, step: 0.05 }); p.append(h('div', { className: 'h', text: 'Position' }), h('div', { className: 'btnrow' }, POS.map(([k, l]) => h('button', { text: l, title: 'Move to ' + l.toLowerCase(), on: { click: () => { movePos(o, k); renderPanels(); } } })))); p.append(h('div', { className: 'btnrow' }, h('button', { text: 'Fit to screen', on: { click: () => { const im = new Image(); im.onload = () => { const k = Math.min(W / im.width, H / im.height); Object.assign(o, { x: (W - im.width * k) / 2, y: (H - im.height * k) / 2, w: im.width * k, h: im.height * k, geo: false }); commit(); }; im.src = S.show.assets[o.asset]; } } }), h('button', { text: 'Use as background', on: { click: () => { cur().bg.type = 'image'; cur().bg.asset = o.asset; delObj(); } } }))); }
     if (T === 'barb') { B('kt', 'range', { min: 0, max: 150, step: 5, label: 'Speed (kt)' }); B('dir', 'range', { min: 0, max: 359, label: 'From (deg)' }); B('size', 'range', { min: 40, max: 300 }); B('color', 'color'); }
     if (T === 'pin') { B('label', 'text'); B('value', 'text'); B('color', 'color'); }
     if (T === 'storm') { B('kind', 'select', { options: [['H', 'Hurricane'], ['TS', 'Tropical storm'], ['TD', 'Depression']] }); B('size', 'range', { min: 60, max: 500 }); B('label', 'text'); }
@@ -658,27 +660,60 @@
   const bgAll = () => builtinBgs().concat(bgList);
   function bgDB() { return new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-bgs', 1); r.onupgradeneeded = () => r.result.createObjectStore('bgs', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }); }
   function bgTx(mode, fn) { return bgDB().then(db => new Promise((res, rej) => { const t = db.transaction('bgs', mode), s = t.objectStore('bgs'), q = fn(s); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); })); }
-  function bgLoad() { bgTx('readonly', s => s.getAll()).then(a => { bgList = (a || []).sort((x, y) => x.t - y.t).map(b => Object.assign(b, { asset: 'bg_' + b.id })); if (S.tab === 'bgs') renderPanels(); }).catch(() => { }); }
-  function bgScale(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onerror = rej; r.onload = () => { const im = new Image(); im.onerror = rej; im.onload = () => { const k = Math.min(1, 1920 / im.width), cv = document.createElement('canvas'); cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k); cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); res(cv.toDataURL('image/jpeg', 0.88)); }; im.src = r.result; }; r.readAsDataURL(file); }); }
-  async function bgAdd(files) {
-    for (const f of files) { if (!/^image\//.test(f.type)) continue; try { const data = await bgScale(f), b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: f.name.replace(/\.[^.]+$/, ''), data, t: Date.now() }; b.asset = 'bg_' + b.id; bgList.push(b); await bgTx('readwrite', s => s.put({ id: b.id, name: b.name, data, t: b.t })).catch(() => toast('Saved for this session only (browser storage unavailable)')); } catch (e) { toast('Could not read ' + f.name); } }
+  function bgLoad() { bgTx('readonly', s => s.getAll()).then(a => { bgList = (a || []).sort((x, y) => x.t - y.t).map(b => Object.assign(b, { asset: (kindOf(b) === 'bg' ? 'bg_' : 'ov_') + b.id })); reattachLib(); if (S.tab === 'bgs') renderPanels(); }).catch(() => { }); }
+  function reattachLib() { if (!S.show) return; let ch = false; S.show.scenes.forEach(sc => [sc.bg && sc.bg.asset].concat(sc.objects.map(o => o.asset)).forEach(id => { if (id && !S.show.assets[id]) { const b = bgList.find(x => x.asset === id); if (b) { S.show.assets[id] = b.data; ch = true; } } })); if (ch) E.preload(S.show).then(() => thumbSoon(true)); }
+  function bgScale(file, keepAlpha) { return new Promise((res, rej) => { const r = new FileReader(); r.onerror = rej; r.onload = () => { const im = new Image(); im.onerror = rej; im.onload = () => { const k = Math.min(1, 2560 / im.width); if (keepAlpha && k === 1 && /png/i.test(file.type)) return res(r.result); const cv = document.createElement('canvas'); cv.width = Math.round(im.width * (keepAlpha ? k : Math.min(1, 1920 / im.width))); cv.height = Math.round(im.height * (cv.width / im.width)); cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); res(keepAlpha ? cv.toDataURL('image/png') : cv.toDataURL('image/jpeg', 0.88)); }; im.src = r.result; }; r.readAsDataURL(file); }); }
+  const kindOf = b => b.kind || 'bg';
+  async function bgAdd(files, kind) {
+    kind = kind || 'bg';
+    for (const f of files) { if (!/^image\//.test(f.type)) continue; try { const data = await bgScale(f, kind !== 'bg'), b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: f.name.replace(/\.[^.]+$/, ''), data, t: Date.now(), kind }; b.asset = (kind === 'bg' ? 'bg_' : 'ov_') + b.id; bgList.push(b); await bgTx('readwrite', s => s.put({ id: b.id, name: b.name, data, t: b.t, kind })).catch(() => toast('Saved for this session only (browser storage unavailable)')); } catch (e) { toast('Could not read ' + f.name); } }
     renderPanels();
   }
   function bgApply(b) { const sc = cur(); S.show.assets[b.asset] = b.data; sc.bg = Object.assign({}, sc.bg, { type: 'image', asset: b.asset, kenburns: false }); E.preload(S.show).then(() => thumbSoon(true)); commit(); refreshAll(); }
-  function bgDefaultSpec() { const b = bgAll().find(x => x.id === bgDefault) || builtinBgs()[0]; return b; }
+  function bgDefaultSpec() { const b = bgAll().filter(x => kindOf(x) === 'bg').find(x => x.id === bgDefault) || builtinBgs()[0]; return b; }
+
+  /* ---- overlays (banners / graphics with transparent backgrounds) ---- */
+  const SAFE = () => (S.show && S.show.safe != null ? S.show.safe : 48);
+  const POS = [['ul', 'Upper left'], ['ur', 'Upper right'], ['ll', 'Lower left'], ['lr', 'Lower right'], ['tc', 'Top center'], ['bc', 'Bottom center'], ['c', 'Center']];
+  const OV_SIZES = [['orig', 'Original size'], ['0.75', '75% of frame width'], ['0.5', '50% of frame width'], ['0.33', '33% of frame width'], ['0.2', '20% of frame width']];
+  const OV_ANIMS = [['in-left', 'Slide in from left'], ['in-right', 'Slide in from right'], ['in-top', 'Slide in from top'], ['in-bottom', 'Slide in from bottom'], ['fade', 'Fade in'], ['pop', 'Pop in'], ['none', 'None (appear)']];
+  let ovOpt = { pos: 'ul', size: 'orig', anim: 'auto' };
+  try { Object.assign(ovOpt, JSON.parse(localStorage.getItem('wx_ov_opt') || '{}')); } catch (e) { /* ignore */ }
+  const saveOvOpt = () => { try { localStorage.setItem('wx_ov_opt', JSON.stringify(ovOpt)); } catch (e) { /* ignore */ } };
+  function placeXY(pos, w, h) { const m = SAFE(); return { ul: [m, m], ur: [W - m - w, m], ll: [m, H - m - h], lr: [W - m - w, H - m - h], tc: [(W - w) / 2, m], bc: [(W - w) / 2, H - m - h], c: [(W - w) / 2, (H - h) / 2] }[pos] || [m, m]; }
+  function movePos(o, pos) { const b = E.bounds(o), xy = placeXY(pos, b.w, b.h); o.x += xy[0] - b.x; o.y += xy[1] - b.y; o.geo = false; commit(); }
+  function defaultInFor(pos) { return { ul: 'in-left', ll: 'in-left', ur: 'in-right', lr: 'in-right', tc: 'in-top', bc: 'in-bottom', c: 'fade' }[pos] || 'fade'; }
+  function addOverlay(b, at) {
+    S.show.assets[b.asset] = b.data;
+    const im = new Image(); im.onload = () => {
+      let w = im.width, h = im.height; const tgt = ovOpt.size === 'orig' ? Math.min(w, W - 2 * SAFE()) : W * (+ovOpt.size); const k = tgt / w; w *= k; h *= k; if (h > H - 2 * SAFE()) { const k2 = (H - 2 * SAFE()) / h; w *= k2; h *= k2; }
+      const xy = at ? [at[0] - w / 2, at[1] - h / 2] : placeXY(ovOpt.pos, w, h);
+      const ob = addObject('image', { asset: b.asset, x: xy[0], y: xy[1], w, h }, { noGeo: true }); ob.geo = false; ob.anim.in = ovOpt.anim === 'auto' ? defaultInFor(ovOpt.pos) : ovOpt.anim; ob.anim.dur = 0.7; E.preload(S.show).then(() => thumbSoon(true)); commit(); renderPanels();
+    }; im.src = b.data;
+  }
+  let assetTab = 'bg';
   function backgroundsPanel(p) {
-    p.append(h('div', { className: 'hint', text: 'Click a background to apply it to the current scene. The star marks the background used by + Scene. Uploads are saved in this browser (resized to 1920 px wide).' }));
-    const fi = h('input', { type: 'file', accept: 'image/*', multiple: true, style: 'display:none', onchange: e => { bgAdd([...e.target.files]); e.target.value = ''; } });
-    const dz = h('div', { id: 'drop', text: 'Upload backgrounds: click to browse or drop images here' }); dz.onclick = () => fi.click();
+    const tabs = h('div', { className: 'btnrow', style: 'margin-bottom:8px' }, [['bg', 'Backgrounds'], ['banner', 'Banners'], ['graphic', 'Graphics']].map(([k, l]) => h('button', { text: l, className: assetTab === k ? 'pri' : '', on: { click: () => { assetTab = k; renderPanels(); } } })));
+    p.append(tabs);
+    const kind = assetTab, isBg = kind === 'bg';
+    p.append(h('div', { className: 'hint', text: isBg ? 'Click a background to apply it to the current scene. The star marks the background used by + Scene. Uploads are saved in this browser (resized to 1920 px wide).' : 'Upload PNGs with transparent backgrounds (kept as-is). Click an item to add it to the current scene using the placement below, or drag it onto the stage. Afterwards move and resize it like any object.' }));
+    if (!isBg) {
+      const sel = (key, opts) => h('select', { on: { change: e => { ovOpt[key] = e.target.value; saveOvOpt(); } } }, opts.map(o => h('option', { value: o[0], text: o[1], selected: ovOpt[key] === o[0] })));
+      p.append(fld('Place at', sel('pos', POS)), fld('Size', sel('size', OV_SIZES)), fld('Entrance', sel('anim', [['auto', 'Automatic (from nearest edge)']].concat(OV_ANIMS))));
+    }
+    const fi = h('input', { type: 'file', accept: 'image/*', multiple: true, style: 'display:none', onchange: e => { bgAdd([...e.target.files], kind); e.target.value = ''; } });
+    const dz = h('div', { id: 'drop', text: isBg ? 'Upload backgrounds: click to browse or drop images here' : 'Upload ' + (kind === 'banner' ? 'banners' : 'graphics') + ': click to browse or drop PNGs here' }); dz.onclick = () => fi.click();
     ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('hov'); })); dz.addEventListener('dragleave', () => dz.classList.remove('hov'));
-    dz.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('hov'); bgAdd([...e.dataTransfer.files]); });
+    dz.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('hov'); bgAdd([...e.dataTransfer.files], kind); });
     p.append(fi, dz);
     const gr = h('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px' });
-    bgAll().forEach(b => {
-      const star = h('button', { text: bgDefault === b.id ? '★' : '☆', title: 'Use for new scenes (+ Scene)', style: 'position:absolute;top:4px;left:4px;padding:0 6px', on: { click: e => { e.stopPropagation(); bgDefault = b.id; try { localStorage.setItem(BGD_KEY, b.id); } catch (x) { /* ignore */ } renderPanels(); } } });
-      const kids = [h('img', { src: b.data, style: 'width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:6px;display:block' }), h('div', { className: 'hint', text: b.name, style: 'margin:2px 0 0' }), star];
-      if (!b.builtin) kids.push(h('button', { text: '✕', title: 'Delete', style: 'position:absolute;top:4px;right:4px;padding:0 6px', on: { click: e => { e.stopPropagation(); if (!confirm('Delete this saved background?')) return; bgList = bgList.filter(x => x !== b); if (bgDefault === b.id) bgDefault = 'sky'; bgTx('readwrite', s => s.delete(b.id)).catch(() => { }); renderPanels(); } } }));
-      gr.append(h('div', { style: 'position:relative;cursor:pointer', on: { click: () => bgApply(b) } }, kids));
+    const items = (isBg ? builtinBgs() : []).concat(bgList.filter(b => kindOf(b) === kind));
+    if (!items.length) p.append(h('div', { className: 'hint', text: 'Nothing saved here yet.' }));
+    items.forEach(b => {
+      const kids = [h('img', { src: b.data, draggable: false, style: 'width:100%;aspect-ratio:16/9;object-fit:' + (isBg ? 'cover' : 'contain') + ';border-radius:6px;display:block;' + (isBg ? '' : 'background:repeating-conic-gradient(#2a3342 0% 25%,#1c2430 0% 50%) 0 0/16px 16px') }), h('div', { className: 'hint', text: b.name, style: 'margin:2px 0 0' })];
+      if (isBg) kids.push(h('button', { text: bgDefault === b.id ? '★' : '☆', title: 'Use for new scenes (+ Scene)', style: 'position:absolute;top:4px;left:4px;padding:0 6px', on: { click: e => { e.stopPropagation(); bgDefault = b.id; try { localStorage.setItem(BGD_KEY, b.id); } catch (x) { /* ignore */ } renderPanels(); } } }));
+      if (!b.builtin) kids.push(h('button', { text: '✕', title: 'Delete', style: 'position:absolute;top:4px;right:4px;padding:0 6px', on: { click: e => { e.stopPropagation(); if (!confirm('Delete this saved item?')) return; bgList = bgList.filter(x => x !== b); if (bgDefault === b.id) bgDefault = 'sky'; bgTx('readwrite', s => s.delete(b.id)).catch(() => { }); renderPanels(); } } }));
+      gr.append(h('div', { style: 'position:relative;cursor:pointer', draggable: !isBg, ondragstart: ev => { ev.dataTransfer.setData('application/x-wx-overlay', b.id); ev.dataTransfer.effectAllowed = 'copy'; }, on: { click: () => (isBg ? bgApply(b) : addOverlay(b)) } }, kids));
     });
     p.append(gr);
   }
