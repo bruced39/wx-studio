@@ -102,6 +102,7 @@ test('Mapbox native settlement names remain visible at zoom 6.0; custom labels t
   getLayer(id){return this.layers.find(l=>l.id===id)},
   setLayoutProperty(id,key,val){this.getLayer(id).layout[key]=val},
   setPaintProperty(id,key,val){this.getLayer(id).paint[key]=val},
+  setFilter(id,filter){this.getLayer(id).filter=filter},
   setLayerZoomRange(id,min,max){assert.ok(max>min);Object.assign(this.getLayer(id),{minzoom:min,maxzoom:max})},
   removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},
   addLayer(l){this.layers.push(l)}};
@@ -129,15 +130,17 @@ test('Mapbox native settlement names remain visible at zoom 6.0; custom labels t
  assert.deepEqual(nativeCity.layout['text-font'],city.layout['text-font']);
  assert.deepEqual(nativeTown.layout['text-font'],town.layout['text-font']);
  assert.equal(nativeCity.layout['text-transform'],'none');
- assert.equal(nativeCity.layout['text-padding'],city.layout['text-padding']);
- assert.equal(nativeTown.layout['text-padding'],town.layout['text-padding']);
+ assert.equal(nativeCity.layout['text-padding'],2,'Overview must use its own tight gap');
+ assert.equal(nativeTown.layout['text-padding'],2,'Town overview gap');
+ assert.ok(city.layout['text-padding']>nativeCity.layout['text-padding'],'High zoom spacing remains independently configurable');
  for(const property of ['text-color','text-halo-color','text-halo-width','text-halo-blur','text-opacity']){
   assert.equal(nativeCity.paint[property],city.paint[property],property+' city');
   assert.equal(nativeTown.paint[property],town.paint[property],property+' town');
  }
  // Changing settings must update native and custom labels together,
  // without waiting until the user zooms through the 7.5 threshold.
- fn(map,{...custom,broadcastCitySize:33,broadcastTownSize:18,broadcastLabelFont:'DIN Pro Bold'});
+ fn(map,{...custom,broadcastCitySize:33,broadcastTownSize:18,broadcastLabelFont:'DIN Pro Bold',broadcastOverviewLabelGap:0});
+ assert.equal(get('settlement-major-label').layout['text-padding'],0,'Zero overview gap must work');
  assert.equal(get('settlement-major-label').layout['text-size'],33);
  assert.equal(get('settlement-minor-label').layout['text-size'],18);
  assert.equal(get('wd-city-labels').layout['text-size'],33);
@@ -151,4 +154,56 @@ test('Mapbox native settlement names remain visible at zoom 6.0; custom labels t
  fn(map,{...styles,broadcastPlaceDensity:'cities'});
  assert.equal(get('settlement-minor-label').layout.visibility,'none');
  assert.equal(get('settlement-major-label').layout.visibility,'visible');
+});
+
+test('overview city coverage increases eligible cities without ignoring collisions',()=>{
+ const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
+ const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
+  nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding);
+ const orig=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
+  minzoom:2,maxzoom:15,layout:{visibility:'visible'},paint:{}});
+ const map={layers:[orig('settlement-major-label'),orig('settlement-minor-label')],
+  getStyle(){return {layers:this.layers}},getLayer(id){return this.layers.find(l=>l.id===id)},
+  setLayoutProperty(id,key,value){this.getLayer(id).layout[key]=value},
+  setPaintProperty(id,key,value){this.getLayer(id).paint[key]=value},
+  setFilter(id,filter){this.getLayer(id).filter=filter},
+  setLayerZoomRange(id,min,max){Object.assign(this.getLayer(id),{minzoom:min,maxzoom:max})},
+  removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},
+  addLayer(l){this.layers.push(l)}};
+ const conf={...cfg,mbStyle:'broadcast',broadcastBase:'satellite',
+  broadcastCityMinZoom:3,broadcastCityMaxZoom:24,broadcastMajorCityRank:9,
+  broadcastOverviewLabelGap:2,broadcastLabelSpacing:1.25,
+  broadcastKeepMajorCities:true,broadcastShowCities:true};
+ const city=n=>({class:'settlement',type:'city',symbolrank:n,filterrank:5});
+ const ranks=[];
+ for(const [mode,expected] of [['standard',9],['more',14],['many',19]]){
+  fn(map,{...conf,broadcastOverviewCityDensity:mode});
+  const layer=map.getLayer('settlement-major-label');
+  ranks.push([mode,[5,9,10,14,15,19].filter(n=>evalFilter(layer.filter,city(n)))]);
+  assert.equal(evalFilter(layer.filter,city(expected)),true,mode+' cap');
+  if(expected<19)assert.equal(evalFilter(layer.filter,city(expected+1)),false,mode+' beyond cap');
+  assert.ok(layer.minzoom<=5&&layer.maxzoom>5,'native labels appear at zoom 5');
+  assert.equal(layer.layout['text-allow-overlap'],false,'no colliding text');
+  assert.equal(layer.layout['text-ignore-placement'],false,'do not block other labels');
+  assert.equal(layer.layout['text-padding'],2,'tight low zoom gap');
+  assert.deepEqual(layer.layout['symbol-sort-key'],['coalesce',['get','symbolrank'],99]);
+  assert.equal(layer.layout['text-size'],conf.broadcastCitySize,'preserve user city font size');
+ }
+ assert.deepEqual(ranks.map(x=>x[1].length),[2,4,6],'higher mode offers more candidates');
+ fn(map,{...conf,broadcastMajorCityRank:13,broadcastOverviewCityDensity:'more'});
+ assert.ok(evalFilter(map.getLayer('settlement-major-label').filter,city(18)),
+  'increasing Major-city rank actually applies to native low zoom');
+ assert.equal(evalFilter(map.getLayer('settlement-minor-label').filter,city(18)),false,
+  'minor layer must not duplicate cities');
+ fn(map,{...conf,broadcastOverviewCityDensity:'many',broadcastPlaceDensity:'cities'});
+ assert.equal(map.getLayer('settlement-minor-label').layout.visibility,'none');
+ fn(map,{...conf,broadcastShowCities:false});
+ assert.equal(map.getLayer('settlement-major-label').layout.visibility,'none');
+});
+test('overview controls have stored defaults and visible Settings inputs',()=>{
+ assert.ok(source.includes("broadcastOverviewCityDensity:'more'"));
+ assert.ok(source.includes('broadcastOverviewLabelGap:2'));
+ assert.ok(ui.includes("B('broadcastOverviewCityDensity','select'"));
+ assert.ok(ui.includes("B('broadcastOverviewLabelGap','range'"));
 });
