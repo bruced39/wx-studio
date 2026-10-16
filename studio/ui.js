@@ -1160,6 +1160,20 @@
     const b=cur().bg;
     if(!b||b.type!=='mapbox')return;
     const cfg=item.settings||{};
+    // An older cloud/browser style may only contain shared font/halo/color
+    // fields. Clear previously initialized per-tier values in the CURRENT
+    // scene before loading it so ensureConfig migrates the preset's actual
+    // original typography, not whatever was last selected in this scene.
+    const hasIndependentLabels=['City','Town','Village'].some(t=>
+      Object.prototype.hasOwnProperty.call(cfg,'broadcast'+t+'Font'));
+    if(!hasIndependentLabels){
+      for(const tier of ['City','Town','Village'])
+        for(const suffix of ['Enabled','Font','Color','HaloColor','HaloWidth',
+          'DensityPct','Population','TextBackground','BackgroundColor','DropShadow',
+          'Uppercase','Opacity','Spacing','Dots','DotColor','DotOutlineColor',
+          'DotOutlineWidth','DotSize','DotNameOffset','DotShadow'])
+          delete b['broadcast'+tier+suffix];
+    }
     for(const k of Object.keys(g.MB.DEFAULTS))if(Object.prototype.hasOwnProperty.call(cfg,k))b[k]=cfg[k];
     if(cfg.proj==='globe'||cfg.proj==='mercator')b.proj=cfg.proj;
     b.mbStyle='broadcast';g.MB.ensureConfig(b);
