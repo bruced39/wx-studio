@@ -271,3 +271,8 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.40 – Snap, guides, safe margin, align & distribute
 - Dragging an object snaps to the frame edges/center, the safe-margin box (`S.show.safe`, default 48 px) and other objects' edges/centers (12 px threshold, magenta snap lines; guide box shows while dragging). Scene panel > "Layout & Guides": Snap on/off, Show guides, Safe margin slider, and "Align & distribute…" dialog (tick objects; align to selection or frame; left/center/right/top/middle/bottom; distribute H/V). Toggles saved in localStorage `wx_snap`. Files: studio/ui.js. mapbox.js untouched.
+
+## v0.9.41 – Broadcast widgets, auto time text, templates
+- New object types (engine.js drawWidget, added from the toolbar "＋ Add…" dropdown): `citytemp` (name + value badge, optional color-by-temperature, pointer to the city; fields are plain strings so data can be bound later), `callout` (anchor dot + leader line + label/value box), `legend` (radar/precip/snow/temp gradient bar with left/right labels), `ticker` (scrolling alert band with tag). Text gained `auto` ('valid','datetime','date','clock' – evaluated at draw time) for the valid-time box, clock and date bugs, and `wrapW` (wrap width). 
+- "Templates…" button next to 7-Day…: Storm Update (red panels), Weather Headlines (glass panels), Storm Impacts (keeps the current map background; time frame box, red panels, valid time). Built by `E.buildTemplate`/`E.sceneFromTemplate`.
+- Files: studio/engine.js, studio/ui.js, studio/index.html. mapbox.js / cloud_presets.js untouched.

@@ -126,12 +126,22 @@
 
   /* ---------- tools ---------- */
   const TOOLS = [['pan', '✋ Pan Map'], ['select', '⌖ Select'], ['pen', '✎ Pen'], ['arrow', '➚ Arrow'], ['line', '〰 Isobar'], ['front', '▲ Front'], ['hl-H', 'H'], ['hl-L', 'L'], ['icon', '☀ Icon'], ['text', 'T Text'], ['rect', '▭ Box'], ['ellipse', '◯ Oval'], ['pin', '● Pin'], ['storm', '🌀 Storm'], ['barb', '⇶ Wind barb']];
+  function addWidget(k) {
+    if (!k) return; const m = SAFE(); let o;
+    if (k === 'citytemp') o = addObject('citytemp', {});
+    else if (k === 'callout') o = addObject('callout', {});
+    else if (k === 'legend') o = addObject('legend', { x: (W - 800) / 2, y: H - m - 190 }, { noGeo: true });
+    else if (k === 'ticker') o = addObject('ticker', { y: H - 76 - m / 2 }, { noGeo: true });
+    else { const pr = { valid: [W - m, H - m - 160, 'Valid'], clock: [W - m, m, 'Clock'], date: [W - m, m + 70, 'Date'] }[k]; o = addObject('text', { x: pr[0], y: pr[1], text: pr[2], auto: k, size: 44, align: 'right', weight: 800 }, { noGeo: true }); E.applyTextPreset(o, 'glass'); }
+    if (o) { o.anim.in = k === 'ticker' ? 'in-bottom' : 'fade'; setTool('select'); setTab('object'); commit(); renderPanels(); }
+  }
   function buildTools() {
     const t = $('#tools'); t.innerHTML = '';
     TOOLS.forEach(([id, label]) => t.append(h('button', { 'data-tool': id, text: label, title: id, on: { click: () => setTool(id) } })));
     t.append(h('span', { className: 'sep' }));
     const fs = h('select', { id: 'frontKind', title: 'Front type', on: { change: e => { S.opt.front = e.target.value; setTool('front'); } } }, g.Sym.FRONT_KINDS.map(k => h('option', { value: k[0], text: k[1] })));
-    t.append(fs, h('button', { text: 'Delete', className: 'dng', on: { click: delObj } }), h('button', { text: 'Duplicate', on: { click: dupObj } }));
+    const addSel = h('select', { title: 'Add a broadcast element', on: { change: e => { addWidget(e.target.value); e.target.value = ''; } } }, [['', '＋ Add…'], ['citytemp', 'City temperature'], ['callout', 'Callout pin'], ['legend', 'Legend / color bar'], ['valid', 'Valid-time box'], ['clock', 'Clock bug'], ['date', 'Date bug'], ['ticker', 'Alert ticker']].map(o => h('option', { value: o[0], text: o[1] })));
+    t.append(addSel, fs, h('button', { text: 'Delete', className: 'dng', on: { click: delObj } }), h('button', { text: 'Duplicate', on: { click: dupObj } }));
     setTool('select');
   }
   function setTool(id) {
@@ -371,9 +381,10 @@
     const o = selObj(); if (!o) { p.append(h('div', { className: 'hint', text: 'Select an object on the stage, or pick a tool below the stage and draw. Click a polyline object to edit its points; drag the square handle to resize.' })); return; }
     p.append(h('div', { className: 'h', text: o.type.toUpperCase() }));
     const T = o.type, B = (k, kind, op) => p.append(bind(o, k, kind, op));
-    if (T === 'text') { B('text', 'area', { label: 'Text' }); B('size', 'range', { min: 16, max: 300 }); B('color', 'color'); B('weight', 'select', { options: OPT.weight }); B('align', 'select', { options: OPT.align }); B('font', 'select', { options: [['display', 'Condensed'], ['sans', 'Standard']] }); B('box', 'check', { label: 'Background box', rerender: true });
+    if (T === 'text') { B('auto', 'select', { label: 'Auto text', rerender: true, options: [['', 'Manual'], ['valid', 'Valid time'], ['datetime', 'Date + time'], ['date', 'Date'], ['clock', 'Clock']] }); if (!o.auto) B('text', 'area', { label: 'Text' }); B('size', 'range', { min: 16, max: 300 }); B('color', 'color'); B('weight', 'select', { options: OPT.weight }); B('align', 'select', { options: OPT.align }); B('font', 'select', { options: [['display', 'Condensed'], ['sans', 'Standard']] }); B('box', 'check', { label: 'Background box', rerender: true });
       if (o.box) B('boxStyle', 'select', { label: 'Box style', options: [['plain', 'Plain tint'], ['titlebar', 'Title bar'], ['red', 'Red glossy'], ['glass', 'Glass']] });
       p.append(h('div', { className: 'h', text: 'Text style' }), fld('Preset', h('select', { on: { change: e => { E.applyTextPreset(o, e.target.value); commit(); renderPanels(); } } }, E.TEXT_PRESETS.map(x => h('option', { value: x[0], text: x[1] })))));
+      if (o.wrapW == null) o.wrapW = 0; B('wrapW', 'range', { min: 0, max: 1800, step: 20, label: 'Wrap width (0=off)' });
       if (o.strokeW == null) o.strokeW = 0; B('strokeW', 'range', { min: 0, max: 24, label: 'Outline' }); if (o.strokeW > 0) B('strokeColor', 'color', { label: 'Outline color' });
       if (!o.color2) o.color2 = o.color; B('grad', 'check', { label: 'Gradient fill', rerender: true }); if (o.grad || o.gloss) B('color2', 'color', { label: 'Bottom color' });
       B('gloss', 'check', { label: 'Gloss highlight', rerender: true }); }
@@ -389,6 +400,10 @@
     if (T === 'pin') { B('label', 'text'); B('value', 'text'); B('color', 'color'); }
     if (T === 'storm') { B('kind', 'select', { options: [['H', 'Hurricane'], ['TS', 'Tropical storm'], ['TD', 'Depression']] }); B('size', 'range', { min: 60, max: 500 }); B('label', 'text'); }
     if (T === 'pop') { B('value', 'text'); B('size', 'range', { min: 20, max: 120 }); }
+    if (T === 'citytemp') { B('name', 'text', { label: 'City' }); B('value', 'text', { label: 'Value' }); B('size', 'range', { min: 22, max: 90 }); B('colorByTemp', 'check', { label: 'Color by temperature' }); }
+    if (T === 'callout') { B('label', 'text'); B('value', 'text'); B('size', 'range', { min: 22, max: 80 }); B('dx', 'range', { min: -600, max: 600, label: 'Offset X' }); B('dy', 'range', { min: -500, max: 500, label: 'Offset Y' }); B('color', 'color', { label: 'Value color' }); }
+    if (T === 'legend') { B('kind', 'select', { options: E.LEGEND_KINDS }); B('title', 'text'); B('left', 'text', { label: 'Left label' }); B('right', 'text', { label: 'Right label' }); B('w', 'range', { min: 300, max: 1600, label: 'Width' }); B('h', 'range', { min: 30, max: 100, label: 'Height' }); }
+    if (T === 'ticker') { B('text', 'area', { label: 'Message' }); B('label', 'text', { label: 'Tag' }); B('speed', 'range', { min: 40, max: 400, label: 'Speed' }); B('h', 'range', { min: 50, max: 140, label: 'Height' }); }
     { const sh0 = E.shadowOf(o), sh = (o.shadow && typeof o.shadow === 'object') ? o.shadow : (o.shadow = sh0 || { on: false, blur: 12, dist: 7, alpha: 0.6 }); sh.on = !!sh0;
       p.append(h('div', { className: 'h', text: 'Shadow' }), bind(sh, 'on', 'check', { label: 'Drop shadow' }), bind(sh, 'blur', 'range', { min: 0, max: 40, label: 'Softness' }), bind(sh, 'dist', 'range', { min: 0, max: 40, label: 'Distance' }), bind(sh, 'alpha', 'range', { min: 0, max: 1, step: 0.05, label: 'Opacity' })); }
     p.append(h('div', { className: 'h', text: 'Animation' }));
@@ -1203,6 +1218,14 @@
     const body = h('div', {}, fld('Layout', lay), h('div', { className: 'row' }, h('label', { text: 'Title' }), h('input', { type: 'text', value: meta.title, oninput: e => meta.title = e.target.value })), h('div', { className: 'row' }, h('label', { text: 'Location' }), h('input', { type: 'text', value: meta.sub, oninput: e => meta.sub = e.target.value })), tb7, h('div', { className: 'hint', text: 'Pick the starting weekday in Day 1 and the rest follow in order. In the Billerica Weather layout days 6 and 7 show only icon, high and precip (greyed fields are unused); Sat/Sun get orange headers; tick Magenta to tint that day panel (semi-transparent, your background still shows through); lows sit under the gaps between days 1–5. Sample values – replace them with your forecast. Icons animate and each card slides in one after another. Everything stays editable afterwards.' }));
     modal('7-Day Forecast Builder', body, [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => { const dd = days.map(d => Object.assign({}, d, { hi: Math.round(d.hi), lo: Math.round(d.lo) })); let sc; if (meta.layout === 'bw' && g.WX_BG7DAY) { S.show.assets.bg7day = g.WX_BG7DAY; sc = E.sceneFromBW(dd, 'bg7day'); } else sc = E.sceneFrom7Day(dd, meta.title, meta.sub); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
   }
+  function templatesDialog() {
+    const st = { kind: 'storm', title: 'Storm Update', lines: ['Timing: latest track and timing may have slowed the start time for rainfall Fri/Sat AM', 'Change in the track and speed will shift where the heaviest rain occurs', 'Confidence remains high that southeastern MA, Cape & Islands will see the strongest wind gusts', 'Coastal flooding & beach erosion still remain along the coast. Power outages still possible.'] };
+    const defs = { storm: ['Storm Update', st.lines], headlines: ['Weather Headlines', ['Bands of rain move in Cape/Islands 11A-12P, Boston 2-3P, Billerica Fri eve', 'Peak wind & rain Friday night into Saturday', 'Widespread 2-4" rainfall in the east, locally higher coast/SE MA', 'Strongest winds Fri night-Sat 40-50+, power outages? 30-40 mph inland']], impacts: ['Storm Impacts', ['Friday-Monday', 'Rain 1.00" west', 'Heavy rain 2-4"+ east', 'Strong winds 40+ mph Cape']] };
+    const tIn = h('input', { type: 'text', value: st.title, oninput: e => st.title = e.target.value }), tas = [0, 1, 2, 3, 4].map(i => h('textarea', { rows: 2, value: st.lines[i] || '', oninput: e => { st.lines[i] = e.target.value; } }));
+    const kindSel = h('select', { onchange: e => { st.kind = e.target.value; const d = defs[st.kind]; st.title = d[0]; st.lines = d[1].slice(); tIn.value = st.title; tas.forEach((t, i) => { t.value = st.lines[i] || ''; }); } }, E.TEMPLATES.map(t => h('option', { value: t[0], text: t[1] })));
+    modal('Scene templates', h('div', {}, fld('Template', kindSel), fld('Title', tIn), h('div', { className: 'hint', text: st.kind === 'impacts' ? 'Impacts: first line is the time frame (lower left); the next lines become red panels. It keeps the current scene background (your map).' : 'One line per panel (up to 5). Text is capitalized automatically. Everything stays editable afterwards.' }), ...tas.map(t => fld('', t, true))),
+      [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => { const bg = st.kind === 'impacts' ? JSON.parse(JSON.stringify(cur().bg)) : null; if (!bg && g.WX_BGDEFAULT) S.show.assets.bgdefault = g.WX_BGDEFAULT; const sc = E.sceneFromTemplate(st.kind, { title: st.title, lines: st.lines, safe: SAFE() }, bg); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
+  }
   function mapboxSettings() {
     const tok = h('input', { type: 'password', value: g.MB.token(), placeholder: 'pk.eyJ1…', style: 'width:100%' }), sc = h('select', {}, [['1', 'Native / sharp (recommended)'], ['1.25', 'Slightly larger labels'], ['1.5', 'Large labels'], ['2', 'Extra large labels']].map(o => h('option', { value: o[0], text: o[1], selected: +o[0] === g.MB.scale })));
     const body = h('div', {}, h('div', { className: 'hint', text: 'Create a free account at mapbox.com, copy your default public token (it starts with pk.) and paste it here. It is stored only in this browser. Keep the page tab visible while exporting a Mapbox video.' }), fld('Public token', tok), fld('Label size', sc), h('div', { className: 'hint', id: 'mbstat', text: g.MB.status === 'error' ? 'Status: ' + g.MB.err : 'Status: ' + g.MB.status }));
@@ -1210,7 +1233,7 @@
       if (t && S.show.scenes.some(x => x.bg.type === 'map') && confirm('Switch your existing basic-map scenes to Mapbox?')) S.show.scenes.forEach(x => { if (x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; } });
       g.MB.init().then(() => toast('Mapbox ready')).catch(e => toast(e.message)).then(() => { commit(); refreshAll(); }); } } })]);
   }
-  $('#b7').onclick = sevenDay;
+  $('#b7').onclick = sevenDay; $('#bTpl').onclick = templatesDialog;
   async function exportDialog() {
     const ac = new AbortController(), bar = h('i'), msg = h('div', { className: 'hint', text: '' }), res = h('div');
     const size = h('select', {}, [['1920x1080', '1920×1080 (Full HD)'], ['1280x720', '1280×720 (smaller file)']].map(o => h('option', { value: o[0], text: o[1] }))), br = h('select', {}, [['10', 'Standard quality (10 Mbps)'], ['16', 'High quality (16 Mbps)'], ['6', 'Small file (6 Mbps)']].map(o => h('option', { value: o[0], text: o[1] })));

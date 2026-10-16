@@ -47,7 +47,11 @@
       barb: { x: 960, y: 540, kt: 15, dir: 270, size: 90, color: '#ffffff' },
       pin: { x: 960, y: 540, label: 'Billerica', value: '54°', color: '#ffd23f' },
       storm: { x: 960, y: 540, size: 160, kind: 'H', label: '' },
-      pop: { x: 960, y: 540, size: 44, value: '30%' }
+      pop: { x: 960, y: 540, size: 44, value: '30%' },
+      citytemp: { x: 960, y: 540, size: 40, name: 'Boston', value: '54°', colorByTemp: true },
+      callout: { x: 960, y: 540, dx: 170, dy: -130, size: 36, label: 'Billerica', value: '54°', color: '#ffd23f' },
+      legend: { x: 560, y: 940, w: 800, h: 46, kind: 'radar', title: '', left: 'LIGHT', right: 'HEAVY' },
+      ticker: { x: 0, y: 960, w: 1920, h: 76, text: 'WIND ADVISORY FOR EASTERN MASSACHUSETTS UNTIL 6 AM SATURDAY', label: 'ALERT', speed: 140, color: '#c01010' }
     };
     return Object.assign(base, JSON.parse(JSON.stringify(D[type] || {})), props || {});
   };
@@ -121,8 +125,9 @@
   const mctx = (typeof document !== 'undefined') ? document.createElement('canvas').getContext('2d') : null;
   function fontFor(o) { return `${o.weight || 700} ${o.size || 40}px ${o.font === 'sans' ? SANS : FONT()}`; }
   function textMetrics(o) {
-    const lines = String(o.text == null ? '' : o.text).split('\n'); mctx.font = fontFor(o);
-    const w = Math.max(10, ...lines.map(l => mctx.measureText(l).width)), lh = o.size * 1.15;
+    let lines = String(autoText(o)).split('\n'); mctx.font = fontFor(o);
+    if (o.wrapW > 0) { const out = []; lines.forEach(ln => { let cur = ''; ln.split(/\s+/).forEach(wd => { const t2 = cur ? cur + ' ' + wd : wd; if (cur && mctx.measureText(t2).width > o.wrapW) { out.push(cur); cur = wd; } else cur = t2; }); out.push(cur); }); lines = out; }
+    const w = o.wrapW > 0 ? o.wrapW : Math.max(10, ...lines.map(l => mctx.measureText(l).width)), lh = o.size * 1.15;
     return { lines, w, h: lines.length * lh, lh };
   }
   function mixHex(a, b, t) { const pa = hexRGB(a), pb = hexRGB(b); return 'rgb(' + [0, 1, 2].map(i => Math.round(pa[i] + (pb[i] - pa[i]) * t)).join(',') + ')'; }
@@ -148,6 +153,57 @@
     const P = { plain: {}, titlebar: { box: true, boxStyle: 'titlebar', color: '#0b2a5e', weight: 800 }, red: { box: true, boxStyle: 'red', color: '#ffffff', weight: 800 }, glass: { box: true, boxStyle: 'glass', color: '#ffffff', weight: 800 }, outline: { color: '#ffffff', strokeW: Math.max(3, o.size * 0.06), strokeColor: '#0a1a33', weight: 800 }, gold: { color: '#ffe27a', color2: '#d98a00', grad: true, gloss: true, strokeW: Math.max(2, o.size * 0.04), strokeColor: '#4a2a00', weight: 800 }, chrome: { color: '#f4f8ff', color2: '#7f93b0', grad: true, gloss: true, strokeW: Math.max(2, o.size * 0.04), strokeColor: '#0a1a33', weight: 800 } };
     if (P[k]) Object.assign(o, base, P[k]);
   };
+  /* ---------- data-driven / broadcast widgets ---------- */
+  function autoText(o) {
+    if (!o.auto) return o.text == null ? '' : o.text;
+    const d = new Date(), P = {}; try { new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short' }).formatToParts(d).forEach(x => { P[x.type] = x.value; }); } catch (e) { return String(o.text || ''); }
+    const tm = P.hour + ':' + P.minute + (P.dayPeriod || '').replace(/\s/g, ''), tz = P.timeZoneName || '';
+    if (o.auto === 'valid') return 'Valid: ' + P.weekday + ' ' + tm + ' ' + tz;
+    if (o.auto === 'date') return P.weekday + ' ' + P.month + ' ' + P.day;
+    if (o.auto === 'clock') return tm + ' ' + tz;
+    if (o.auto === 'datetime') return P.weekday + ' ' + P.month + ' ' + P.day + '  ' + tm + ' ' + tz;
+    return String(o.text || '');
+  }
+  const mctx2 = document.createElement('canvas').getContext('2d');
+  function cityLayout(o) { const sz = o.size || 40; mctx2.font = `800 ${sz}px ${FONT()}`; const vw = mctx2.measureText(o.value || '').width; mctx2.font = `800 ${sz * 0.78}px ${FONT()}`; const nw = o.name ? mctx2.measureText(o.name).width : 0; const bw = vw + sz * 0.8, bh = sz * 1.25, nh = o.name ? sz * 0.95 : 0; return { w: Math.max(bw, nw) + 8, h: bh + nh + sz * 0.38, bw, bh, nh, sz }; }
+  function calloutLayout(o) { const sz = o.size || 36; mctx2.font = `700 ${sz}px ${FONT()}`; const lw = o.label ? mctx2.measureText(o.label).width : 0; mctx2.font = `800 ${sz * 1.15}px ${FONT()}`; const vw = o.value ? mctx2.measureText(o.value).width : 0; const bw = lw + vw + (o.label && o.value ? sz * 1.1 : sz * 0.8), bh = sz * 1.6; const bx = o.x + (o.dx || 0) - (o.dx < 0 ? bw : 0), by = o.y + (o.dy || 0) - bh / 2; return { bx, by, bw, bh, lw, vw }; }
+  const LEGENDS = { radar: [[0, '#00e676'], [0.2, '#0a9a3a'], [0.38, '#ffee00'], [0.55, '#ff9a00'], [0.7, '#e60000'], [0.85, '#ff33cc'], [1, '#ffffff']], precip: [[0, '#ffffff'], [0.2, '#9fd6ff'], [0.45, '#2f8bff'], [0.7, '#6a2bd8'], [1, '#ff2fd0']], snow: [[0, '#d8f0ff'], [0.35, '#6fb7ff'], [0.7, '#2a56d8'], [1, '#a02bd8']], temp: [[0, '#9b6bff'], [0.2, '#4aa3ff'], [0.4, '#6fd3ff'], [0.55, '#6fe3b0'], [0.7, '#ffe066'], [0.85, '#ffa63d'], [1, '#ff5a3d']] };
+  E.LEGEND_KINDS = [['radar', 'Radar (light → heavy)'], ['precip', 'Precipitation'], ['snow', 'Snowfall'], ['temp', 'Temperature']];
+  function drawWidget(c, o, t) {
+    if (o.type === 'citytemp') {
+      const L = cityLayout(o), sz = L.sz, bx = o.x - L.bw / 2, by = o.y - L.h + L.nh;
+      c.save(); c.textAlign = 'center'; c.textBaseline = 'middle';
+      if (o.name) { c.font = `800 ${sz * 0.78}px ${FONT()}`; c.lineJoin = 'round'; c.lineWidth = sz * 0.2; c.strokeStyle = 'rgba(5,15,35,0.9)'; c.strokeText(o.name, o.x, by - sz * 0.42); c.fillStyle = '#fff'; c.fillText(o.name, o.x, by - sz * 0.42); }
+      const num = parseFloat(String(o.value).replace(/[^0-9.\-]/g, '')), col = o.colorByTemp && isFinite(num) ? E.tempColor(num) : '#1f4fd8', dark = o.colorByTemp && isFinite(num);
+      c.beginPath(); c.moveTo(o.x - sz * 0.18, by + L.bh - 1); c.lineTo(o.x, o.y); c.lineTo(o.x + sz * 0.18, by + L.bh - 1); c.closePath(); c.fillStyle = col; c.fill();
+      const gr = c.createLinearGradient(0, by, 0, by + L.bh); gr.addColorStop(0, col); gr.addColorStop(1, mixHex(col, '#000000', 0.35)); c.fillStyle = gr; rrect(c, bx, by, L.bw, L.bh, sz * 0.28); c.fill(); c.lineWidth = Math.max(2, sz * 0.07); c.strokeStyle = '#fff'; c.stroke();
+      c.font = `800 ${sz}px ${FONT()}`; c.fillStyle = dark ? '#06152e' : '#fff'; c.fillText(o.value || '', o.x, by + L.bh / 2 + sz * 0.04); c.restore(); return;
+    }
+    if (o.type === 'callout') {
+      const L = calloutLayout(o), sz = o.size || 36; c.save();
+      const ax = L.bx + (o.dx < 0 ? L.bw : 0), ay = L.by + L.bh / 2; c.strokeStyle = '#fff'; c.lineWidth = Math.max(3, sz * 0.09); c.lineCap = 'round'; c.beginPath(); c.moveTo(o.x, o.y); c.lineTo(ax, ay); c.stroke();
+      const gr = c.createLinearGradient(0, L.by, 0, L.by + L.bh); gr.addColorStop(0, '#2a5fc4'); gr.addColorStop(1, '#0b2a66'); c.fillStyle = gr; rrect(c, L.bx, L.by, L.bw, L.bh, sz * 0.22); c.fill(); c.lineWidth = 3; c.strokeStyle = '#fff'; c.stroke();
+      c.textBaseline = 'middle'; c.textAlign = 'left'; let tx = L.bx + sz * 0.4; if (o.label) { c.font = `700 ${sz}px ${FONT()}`; c.fillStyle = '#fff'; c.fillText(o.label, tx, L.by + L.bh / 2 + 2); tx += L.lw + sz * 0.3; } if (o.value) { c.font = `800 ${sz * 1.15}px ${FONT()}`; c.fillStyle = o.color || '#ffd23f'; c.fillText(o.value, tx, L.by + L.bh / 2 + 2); }
+      c.beginPath(); c.arc(o.x, o.y, Math.max(8, sz * 0.26), 0, TAU); c.fillStyle = o.color || '#ffd23f'; c.fill(); c.lineWidth = 3; c.strokeStyle = '#fff'; c.stroke(); c.restore(); return;
+    }
+    if (o.type === 'legend') {
+      const b = E.bounds(o), st = LEGENDS[o.kind] || LEGENDS.radar; c.save();
+      c.fillStyle = 'rgba(25,70,150,0.88)'; rrect(c, b.x, b.y, b.w, b.h, 6); c.fill(); c.lineWidth = 2; c.strokeStyle = 'rgba(190,215,255,0.8)'; c.stroke();
+      const by = b.y + b.h - o.h - 14, gx = o.x + 14, gw = o.w - 28; mctx2.font = `700 ${o.h * 0.5}px ${FONT()}`;
+      c.textBaseline = 'middle'; c.font = `700 ${o.h * 0.5}px ${FONT()}`; c.fillStyle = '#fff'; c.textAlign = 'left'; const lw = o.left ? c.measureText(o.left).width + 10 : 0; c.textAlign = 'right'; const rw = o.right ? c.measureText(o.right).width + 10 : 0;
+      const bx0 = gx + lw, bw0 = gw - lw - rw, gr = c.createLinearGradient(bx0, 0, bx0 + bw0, 0); st.forEach(s2 => gr.addColorStop(s2[0], s2[1])); c.fillStyle = gr; rrect(c, bx0, by + o.h * 0.15, bw0, o.h * 0.7, o.h * 0.2); c.fill(); c.lineWidth = 1.5; c.strokeStyle = 'rgba(255,255,255,0.7)'; c.stroke();
+      c.fillStyle = '#fff'; c.textAlign = 'left'; if (o.left) c.fillText(o.left, gx, by + o.h / 2 + 1); c.textAlign = 'right'; if (o.right) c.fillText(o.right, gx + gw, by + o.h / 2 + 1);
+      if (o.title) { c.textAlign = 'center'; c.font = `800 ${o.h * 0.6}px ${FONT()}`; c.fillText(o.title, o.x + o.w / 2, b.y + o.h * 0.55 + 4); } c.restore(); return;
+    }
+    if (o.type === 'ticker') {
+      c.save(); const gr = c.createLinearGradient(0, o.y, 0, o.y + o.h); gr.addColorStop(0, '#12306a'); gr.addColorStop(1, '#061a42'); c.fillStyle = gr; c.fillRect(o.x, o.y, o.w, o.h); c.fillStyle = 'rgba(255,255,255,0.55)'; c.fillRect(o.x, o.y, o.w, 3);
+      const fs = o.h * 0.5; c.font = `800 ${fs}px ${FONT()}`; c.textBaseline = 'middle'; c.textAlign = 'left'; const lab = o.label || '', lw = lab ? c.measureText(lab).width + o.h * 0.9 : 0;
+      c.save(); c.beginPath(); c.rect(o.x + lw, o.y, o.w - lw, o.h); c.clip(); c.fillStyle = '#fff'; const txt = String(o.text || ''), tw = c.measureText(txt).width, gap = o.w * 0.25, per = tw + gap, off = ((t * (o.speed || 140)) % per);
+      for (let x = o.x + lw + 24 - off; x < o.x + o.w; x += per) c.fillText(txt, x, o.y + o.h / 2 + 2); c.restore();
+      if (lab) { const g2 = c.createLinearGradient(0, o.y, 0, o.y + o.h); g2.addColorStop(0, '#ff5a4a'); g2.addColorStop(1, o.color || '#a00000'); c.fillStyle = g2; c.fillRect(o.x, o.y + 3, lw, o.h - 3); c.fillStyle = '#fff'; c.textAlign = 'center'; c.fillText(lab, o.x + lw / 2, o.y + o.h / 2 + 2); }
+      c.restore(); return;
+    }
+  }
   function ptsBox(pts, pad) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; pts.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }); if (x0 > x1) return { x: 0, y: 0, w: 1, h: 1 }; return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 }; }
   E.bounds = function (o) {
     switch (o.type) {
@@ -161,6 +217,10 @@
       case 'pin': return { x: o.x - 24, y: o.y - 24, w: 300, h: 70 };
       case 'storm': return { x: o.x - o.size / 2, y: o.y - o.size / 2, w: o.size, h: o.size };
       case 'pop': return { x: o.x - o.size * 0.6, y: o.y - o.size * 0.7, w: o.size * 3.2, h: o.size * 1.4 };
+      case 'citytemp': { const L = cityLayout(o); return { x: o.x - L.w / 2, y: o.y - L.h, w: L.w, h: L.h }; }
+      case 'callout': { const L = calloutLayout(o), x0 = Math.min(o.x - 14, L.bx), y0 = Math.min(o.y - 14, L.by), x1 = Math.max(o.x + 14, L.bx + L.bw), y1 = Math.max(o.y + 14, L.by + L.bh); return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }; }
+      case 'legend': return { x: o.x, y: o.y - (o.title ? o.h * 0.9 : 0) - 10, w: o.w, h: o.h + (o.title ? o.h * 0.9 : 0) + 40 };
+      case 'ticker': return { x: o.x, y: o.y, w: o.w, h: o.h };
     }
     return { x: 0, y: 0, w: 10, h: 10 };
   };
@@ -180,6 +240,7 @@
         m.lines.forEach((l, i) => { if (o.strokeW > 0) { c.lineWidth = o.strokeW * 2; c.strokeStyle = o.strokeColor || '#000000'; c.strokeText(l, o.x, o.y + i * m.lh); } c.fillStyle = fill; c.fillText(l, o.x, o.y + i * m.lh); });
         c.restore(); break;
       }
+      case 'citytemp': case 'callout': case 'legend': case 'ticker': drawWidget(c, o, t); break;
       case 'icon': g.Icons.draw(c, o.icon, o.x, o.y, o.size, t); break;
       case 'hl': g.Sym.drawHL(c, o.kind, o.x, o.y, o.size, o.value, t, { progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'front': g.Sym.drawFront(c, o.kind, o.pts, o.size, t, { flip: o.flip, progress: o.animMode === 'draw' ? p : 1 }); break;
@@ -207,7 +268,7 @@
   }
   const PATHY = { front: 1, arrow: 1, line: 1, pen: 1, hl: 1 };
   /* ---------- drop shadows (composited per object so glows/effects keep working) ---------- */
-  const SHADOW_OFF = { shape: 1, image: 1 };
+  const SHADOW_OFF = { shape: 1, image: 1, ticker: 1 };
   E.shadowOf = function (o) {
     const s = o.shadow; if (s === false) return null;
     if (s && typeof s === 'object') return s.on === false ? null : s;
@@ -460,6 +521,27 @@
   };
   E.sceneFrom7Day = function (days, titleText, sub) {
     return E.newScene({ name: '7-Day Forecast', duration: 10, bg: { type: 'gradient', grad: 'sky' }, title: { show: true, text: titleText || '7-Day Forecast', sub: sub || 'Billerica, MA' }, objects: E.build7Day(days) });
+  };
+
+
+  /* ---------- scene templates ---------- */
+  E.TEMPLATES = [['storm', 'Storm Update (red panels)'], ['headlines', 'Weather Headlines (glass panels)'], ['impacts', 'Storm Impacts (over current map)']];
+  E.buildTemplate = function (kind, o) {
+    const objs = [], lines = (o.lines || []).filter(x => String(x).trim()), m = o.safe || 48;
+    const add = (type, props, delay) => { const ob = E.newObject(type, props); ob.anim = { in: props.anim || 'fade', delay: delay || 0, dur: 0.6 }; delete ob.anim.undefined; objs.push(ob); return ob; };
+    const title = add('text', { x: m, y: m - 4, text: (o.title || 'STORM UPDATE').toUpperCase(), size: 110, align: 'left', anim: 'in-left' }, 0); E.applyTextPreset(title, 'titlebar');
+    if (kind === 'storm' || kind === 'headlines') {
+      const y0 = 260, step = lines.length > 4 ? 150 : 200;
+      lines.slice(0, 6).forEach((ln, i) => { const t = add('text', { x: 1000, y: y0 + i * step, text: String(ln).toUpperCase(), size: kind === 'storm' ? 48 : 58, align: 'center', wrapW: kind === 'storm' ? 1300 : 1400, anim: 'in-bottom' }, 0.5 + i * 0.35); E.applyTextPreset(t, kind === 'storm' ? 'red' : 'glass'); t.box = true; });
+    } else {
+      if (lines[0]) { const t = add('text', { x: m, y: 1080 - m - 80, text: String(lines[0]).toUpperCase(), size: 60, align: 'left' }, 0.4); E.applyTextPreset(t, 'glass'); }
+      lines.slice(1, 5).forEach((ln, i) => { const t = add('text', { x: 1920 - m - 400, y: 280 + i * 190, text: String(ln).toUpperCase(), size: 48, align: 'center', wrapW: 700, anim: 'in-right' }, 0.6 + i * 0.35); E.applyTextPreset(t, 'red'); t.box = true; });
+      add('text', { x: 1920 - m, y: 1080 - m - 70, text: 'Valid', auto: 'valid', size: 40, align: 'right' }, 0.3);
+    }
+    return objs;
+  };
+  E.sceneFromTemplate = function (kind, o, bg) {
+    return E.newScene({ name: (E.TEMPLATES.find(t => t[0] === kind) || [0, 'Template'])[1].replace(/ \(.*/, ''), duration: 10, bg: bg || { type: 'image', asset: 'bgdefault', kenburns: false, fit: 'fill' }, title: { show: false, text: '', sub: '' }, objects: E.buildTemplate(kind, o) });
   };
 
   g.Engine = E;
