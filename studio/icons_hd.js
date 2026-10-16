@@ -140,6 +140,10 @@
     { id: 'mostly-sunny-rain', label: 'Mostly Sunny/Rain', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({})); } },
     { id: 'mostly-sunny-showers', label: 'Mostly Sunny/Showers', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 })); } }
   ];
+  /* same artwork, different wording (user's call): Light Rain / Light Showers reuse Showers, Snow Showers reuses Light Snow */
+  const byId = {}; ICONS.forEach(i => { byId[i.id] = i; });
+  [{ id: 'light-rain', label: 'Light Rain', src: 'showers' }, { id: 'light-showers', label: 'Light Showers', src: 'showers' }, { id: 'snow-showers-day', label: 'Snow Showers', src: 'light-snow' }]
+    .forEach(d => ICONS.push(Object.assign({}, byId[d.src], { id: d.id, label: d.label })));
   const STATIC_T = 0.75;       // frozen frame used for the Static versions (seconds)
 
   const Icons = g.Icons, HD = {};
@@ -153,14 +157,14 @@
   /* replaced originals leave their old category; the new Animated / Static groups come first */
   /* Day-only graphics for now: the new Showers stands in for both original showers icons, and
      night variants are hidden from the library (saved scenes that use them still draw). */
-  const ALIAS = { 'showers-day': 'showers', 'showers-night': 'showers' };
+  const ALIAS = { 'showers-day': 'showers', 'showers-night': 'showers', 'overcast': 'cloudy' };   // Overcast is dropped: Cloudy covers it
   const rest = Icons.list.filter(i => !HD[i.id] && !ALIAS[i.id] && !/night/.test(i.id));
   Icons.list.length = 0; Array.prototype.push.apply(Icons.list, anim.concat(stat, rest));
 
   const _draw = Icons.draw, _has = Icons.has, _label = Icons.label;
   Icons.has = id => !!HD[id] || !!ALIAS[id] || _has(id);
   Icons.label = id => HD[ALIAS[id] || id] ? HD[ALIAS[id] || id].label : _label(id);
-  const _from = Icons.fromText; Icons.fromText = (txt) => _from.call(Icons, txt, true);   // day icons only
+  const _from = Icons.fromText; Icons.fromText = (txt) => { const id = _from.call(Icons, txt, true); return ALIAS[id] || id; };   // day icons only
   Icons.draw = function (ctx, id, cx, cy, size, t) {
     id = ALIAS[id] || id; const e = HD[id]; if (!e) return _draw.call(Icons, ctx, id, cx, cy, size, t);
     const ph = e.still ? STATIC_T / LOOP : (((t || 0) % LOOP) + LOOP) % LOOP / LOOP;
