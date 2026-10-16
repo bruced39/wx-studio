@@ -298,3 +298,8 @@ After publishing the v0.9.42 cloud Assets feature, identified a failed cloud lis
 - New reusable Photopea-like **Layer Style** floating window (ui.js `openFxWindow`): Stroke, Drop Shadow, Color Overlay, Gradient Overlay, Outer Glow; live preview, drag by title, Reset/Cancel/OK. Rendering in `E.drawFxLines`. Also available on text objects ("Layer style…" button; `o.fx`). Spread, bevel/emboss, contour, texture, satin, inner shadow/glow are not implemented; Multiply blend approximated by plain black at opacity.
 - Roboto Condensed added to the Google Fonts link and font preload.
 - Touched files ChatGPT changed recently for v0.9.42/43 (cloud Assets): studio/ui.js, studio/engine.js, studio/index.html (small, separate edits). cloud_assets.js, tests and supabase files untouched.
+
+## v0.9.45 – Layer Style for every object + saved styles (Claude)
+- `engine.js` `drawFxObj`: any non-text object with `o.fx` is drawn via its silhouette (stroke, drop shadow, outer glow, color/gradient overlay). `o.fx` replaces the legacy shadow. Skipped under scaled/rotated transforms (falls back to plain draw).
+- `ui.js`: "Layer style…" button in the inspector for all non-text objects (+ Remove); Layer Style window gained a **Saved styles** dropdown with Save style as… / Delete (localStorage `wx_fxpresets`).
+- Not touched: ChatGPT cloud files (cloud_assets.js, cloud_presets.js, supabase, tests).

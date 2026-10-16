@@ -276,7 +276,34 @@
     return SHADOW_OFF[o.type] ? null : { on: true, blur: 12, dist: 7, alpha: 0.6 };
   };
   let shadowCv = null;
+  /* ---------- Layer Style for any non-text object (works from the object's silhouette) ---------- */
+  let tintCv = null;
+  function drawFxObj(c, o, o0, t, p, show, fx) {
+    let b; try { b = E.bounds(o); } catch (e) { b = null; }
+    const st = fx.stroke || {}, sh = fx.shadow || {}, gl = fx.glow || {}, co = fx.coverlay || {}, go = fx.goverlay || {};
+    const pad = Math.ceil(Math.max(gl.on ? (gl.size || 0) * 2 : 0, sh.on ? (sh.size || 0) * 2 + (sh.dist || 0) : 0, st.on ? (st.size || 0) : 0) + 80 + (o.size || 0) * 0.3);
+    const tr = c.getTransform(), W2 = c.canvas.width, H2 = c.canvas.height;
+    if (!b || !isFinite(b.x + b.y + b.w + b.h) || tr.a !== 1 || tr.d !== 1 || tr.b !== 0 || tr.c !== 0) { drawObj(c, o, t, p, show); return; }
+    const x0 = Math.max(0, Math.floor(b.x - pad)), y0 = Math.max(0, Math.floor(b.y - pad)), x1 = Math.min(W2, Math.ceil(b.x + b.w + pad)), y1 = Math.min(H2, Math.ceil(b.y + b.h + pad)), w = x1 - x0, h2 = y1 - y0;
+    if (w <= 0 || h2 <= 0) { drawObj(c, o, t, p, show); return; }
+    if (!shadowCv || shadowCv.width !== W2 || shadowCv.height !== H2) { shadowCv = document.createElement('canvas'); shadowCv.width = W2; shadowCv.height = H2; }
+    if (!tintCv || tintCv.width !== W2 || tintCv.height !== H2) { tintCv = document.createElement('canvas'); tintCv.width = W2; tintCv.height = H2; }
+    const sc = shadowCv.getContext('2d'); sc.setTransform(1, 0, 0, 1, 0, 0); sc.clearRect(x0, y0, w, h2);
+    sc.save(); sc.beginPath(); sc.rect(x0, y0, w, h2); sc.clip(); sc.setTransform(tr); sc.globalAlpha = 1; drawObj(sc, o, t, p, show); sc.restore();
+    const tint = fill => { const q = tintCv.getContext('2d'); q.setTransform(1, 0, 0, 1, 0, 0); q.clearRect(x0, y0, w, h2); q.globalCompositeOperation = 'source-over'; q.drawImage(shadowCv, x0, y0, w, h2, x0, y0, w, h2); q.globalCompositeOperation = 'source-atop'; q.fillStyle = fill; q.fillRect(x0, y0, w, h2); q.globalCompositeOperation = 'source-over'; return tintCv; };
+    const OFF = 6000, A = c.globalAlpha;
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+    const ghost = (dx, dy, color, op, blur, twice) => { c.save(); c.shadowColor = rgba(color, op); c.shadowBlur = blur; c.shadowOffsetX = OFF + dx; c.shadowOffsetY = dy; c.drawImage(shadowCv, x0, y0, w, h2, x0 - OFF, y0, w, h2); if (twice) c.drawImage(shadowCv, x0, y0, w, h2, x0 - OFF, y0, w, h2); c.restore(); };
+    if (gl.on) ghost(0, 0, gl.color, gl.opacity, Math.max(1, gl.size) * 2, true);
+    if (sh.on) { const a = (sh.angle || 0) * Math.PI / 180, d = sh.dist || 0; ghost(-Math.cos(a) * d, Math.sin(a) * d, sh.color, sh.opacity, Math.max(0, sh.size || 0), false); }
+    if (st.on && st.size > 0) { const r = st.pos === 'center' ? st.size / 2 : st.size, ts = tint(st.color || '#000000'); c.save(); c.globalAlpha = A * clamp((st.opacity == null ? 100 : st.opacity) / 100, 0, 1); for (let i = 0; i < 24; i++) { const an = i / 24 * Math.PI * 2; c.drawImage(ts, x0, y0, w, h2, x0 + Math.cos(an) * r, y0 + Math.sin(an) * r, w, h2); } c.restore(); }
+    c.drawImage(shadowCv, x0, y0, w, h2, x0, y0, w, h2);
+    if (co.on) { const ts = tint(co.color || '#ffffff'); c.save(); c.globalAlpha = A * clamp((co.opacity == null ? 100 : co.opacity) / 100, 0, 1); c.drawImage(ts, x0, y0, w, h2, x0, y0, w, h2); c.restore(); }
+    if (go.on) { const a = (go.angle == null ? 90 : go.angle) * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a), cx = b.x + b.w / 2, cy = b.y + b.h / 2, rr = (Math.abs(dx) * b.w + Math.abs(dy) * b.h) / 2 || 1, gr = c.createLinearGradient(cx - dx * rr, cy - dy * rr, cx + dx * rr, cy + dy * rr); gr.addColorStop(0, go.c1 || '#ffffff'); gr.addColorStop(1, go.c2 || '#9fb4d6'); const ts = tint(gr); c.save(); c.globalAlpha = A * clamp((go.opacity == null ? 100 : go.opacity) / 100, 0, 1); c.drawImage(ts, x0, y0, w, h2, x0, y0, w, h2); c.restore(); }
+    c.restore();
+  }
   function drawShadowed(c, o, o0, t, p, show) {
+    if (o0.fx && o0.type !== 'text') { drawFxObj(c, o, o0, t, p, show, o0.fx); return; }
     const sh = E.shadowOf(o0);
     if (!sh) { drawObj(c, o, t, p, show); return; }
     let b; try { b = E.bounds(o); } catch (e) { b = null; }
