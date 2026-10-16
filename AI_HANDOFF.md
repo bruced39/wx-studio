@@ -229,3 +229,8 @@ User reported satellite maps at regional zoom showed many unintended black irreg
 A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp high-resolution map, correctly weighted roads and locality labels, aesthetically matching land/water colors, responsive smooth panning/zooming without stop flicker, granular overlay controls, and retention of all existing Claude-created studio capabilities.
 
 **Status at handoff:** v0.9.19 separates ocean/island shorelines from optional inland-water outlines (off by default) on both Satellite and flat maps, preserving Claude's v0.9.18 code and cloud presets. Awaiting browser shoreline/line-performance QA.
+
+## v0.9.29 – 7-Day builder: Magenta panel checkbox + template self-heal
+- 7-Day Forecast Builder has a new per-day "Magenta" checkbox (`d.hl`). `E.build7DayBW` draws a semi-transparent magenta rect (`rgba(220,30,175,0.6)`) over that day's template panel (days 1-5: y 280-948; day 6: 280-628; day 7: 722-1070 in 1920x1080) beneath the header/content, so the background still shows through.
+- Template robustness: `ensureBG()` in ui.js re-registers `assets.bg7day` (window.WX_BG7DAY) on boot and loadShow whenever a scene references it; autosave no longer stores the 335 KB template in localStorage (avoids quota loss).
+- Files: studio/engine.js, studio/ui.js. No ChatGPT-modified code touched.

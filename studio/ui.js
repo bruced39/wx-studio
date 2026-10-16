@@ -25,7 +25,8 @@
   function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
-  function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show)); } catch (e) { /* quota or blocked */ } }
+  function ensureBG(sh) { if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } }
+  function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show, (k, v) => (k === 'bg7day' && typeof v === 'string' && v === g.WX_BG7DAY) ? undefined : v)); } catch (e) { /* quota or blocked */ } }
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
   function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
   function builtInDefaultMapBg(){
@@ -85,7 +86,7 @@
     const sh=E.newShow(); if(sh.scenes&&sh.scenes[0]&&sh.scenes[0].bg&&sh.scenes[0].bg.type==='mapbox')sh.scenes[0].bg=JSON.parse(JSON.stringify(defaultMapBg()));
     return sh;
   }
-  function loadShow(sh) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); sh.assets = sh.assets || {}; sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
+  function loadShow(sh) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); sh.assets = sh.assets || {}; ensureBG(sh); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
@@ -1061,7 +1062,7 @@
   function modal(title, body, buttons) { const m = $('#modal'); m.innerHTML = ''; m.append(h('h3', { text: title }), body, h('div', { className: 'mb' }, buttons || [])); $('#modalBg').style.display = 'flex'; }
   function closeModal() { $('#modalBg').style.display = 'none'; $('#modal').innerHTML = ''; }
   function sevenDay() {
-    const days = E.sample7(), meta = { title: '7-Day Forecast', sub: 'Billerica, MA', layout: 'bw' }, tb7 = h('table', { className: 't7' }, h('tr', {}, ['Day', 'Date', 'Icon', 'Phrase', 'High', 'Low', 'PoP %', 'Tag', 'Top tag'].map(x => h('th', { text: x }))));
+    const days = E.sample7(), meta = { title: '7-Day Forecast', sub: 'Billerica, MA', layout: 'bw' }, tb7 = h('table', { className: 't7' }, h('tr', {}, ['Day', 'Date', 'Icon', 'Phrase', 'High', 'Low', 'PoP %', 'Tag', 'Top tag', 'Magenta'].map(x => h('th', { text: x }))));
     const prev = h('canvas', { width: 64, height: 64 });
     const FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], AB = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], rows = [];
     const startSel = h('select', { style: 'width:100px' }, FULL.map((n, k) => h('option', { value: k, text: n, selected: AB[k] === days[0].day })));
@@ -1073,10 +1074,10 @@
       ph.oninput = () => d.phrase = ph.value; const inp = (k, w, t) => { const i = h('input', { type: t || 'text', value: d[k], style: 'width:' + w + 'px' }); i.oninput = () => d[k] = t === 'number' ? +i.value : i.value; return i; };
       d.phrase = d.phrase || g.Icons.label(d.icon);
       const dayCell = i === 0 ? startSel : (rows[i] = h('input', { type: 'text', value: d.day, readOnly: true, style: 'width:50px;opacity:.75' })), dateCell = inp('date', 56); rows[i] = { day: dayCell, date: dateCell };
-      tb7.append(h('tr', {}, [dayCell, dateCell, sel, ph, inp('hi', 56, 'number'), inp('lo', 56, 'number'), inp('pop', 56, 'number'), inp('tag', 90), inp('tag2', 80)].map((x, ci) => h('td', { className: (i >= 5 && [3, 5, 7, 8].includes(ci)) ? 'dis' : '' }, x)))); });
+      tb7.append(h('tr', {}, [dayCell, dateCell, sel, ph, inp('hi', 56, 'number'), inp('lo', 56, 'number'), inp('pop', 56, 'number'), inp('tag', 90), inp('tag2', 80), (() => { const c = h('input', { type: 'checkbox', title: 'Magenta panel behind this day' }); c.onchange = () => { d.hl = c.checked; }; return c; })()].map((x, ci) => h('td', { className: (i >= 5 && [3, 5, 7, 8].includes(ci)) ? 'dis' : '' }, x)))); });
     startSel.value = AB.indexOf(days[0].day); applyStart();
     const lay = h('select', { onchange: e => { meta.layout = e.target.value; } }, [['bw', 'Billerica Weather template (your background)'], ['classic', 'Classic 7 cards (generic background)']].map(o => h('option', { value: o[0], text: o[1] })));
-    const body = h('div', {}, fld('Layout', lay), h('div', { className: 'row' }, h('label', { text: 'Title' }), h('input', { type: 'text', value: meta.title, oninput: e => meta.title = e.target.value })), h('div', { className: 'row' }, h('label', { text: 'Location' }), h('input', { type: 'text', value: meta.sub, oninput: e => meta.sub = e.target.value })), tb7, h('div', { className: 'hint', text: 'Pick the starting weekday in Day 1 and the rest follow in order. In the Billerica Weather layout days 6 and 7 show only icon, high and precip (greyed fields are unused); Sat/Sun get orange headers; lows sit under the gaps between days 1–5. Sample values – replace them with your forecast. Icons animate and each card slides in one after another. Everything stays editable afterwards.' }));
+    const body = h('div', {}, fld('Layout', lay), h('div', { className: 'row' }, h('label', { text: 'Title' }), h('input', { type: 'text', value: meta.title, oninput: e => meta.title = e.target.value })), h('div', { className: 'row' }, h('label', { text: 'Location' }), h('input', { type: 'text', value: meta.sub, oninput: e => meta.sub = e.target.value })), tb7, h('div', { className: 'hint', text: 'Pick the starting weekday in Day 1 and the rest follow in order. In the Billerica Weather layout days 6 and 7 show only icon, high and precip (greyed fields are unused); Sat/Sun get orange headers; tick Magenta to tint that day panel (semi-transparent, your background still shows through); lows sit under the gaps between days 1–5. Sample values – replace them with your forecast. Icons animate and each card slides in one after another. Everything stays editable afterwards.' }));
     modal('7-Day Forecast Builder', body, [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => { const dd = days.map(d => Object.assign({}, d, { hi: Math.round(d.hi), lo: Math.round(d.lo) })); let sc; if (meta.layout === 'bw' && g.WX_BG7DAY) { S.show.assets.bg7day = g.WX_BG7DAY; sc = E.sceneFromBW(dd, 'bg7day'); } else sc = E.sceneFrom7Day(dd, meta.title, meta.sub); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
   }
   function mapboxSettings() {
@@ -1119,7 +1120,7 @@
     if(sh){migrateMB(sh);migrateWDBroadcast(sh);}
     S.show=sh||newShowWithDefaultMap();
     const loadedDefault=applySavedDefaultOnStartup(S.show);
-    S.show.assets=S.show.assets||{};S.hist=[];S.hp=-1;
+    S.show.assets=S.show.assets||{};ensureBG(S.show);S.hist=[];S.hp=-1;
     commit();refreshAll();
     if(S.show.scenes[0]?.bg?.type==='mapbox')setTool('pan');
     if(sh){

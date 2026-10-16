@@ -363,16 +363,18 @@
     const f = 1920 / 1672, S = v => v * f, objs = [];
     const COLS = [[25, 281], [298, 553], [573, 828], [846, 1102], [1119, 1375]], RC = [1394, 1650], LOWS = [[206, 370], [480, 643], [754, 917], [1029, 1192]];
     const NAVY = 'rgba(8,36,92,0.97)', ORANGE = '#f28a1c', GREEN = '#25d450', LOWC = '#7fcfff';
-    const mk = (d, i, x0, x1, y0, y1, delay) => {
+    const MAGENTA = 'rgba(220,30,175,0.6)';
+    const mk = (d, i, x0, x1, y0, y1, delay, panelB) => {
       const add = (type, props, ex) => { const ob = E.newObject(type, props); ob.anim = { in: 'slide-up', delay: delay + (ex || 0), dur: 0.5 }; objs.push(ob); return ob; };
       const wk = /^(SAT|SUN)/i.test(d.day), x = S(x0), w = S(x1 - x0), cx = x + w / 2;
+      if (d.hl) add('shape', { shape: 'rect', x: x, y: S(y0) + S(72), w, h: panelB - S(y0) - S(72), fill: MAGENTA, stroke: 'rgba(255,255,255,0.55)', lw: 2 }, 0);
       add('shape', { shape: 'rect', x, y: S(y0), w, h: S(72), fill: wk ? ORANGE : NAVY, stroke: 'rgba(255,255,255,0.8)', lw: 2 });
       add('shape', { shape: 'rect', x, y: S(y0), w, h: S(36), fill: 'rgba(255,255,255,0.12)', stroke: 'none', lw: 0 });
       add('text', { x: cx, y: S(y0 + 36) - 34, text: d.day, size: 76, align: 'center', color: '#fff', weight: 800 }, 0.04);
       return { add, cx, w, x };
     };
     days.slice(0, 5).forEach((d, i) => {
-      const [x0, x1] = COLS[i], c = mk(d, i, x0, x1, 168, 240, i * 0.14), add = c.add, cx = c.cx;
+      const [x0, x1] = COLS[i], c = mk(d, i, x0, x1, 168, 240, i * 0.14, 948), add = c.add, cx = c.cx;
       add('icon', { x: cx, y: S(370), size: c.w * 0.86, icon: d.icon }, 0.1);
       if (d.tag2) add('text', { x: cx, y: S(468) - 26, text: String(d.tag2).toUpperCase(), size: 48, align: 'center', color: '#bfe6ff', weight: 800 }, 0.25);
       add('text', { x: cx, y: S(500), text: wrapText(String(d.phrase || '').toUpperCase(), 30, c.w - 30), size: 30, align: 'center', color: '#ffffff', weight: 700, font: 'display' }, 0.15);
@@ -382,7 +384,7 @@
       if (i < 4 && days[i].lo != null && days[i].lo !== '') { const lx = S(LOWS[i][0] + LOWS[i][1]) / 2; const o = E.newObject('text', { x: lx, y: S(879) - 43, text: String(days[i].lo) + '°', size: 74, align: 'center', color: LOWC, weight: 800 }); o.anim = { in: 'slide-up', delay: i * 0.14 + 0.35, dur: 0.5 }; objs.push(o); }
     });
     [[5, 168, 243], [6, 556, 630]].forEach(([i, hy, by], n) => {
-      const d = days[i]; if (!d) return; const c = mk(d, i, RC[0], RC[1], hy, hy + 72, 0.7 + n * 0.14), add = c.add, cx = c.cx;
+      const d = days[i]; if (!d) return; const c = mk(d, i, RC[0], RC[1], hy, hy + 72, 0.7 + n * 0.14, n ? 1070 : 628), add = c.add, cx = c.cx;
       add('icon', { x: cx, y: S(by + 120), size: c.w * 0.8, icon: d.icon }, 0.1);
       add('text', { x: cx, y: S(by + 226) - 34, text: (Number(d.pop) || 0) + '%', size: 36, align: 'center', color: GREEN, weight: 800 }, 0.25);
       add('text', { x: cx, y: S(by + 276) - 44, text: String(d.hi) + '°', size: 84, align: 'center', color: '#eef3fb', weight: 800 }, 0.2);
