@@ -230,7 +230,7 @@
   function labelBackground(map,cfg,tier){
     const t=tierAppearance(cfg,tier);
     if(!t.background)return null;
-    const id='wd-text-bg-'+tier.toLowerCase();
+    const id='wd-text-bg-'+tier.toLowerCase()+'-'+String(t.backgroundColor).replace(/[^0-9a-f]/gi,'').toLowerCase();
     if(map.getImage&&map.getImage(id))return id;
     try{
       const canvas=document.createElement('canvas');canvas.width=24;canvas.height=24;
