@@ -238,3 +238,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 ## v0.9.30 – Magenta = #ff00c6 @ 65%; "+ Scene" inserts a blank scene
 - Magenta highlight panel now `rgba(255,0,198,0.65)` (user's #ff00c6 at the template's 65% opacity).
 - `+ Scene` (ui.js newScene) now inserts a blank scene (solid #101820 background, no title, no objects) instead of copying the previous scene's background. Files: studio/engine.js, studio/ui.js. No ChatGPT-modified code touched.
+
+## v0.9.31 – Drag icons from the Library onto the canvas
+- Library icons are now `draggable`; dropping one on the stage places an icon object at the drop point (selected, default size 220, resizable/movable afterwards). Click-to-place still works. Drop handler in ui.js reuses the existing file-drop listener (`application/x-wx-icon`). File: studio/ui.js. No ChatGPT-modified code touched.

@@ -245,7 +245,7 @@
     if (sc.bg.type === 'mapbox') { g.MB.setInteractive(true); const v = mapView(sc), ll = E.xf(sc, editT()).inv(p[0], p[1]); v.z = clamp(v.z - e.deltaY * 0.0025, 0, 20); const l2 = E.xf(sc, editT()).inv(p[0], p[1]); if (isFinite(ll[0]) && isFinite(l2[0])) v.c = [v.c[0] + ll[0] - l2[0], Math.max(-85, Math.min(85, v.c[1] + ll[1] - l2[1]))]; updateZoomBadge(); clearTimeout(ov._wt); ov._wt = setTimeout(()=>{g.MB.setInteractive(false);commit();},180); return; }
     const v = mapView(sc), k = W / v.w, P = [v.cx + (p[0] - W / 2) / k, v.cy + (p[1] - H / 2) / k]; v.w = clamp(v.w * Math.exp(e.deltaY * 0.0012), 18, 1700); const k2 = W / v.w; v.cx = P[0] - (p[0] - W / 2) / k2; v.cy = P[1] - (p[1] - H / 2) / k2; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); }, { passive: false });
   ['dragover', 'dragenter'].forEach(ev => stage.parentElement.addEventListener(ev, e => { e.preventDefault(); }));
-  stage.parentElement.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], e.shiftKey ? 'bg' : 'obj'); });
+  stage.parentElement.addEventListener('drop', e => { e.preventDefault(); const ic = e.dataTransfer && e.dataTransfer.getData('application/x-wx-icon'); if (ic) { const p = pt(e); addObject('icon', { x: p[0], y: p[1], icon: ic }); setTool('select'); const o = selObj(); if (o) { S.oid = o.id; } refreshAll(); return; } if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], e.shiftKey ? 'bg' : 'obj'); });
   document.addEventListener('keydown', e => {
     const tg = e.target.tagName; if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
     const mod = e.ctrlKey || e.metaKey;
@@ -640,7 +640,7 @@
   function libraryPanel(p) {
     p.append(h('div', { className: 'hint', text: 'Click an icon to place it (or swap the selected icon). Animated icons export to video (the 7-Day builder uses these); Static copies are the same artwork frozen for other projects.' }));
     const cats = {}; g.Icons.list.forEach(i => (cats[i.cat] = cats[i.cat] || []).push(i));
-    Object.keys(cats).forEach(c => { p.append(h('div', { className: 'h', text: c })); const gr = h('div', { className: 'igrid' }); cats[c].forEach(i => { const cv = h('canvas', { width: 120, height: 120 }); cv.dataset.icon = i.id; gr.append(h('div', { className: 'ic' + (S.opt.icon === i.id ? ' on' : ''), title: i.label, on: { click: () => { S.opt.icon = i.id; const o = selObj(); if (o && o.type === 'icon') { o.icon = i.id; commit(); } else setTool('icon'); renderPanels(); } } }, cv, h('div', { text: i.label }))); }); p.append(gr); });
+    Object.keys(cats).forEach(c => { p.append(h('div', { className: 'h', text: c })); const gr = h('div', { className: 'igrid' }); cats[c].forEach(i => { const cv = h('canvas', { width: 120, height: 120 }); cv.dataset.icon = i.id; gr.append(h('div', { className: 'ic' + (S.opt.icon === i.id ? ' on' : ''), title: i.label, draggable: true, ondragstart: ev => { ev.dataTransfer.setData('application/x-wx-icon', i.id); ev.dataTransfer.effectAllowed = 'copy'; }, on: { click: () => { S.opt.icon = i.id; const o = selObj(); if (o && o.type === 'icon') { o.icon = i.id; commit(); } else setTool('icon'); renderPanels(); } } }, cv, h('div', { text: i.label }))); }); p.append(gr); });
   }
   function mediaPanel(p) {
     const dz = h('div', { id: 'drop', text: 'Drop your own graphics here (PNG, JPG, WebP) – or click to browse' });
