@@ -253,3 +253,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.35 – Background image fit modes
 - Image backgrounds have `bg.fit`: `blur` (default: whole image + blurred/darkened fill), `fill` (crop), `solid` (whole image + `bg.fitColor` bars), `stretch`. Switch is "Image fit" in Scene panel > Background (image backgrounds). 16:9 images look identical in all but stretch/fill-with-different-shape. Files: studio/engine.js, studio/ui.js. No ChatGPT-modified code touched.
+
+## v0.9.36 – Resilient scene drawing + visible draw errors
+- User video (Streamlit, live Mapbox scene) showed Front/H clicks creating objects but nothing drawing, not even the draft dots or the scene title: consistent with renderScene throwing each frame (loop swallowed it into console.error). E.renderScene now guards background, each object, title and bug separately; the editor loop still draws the overlay after an error and shows a one-time "Drawing error: <message>" toast (E.onDrawError). With a stub projection in headless all tools work, so the real cause is still unconfirmed. Files: studio/engine.js, studio/ui.js. Touches map-adjacent drawing code but not the ChatGPT map files (mapbox.js).

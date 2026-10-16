@@ -302,8 +302,11 @@
         if (S.mode === 'play' && S.play) { S.T = S.play.a + (clock() - S.play.t0); if (S.T >= S.play.b) { S.T = S.play.b - 0.001; E.renderShow(sctx, S.show, S.T, { liveMap: true }); stopPlay(); return; } }
         E.renderShow(sctx, S.show, S.T, { liveMap: true }); octx.clearRect(0, 0, W, H); updateTransport();
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err); reportDrawErr(err); try { drawOverlay(); } catch (e2) { /* ignore */ } }
   }
+  let lastDrawErr = '';
+  function reportDrawErr(err) { const m = String(err && err.message || err); if (m !== lastDrawErr) { lastDrawErr = m; toast('Drawing error: ' + m.slice(0, 140)); } }
+  E.onDrawError = reportDrawErr;
   function drawOverlay() {
     octx.clearRect(0, 0, W, H); const sc = cur(), xf = E.xf(sc, editT()), d = S.draft;
     octx.save(); octx.lineWidth = 3;

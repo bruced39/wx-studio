@@ -250,9 +250,10 @@
   E.renderScene = function (c, show, scene, t, opts) {
     opts = opts || {}; const editing = !!opts.editing, ct = opts.camT != null ? opts.camT : t, xf = E.xf(scene, ct);
     c.save(); c.clearRect(0, 0, W, H);
-    drawBackground(c, show, scene, t, ct, opts);
-    scene.objects.forEach(o => { if (!o.hidden) drawObjectAnimated(c, o, scene, xf, t, show, editing); });
-    drawTitle(c, show, scene, t, editing); drawBug(c, show);
+    const guard = (fn) => { try { fn(); } catch (err) { c.restore(); c.save(); E.lastErr = err; if (E.onDrawError) E.onDrawError(err); } };
+    guard(() => drawBackground(c, show, scene, t, ct, opts));
+    scene.objects.forEach(o => { if (!o.hidden) guard(() => drawObjectAnimated(c, o, scene, xf, t, show, editing)); });
+    guard(() => drawTitle(c, show, scene, t, editing)); guard(() => drawBug(c, show));
     c.restore();
   };
 
