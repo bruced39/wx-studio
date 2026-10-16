@@ -523,6 +523,7 @@
           B('broadcastKeepMajorCities','check',{label:'Keep major cities'}),
           B('broadcastOverviewCityDensity','select',{label:'Overview city coverage (zoom below 7.5)',options:[
             ['standard','Standard'],['more','More cities (recommended)'],['many','Many cities']]}),
+          B('broadcastOverviewLabelGap','range',{label:'Overview label gap (px)',min:0,max:20,step:0.5}),
           B('broadcastMajorCityRank','range',{label:'Major-city rank — higher shows more',min:1,max:19,step:1}),
           B('broadcastMajorCityMinZoom','range',{label:'Major-city minimum zoom',min:0,max:12,step:.5}),
           B('broadcastLabelFont','select',{label:'Label font',options:[['DIN Pro Bold','DIN Pro Bold'],['DIN Pro Medium','DIN Pro Medium'],['Roboto Bold','Roboto Bold'],['Roboto Medium','Roboto Medium'],['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold']]}),
@@ -541,7 +542,7 @@
           B('broadcastVillageSize','range',{label:'Village size',min:7,max:26,step:1}),
           B('broadcastVillageMinZoom','range',{label:'Village min zoom',min:0,max:22,step:.5}),
           B('broadcastVillageMaxZoom','range',{label:'Village max zoom',min:0.5,max:24,step:.5}),
-          h('div',{className:'hint',text:'For regional maps around zoom 5, choose More cities or Many cities. Raise Major-city rank to include smaller cities. City font and size stay unchanged; Mapbox still prevents overlapping names. For additional towns at zoom 4, lower Town min zoom.'})
+          h('div',{className:'hint',text:'For regional maps around zoom 5, choose More cities or Many cities. Raise Major-city rank to include smaller cities. Reduce Overview label gap to fit more names without changing font or size; names still avoid overlapping. To show towns below zoom 5, lower Town min zoom.'})
         ],false));
 
         // All four boundary width sliders share ONE physical pixel scale.
