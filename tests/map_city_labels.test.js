@@ -16,7 +16,8 @@ const maker=new Function('wdFontStack','labelPadding',
  between('  function settlementLayer(','  // Natural Earth land polygons')+
  ';return settlementLayer;')(()=>['DIN Pro Bold','Arial Unicode MS Bold'],()=>9);
 const buildCode=between("    ['wd-major-city-labels'",'\n  }\n\n  MB.token');
-const build=new Function('cfg','map','source','settlementLayer',buildCode+';return map.layers;');
+const build=new Function('cfg','map','source','settlementLayer',
+  'const nativeOverviewEnabled=false,nativeOverviewEnd=7.5;'+buildCode+';return map.layers;');
 function render(cfg){
  const map={layers:[],getLayer(id){return this.layers.find(l=>l.id===id)},
   removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},
@@ -82,4 +83,39 @@ test('UI exposes editable min and max zoom ranges for every place type',()=>{
   for(const edge of ['Min','Max'])
    assert.ok(ui.includes("B('broadcast"+name+edge+"Zoom','range'"),name+' '+edge);
  assert.ok(ui.includes("B('broadcastMajorCityMinZoom','range'"));
+});
+
+test('Mapbox native settlement names remain visible at zoom 6.0; custom labels take over at 7.5',()=>{
+ const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
+ const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
+  'installTransportation','installOverlays','settlementLayer',
+  nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker);
+ const orig=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
+  minzoom:2,maxzoom:15,layout:{visibility:'visible'},paint:{}});
+ const map={layers:[orig('settlement-major-label'),orig('settlement-minor-label'),orig('state-label')],
+  getStyle(){return {layers:this.layers}},
+  getLayer(id){return this.layers.find(l=>l.id===id)},
+  setLayoutProperty(id,key,val){this.getLayer(id).layout[key]=val},
+  setPaintProperty(id,key,val){this.getLayer(id).paint[key]=val},
+  setLayerZoomRange(id,min,max){assert.ok(max>min);Object.assign(this.getLayer(id),{minzoom:min,maxzoom:max})},
+  removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},
+  addLayer(l){this.layers.push(l)}};
+ const styles={mbStyle:'broadcast',broadcastBase:'satellite',...cfg};
+ fn(map,styles);
+ const get=id=>map.getLayer(id);
+ assert.equal(get('settlement-major-label').layout.visibility,'visible');
+ assert.equal(get('settlement-minor-label').layout.visibility,'visible');
+ assert.ok(get('settlement-major-label').minzoom<=6&&get('settlement-major-label').maxzoom>6);
+ assert.ok(get('settlement-minor-label').minzoom<=6&&get('settlement-minor-label').maxzoom>6);
+ assert.equal(get('wd-city-labels').minzoom,get('settlement-major-label').maxzoom);
+ assert.equal(get('state-label').layout.visibility,'none');
+ // User saved settings can select city minimum 6; overview should not disappear.
+ fn(map,{...styles,broadcastCityMinZoom:6});
+ assert.ok(get('settlement-major-label').minzoom<=6&&get('settlement-major-label').maxzoom>6);
+ fn(map,{...styles,broadcastShowCities:false});
+ assert.equal(get('settlement-major-label').layout.visibility,'none');
+ assert.equal(get('wd-city-labels'),undefined);
+ fn(map,{...styles,broadcastPlaceDensity:'cities'});
+ assert.equal(get('settlement-minor-label').layout.visibility,'none');
+ assert.equal(get('settlement-major-label').layout.visibility,'visible');
 });
