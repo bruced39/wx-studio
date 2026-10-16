@@ -94,6 +94,19 @@
     c.restore();
   }
 
+  /* ---- Mostly Cloudy (his artwork: sun peeking over a big cloud): breathing glow + shimmering rays ---- */
+  function mostlyCloudy(c, ph) {
+    if (!ok('mcloudy')) return; const im = IMG.mcloudy, SXm = 213, SYm = 190; _oc2 = _oc2 || mkc(); const o2 = _oc2.getContext('2d');
+    const br = 0.5 + 0.5 * Math.sin(ph * TAU), S = 1 + 0.014 * Math.sin(ph * TAU);
+    c.save(); c.translate(-10, 0);
+    const gl = c.createRadialGradient(SXm, SYm, 30, SXm, SYm, 230); gl.addColorStop(0, 'rgba(255,190,60,' + (0.22 + 0.18 * br) + ')'); gl.addColorStop(1, 'rgba(255,170,40,0)'); c.fillStyle = gl; c.beginPath(); c.arc(SXm, SYm, 230, 0, TAU); c.fill();
+    c.save(); c.translate(SXm, SYm); c.scale(S, S); c.drawImage(im, -SXm, -SYm); c.restore();
+    const mask = () => { const r = o2.createRadialGradient(SXm, SYm, 0, SXm, SYm, 160); r.addColorStop(0, 'rgba(0,0,0,0)'); r.addColorStop(0.46, 'rgba(0,0,0,0)'); r.addColorStop(0.62, 'rgba(0,0,0,1)'); r.addColorStop(1, 'rgba(0,0,0,0)'); o2.fillStyle = r; o2.fillRect(0, 0, 400, 400); o2.globalCompositeOperation = 'destination-in'; const v = o2.createLinearGradient(0, SYm - 76, 0, SYm - 44); v.addColorStop(0, 'rgba(0,0,0,1)'); v.addColorStop(1, 'rgba(0,0,0,0)'); o2.fillStyle = v; o2.fillRect(0, 0, 400, 400); };
+    const lay = (rot, k, al) => { o2.globalCompositeOperation = 'source-over'; o2.clearRect(0, 0, 400, 400); o2.drawImage(im, 0, 0); o2.globalCompositeOperation = 'destination-in'; mask(); c.save(); c.translate(SXm, SYm); c.rotate(rot); c.scale(k, k); c.globalAlpha = al; c.globalCompositeOperation = 'lighter'; c.drawImage(_oc2, -SXm, -SYm); c.restore(); };
+    lay(0.05 * Math.sin(ph * TAU), 1.03, 0.34 * (0.6 + 0.4 * Math.sin(ph * TAU + 1))); lay(-0.05 * Math.sin(ph * TAU + 0.6), 0.99, 0.26 * (0.6 + 0.4 * Math.cos(ph * TAU)));
+    c.restore();
+  }
+
   /* ---- Sun_Thunderstorms (his artwork, bolt removed and redrawn procedurally). Art pixel space, drawn at (0,0). ---- */
   const SX = 125, SY = 113, BOLTS = [makeBolt(11, 184, 238, 160, 392), makeBolt(23, 210, 238, 222, 360)];
   function sunStorm(c, ph) {
@@ -204,16 +217,16 @@
   function blizzard(c, ph) {
     const r = rng(77); c.save(); c.lineCap = 'round';
     c.save(); c.translate(205, 415); c.scale(1.15, 0.8); const hz = c.createRadialGradient(0, 0, 0, 0, 0, 170); hz.addColorStop(0, 'rgba(225,238,255,' + (0.18 + 0.06 * Math.sin(ph * TAU)) + ')'); hz.addColorStop(1, 'rgba(225,238,255,0)'); c.fillStyle = hz; c.beginPath(); c.arc(0, 0, 170, 0, TAU); c.fill(); c.restore();
-    const mk = () => { const xs = 90 + 250 * r(), xe = xs - (40 + 150 * r()), H = 70 + 140 * r(), y0 = 282 + 8 * r(); return { xs, D: xs - xe, H, y0 }; };
+    const mk = () => { const xs = 90 + 250 * r(), xe = xs - (20 + 85 * r()), H = 70 + 140 * r(), y0 = 282 + 8 * r(); return { xs, D: xs - xe, H, y0 }; };
     const P = (q, u) => [q.xs - q.D * Math.pow(u, 2.4) + 4 * Math.sin(u * 9), q.y0 + q.H * Math.pow(u, 0.8)];
     for (let i = 0; i < 18; i++) {
-      const q = mk(), spd = 1 + (r() < 0.5 ? 1 : 0), off = r(), u = ((ph * spd + off) % 1), a = Math.sin(Math.PI * u) ** 0.8 * 0.2, wd = 2.5 + 3 * r();
+      const q = mk(), spd = 1 + (r() < 0.5 ? 1 : 0), off = r(), u = ((ph * spd + off) % 1), a = Math.sin(Math.PI * u) ** 0.8 * 0.13, wd = 2.5 + 3 * r();
       for (let k = 0; k < 10; k++) { const ua = Math.max(0, u - 0.34 + k * 0.034), ub = Math.max(0, u - 0.34 + (k + 1) * 0.034); if (ub <= 0) continue; const A = P(q, ua), B = P(q, Math.min(1, ub)); c.strokeStyle = 'rgba(235,245,255,' + (a * ((k + 1) / 10) ** 1.5) + ')'; c.lineWidth = wd; c.beginPath(); c.moveTo(A[0], A[1]); c.lineTo(B[0], B[1]); c.stroke(); }
     }
     for (let i = 0; i < 300; i++) {
-      const q = mk(), spd = 2 + (r() < 0.5 ? 1 : 0), off = r(), u = ((ph * spd + off) % 1), a = Math.sin(Math.PI * u) ** 0.5 * Math.min(1, u * 10), kind = r(), R = 2.2 + 3.2 * r(), Lg = 0.07 + 0.10 * r(), w = 1.6 + 2.2 * r(), rs = r();
+      const q = mk(), spd = 2 + (r() < 0.5 ? 1 : 0), off = r(), u = ((ph * spd + off) % 1), a = Math.sin(Math.PI * u) ** 0.5 * Math.min(1, u * 10), kind = r(), R = 2.2 + 3.2 * r(), Lg = 0.05 + 0.07 * r(), w = 1.6 + 2.2 * r(), rs = r();
       const H = P(q, u), T = P(q, Math.max(0, u - Lg));
-      if (kind < 0.3) flake(c, H[0], H[1], R * 1.9, TAU * (ph * spd + off) * (rs < 0.5 ? 1 : -1) + rs * 6, a * 0.95);
+      if (kind < 0.45) flake(c, H[0], H[1], R * 1.9, TAU * (ph * spd + off) * (rs < 0.5 ? 1 : -1) + rs * 6, a * 0.95);
       else { const g = c.createLinearGradient(H[0], H[1], T[0], T[1]); g.addColorStop(0, 'rgba(245,250,255,' + (0.92 * a) + ')'); g.addColorStop(1, 'rgba(245,250,255,0)'); c.strokeStyle = g; c.lineWidth = w; c.shadowColor = 'rgba(170,210,255,' + (0.6 * a) + ')'; c.shadowBlur = 4; c.beginPath(); c.moveTo(H[0], H[1]); c.lineTo(T[0], T[1]); c.stroke(); c.shadowBlur = 0; }
     }
     c.restore();
@@ -243,14 +256,16 @@
     { id: 'heavy-snow', k: 1.18, label: 'Heavy Snow', oy: 300, fn: (c, ph) => { snow(c, ph, { seed: 55928, n: 30, s0: 6, s1: 8, r0: 8.5, r1: 3.5 }); cloudImg(c, 200, 232, ph); } },
     { id: 'blizzard', k: 1.05, label: 'Blizzard', oy: 318, fn: (c, ph) => { blizzard(c, ph); cloudImg(c, 200, 232, ph); } },
     { id: 'wintry-mix', k: 1.18, label: 'Wintry Mix', oy: 300, fn: (c, ph) => { rain(c, ph, RP({ seed: 21, n: 28, spd: 3, spdP: 0.4, L: 26 })); snow(c, ph, { seed: 16363, n: 10, s0: 6, s1: 8, r0: 8.5, r1: 3.5 }); cloudImg(c, 200, 232, ph); } },
+    { id: 'snow-showers-day', k: 1.18, label: 'Snow Showers', oy: 300, fn: (c, ph) => { snow(c, ph, { seed: 4242, n: 7, s0: 6, s1: 8, r0: 8.5, r1: 3.5 }); cloudImg(c, 200, 232, ph); } },
     { id: 'mostly-sunny-rain', label: 'Mostly Sunny/Rain', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({})); } },
     { id: 'mostly-sunny-showers', label: 'Mostly Sunny/Showers', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 })); } },
     { id: 'thunderstorm', label: 'Thunderstorms', k: 0.95, oy: 195, st: 0.205, fn: (c, ph) => thunder(c, ph) },
+    { id: 'mostly-cloudy', label: 'Mostly Cloudy', k: 1.08, oy: 197, fn: (c, ph) => mostlyCloudy(c, ph) },
     { id: 'sun-thunderstorms', label: 'Sun_Thunderstorms', k: 1.0, oy: 206, st: 0.205, fn: (c, ph) => sunStorm(c, ph) }
   ];
   /* same artwork, different wording (user's call): Light Rain / Light Showers reuse Showers, Snow Showers reuses Light Snow */
   const byId = {}; ICONS.forEach(i => { byId[i.id] = i; });
-  [{ id: 'light-rain', label: 'Light Rain', src: 'showers' }, { id: 'light-showers', label: 'Light Showers', src: 'showers' }, { id: 'snow-showers-day', label: 'Snow Showers', src: 'light-snow' }]
+  [{ id: 'light-rain', label: 'Light Rain', src: 'showers' }, { id: 'light-showers', label: 'Light Showers', src: 'showers' }]
     .forEach(d => ICONS.push(Object.assign({}, byId[d.src], { id: d.id, label: d.label })));
   const STATIC_T = 0.75;       // frozen frame used for the Static versions (seconds)
 

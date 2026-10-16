@@ -212,6 +212,7 @@ User reported satellite maps at regional zoom showed many unintended black irreg
 - v0.9.25: added animated/static **Wintry Mix** (`wintry-mix`, replaces the original `wintry-mix`): Cloudy cloud + raindrop sprites (`rain()`) and the original procedural snowflakes (`snow()`) falling together.
 - v0.9.26: `sun-thunderstorms` now also has raindrop sprites; for it and `thunderstorm` the drops are born under the solid cloud body and fade in at its underside (`rain()` accepts `p.mask = { k: <art key> }`; `cloudBase()` reads the cloud underside from the art alpha). Other rain icons unchanged.
 - v0.9.27: all snow icons (Flurries, Light Snow, Snow, Heavy Snow, Snow Showers, and the flakes in Wintry Mix) use a new `snow()` layout: random flakes whose positions are re-rolled until no two crowd or overlap at any moment of the loop (`snowLayout()` in `icons_hd.js`). Flake art unchanged; Blizzard unchanged.
+- v0.9.28: added animated/static **Mostly Cloudy** (`mostly-cloudy`, replaces the original; user's sun+cloud artwork `mcloudy` in `icons_hd_art.js`, breathing glow + shimmering rays, `mostlyCloudy()`); **Snow Showers** is now its own icon with 7 flakes (between Flurries 5 and Light Snow 10) instead of a copy of Light Snow; **Blizzard** has less wind effect (shorter/shallower streaks, more tumbling flakes, still blows left).
 - Verified in headless Chromium: library renders both categories with no script errors; live look inside the user's browser still to confirm.
 
 ## Rules for alternating between ChatGPT and Claude
