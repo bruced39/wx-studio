@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.52` (`VERSION`).
+- **Last reviewed application version:** `0.9.53` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -356,3 +356,14 @@ User reported too few major city labels below zoom 5, despite v0.9.51 having fix
 - New `broadcastOverviewLabelGap:2` px (adjustable 0–20) relaxes overview collision spacing. Font, city/town size, casing, color, halo and opacity from user settings are unchanged; regular high-zoom spacing remains as previously configured. Map Style → City + Town Labels adds Overview city coverage and Overview label gap controls and improved guidance. `MB.ensureConfig` adds missing defaults to old cloud presets/saved shows automatically.
 - Extended `tests/map_city_labels.test.js` mocks with `setFilter`, rank 9/14/19 density modes, z5, no forced overlap, zero gap, preservation of typography, Show Places and Cities Only toggles. JS parse and simulated filter tests passed. Browser Mapbox layout/collision behavior and tile data still need live QA.
 - Starting main v0.9.51 `fc770ec`; touched only `studio/mapbox.js`, `studio/ui.js` (targeted Map Style controls), `tests/map_city_labels.test.js`, `VERSION` and `AI_HANDOFF.md`. Claude's `studio/engine.js`, `studio/index.html`, + Map, banners, clouds, templates and existing settings were not changed.
+
+## v0.9.53 — critical regression fix: restore low-zoom city names (ChatGPT, 2026-10-16)
+
+User reported WX Studio v0.9.52 hides **all** city labels again after zooming out past ~6, before they could try the new density controls. Critically, the user wants **every existing font, size, halo, color and other label preference preserved**.
+
+- Root cause: v0.9.52 **replaced** the proven Mapbox Streets native settlement-major/minor filters with restrictive hand-written filters, instead of augmenting the original. Those changed filters could leave no eligible settlement names at specific overview zooms. v0.9.51's native baseline was visually confirmed by the user to show cities (albeit too few).
+- `studio/mapbox.js` now captures and caches each untouched stock/native settlement layer filter **once per loaded style**, then the v0.9.52 Standard/More/Many rank rules are applied with `['any',originalFilter,extraCandidatesFilter]`. This guarantees the stock settlement labels remain eligible even when the extra density criteria do not match. On failure to install the additive filter, explicitly restore the stock filter. The stock `symbol-sort-key` and placement settings are **no longer overwritten**, retaining Mapbox's tested priority/collision behavior. The pristine-filter cache is cleared when the base style reloads.
+- **Preserved all current user styling**: font, city and town pixel sizes, uppercase, label opacity, halo color/width, label text color, WX Studio's separate 2px Overview gap, and the higher-zoom label behavior from v0.9.51. No label keys/defaults, presets or UI controls were changed. No cloud show/asset data modified.
+- Enhanced `tests/map_city_labels.test.js`: simulate a Mapbox Streets v12-style existing stock layer with a real separate pre-existing filter; verify that rank modes 9/14/19 broaden eligibility but a stock city remains eligible even at strict user rank 1, including disputed-settlement/type variations covered by the baseline; repeat mode changes to ensure filter changes do not accumulate; preserve stock sorting, collision settings and overview font size. JS source and mocked Mapbox layer tests pass. **Requires live browser QA at zoom 7, 6, 5, 4, 3 to confirm rendering**, not merely source/mocked tests.
+- Starting main v0.9.52 `9b89b77`; touched only `studio/mapbox.js`, `tests/map_city_labels.test.js`, `VERSION`, and `AI_HANDOFF.md`. Claude's `studio/ui.js`, `studio/index.html`, `studio/engine.js`, scenes, banners and cloud features untouched. The user should NOT need to rebuild any saved settings.
+
