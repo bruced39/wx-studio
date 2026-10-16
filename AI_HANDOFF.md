@@ -206,6 +206,7 @@ User reported satellite maps at regional zoom showed many unintended black irreg
 - v0.9.18: added animated/static **Blizzard** (`blizzard`, replaces the original; `blizzard()` in `icons_hd.js`).
 - v0.9.20: library is **day-only**. The new `showers` icon stands in for the original `showers-day`/`showers-night` (aliases in `icons_hd.js`), all remaining `*-night` icons are hidden from the library list, and `Icons.fromText` always returns day icons. Saved scenes that reference night ids still draw.
 - Next icon update: `light-rain` ("Light Rain") and new `light-showers` reuse the Showers artwork, `snow-showers-day` ("Snow Showers") reuses Light Snow, and `overcast` is aliased to `cloudy` and removed from the library (weather text "overcast" now returns `cloudy`). Duplicates are listed as separate Animated + Static entries via the `ICONS.push(...)` block in `icons_hd.js`.
+- v0.9.22: added animated/static **Sun_Thunderstorms** (`sun-thunderstorms`, new addition; the original `thunderstorm`/`tstorm-day` are untouched). User artwork with the original bolt removed (`sunstorm` in `icons_hd_art.js`) plus a procedural branching lightning bolt (`makeBolt/strike/drawBolt`, `sunStorm()` in `icons_hd.js`); ICONS entries may now carry `st` = phase used for the Static still (strike peak).
 - Verified in headless Chromium: library renders both categories with no script errors; live look inside the user's browser still to confirm.
 
 ## Rules for alternating between ChatGPT and Claude

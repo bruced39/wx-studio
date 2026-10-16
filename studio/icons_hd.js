@@ -57,6 +57,46 @@
     draw(0, S, 1, 'source-over'); draw(0.05 * Math.sin(ph * TAU), S * 1.03, 0.2 * (0.6 + 0.4 * Math.sin(ph * TAU + 1)), 'lighter', true); draw(-0.05 * Math.sin(ph * TAU + 0.6), S * 0.99, 0.16 * (0.6 + 0.4 * Math.cos(ph * TAU)), 'lighter', true);
   }
 
+
+  /* ---- realistic lightning (procedural, branching bolt: leader -> return stroke -> flicker -> afterglow) ---- */
+  function bdisp(p0, p1, amp, levels, r) { let pts = [p0, p1]; for (let l = 0; l < levels; l++) { const n = [pts[0]]; for (let i = 0; i < pts.length - 1; i++) { const a = pts[i], b = pts[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, off = (r() - 0.5) * 2 * amp; n.push([(a[0] + b[0]) / 2 + (-dy / L) * off, (a[1] + b[1]) / 2 + (dx / L) * off]); n.push(b); } pts = n; amp *= 0.58; } return pts; }
+  function plen(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
+  function makeBolt(seed, x0, y0, x1, y1) {
+    const r = rng(seed), main = bdisp([x0, y0], [x1, y1], 26, 7, r), branches = [], nb = 3 + Math.floor(r() * 2);
+    for (let k = 0; k < nb; k++) { const i = Math.floor(main.length * (0.18 + 0.5 * r())), p = main[i], dir = r() < 0.5 ? -1 : 1, ang = dir * (0.35 + 0.5 * r()), len = 38 + 60 * r(), q = [p[0] + Math.sin(ang) * len, p[1] + Math.cos(ang) * len * 0.85]; branches.push({ pts: bdisp(p, q, 9, 5, r), at: i / main.length }); }
+    return { main, branches, len: plen(main) };
+  }
+  function strike(ph, s) { const d = ((ph - s) % 1 + 1) % 1; if (d > 0.32) return { prog: 0, I: 0 }; const lead = 0.020; if (d < lead) return { prog: d / lead, I: 0.18 }; const e = d - lead; let I = Math.exp(-e / 0.020); if (e > 0.05) I += 0.85 * Math.exp(-(e - 0.05) / 0.016); I += 0.16 * Math.exp(-e / 0.09); return { prog: 1, I: Math.min(1.6, I) }; }
+  function strokePath(c, pts, upto, wd, col) { let acc = 0; c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) { const seg = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); if (acc + seg > upto) { const f = (upto - acc) / seg; c.lineTo(pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f); break; } c.lineTo(pts[i][0], pts[i][1]); acc += seg; } c.lineWidth = wd; c.strokeStyle = col; c.stroke(); }
+  function drawBolt(c, B, prog, I) {
+    if (I <= 0.01) return; const up = B.len * prog, a = Math.min(1, I); c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.globalCompositeOperation = 'lighter';
+    [[22, 'rgba(70,120,255,' + 0.16 * a + ')', 0], [11, 'rgba(120,170,255,' + 0.30 * a + ')', 0], [5, 'rgba(190,215,255,' + 0.65 * a + ')', 8], [2.4, 'rgba(255,255,255,' + Math.min(1, a * 1.1) + ')', 10]].forEach(([w, col, bl]) => {
+      c.shadowColor = 'rgba(120,170,255,' + a + ')'; c.shadowBlur = bl; strokePath(c, B.main, up, w, col);
+      B.branches.forEach(br => { const bl2 = plen(br.pts), bp = Math.max(0, Math.min(1, (up - B.len * br.at) / bl2)); if (bp > 0) strokePath(c, br.pts, bl2 * bp, w * 0.55, col); });
+    }); c.restore();
+  }
+  const mkc = () => { const o = document.createElement('canvas'); o.width = 400; o.height = 400; return o; };
+  let _oc, _oc2;
+  /* ---- Sun_Thunderstorms (his artwork, bolt removed and redrawn procedurally). Art pixel space, drawn at (0,0). ---- */
+  const SX = 125, SY = 113, BOLTS = [makeBolt(11, 184, 238, 160, 392), makeBolt(23, 210, 238, 222, 360)];
+  function sunStorm(c, ph) {
+    if (!ok('sunstorm')) return; const im = IMG.sunstorm; _oc = _oc || mkc(); _oc2 = _oc2 || mkc(); const o = _oc.getContext('2d'), o2 = _oc2.getContext('2d');
+    const br = 0.5 + 0.5 * Math.sin(ph * TAU), S = 1 + 0.012 * Math.sin(ph * TAU), S1 = strike(ph, 0.18), S2 = strike(ph, 0.62);
+    const F = Math.min(1, 0.9 * Math.max(S1.I > 0.3 ? S1.I : 0, S2.I > 0.3 ? S2.I * 0.8 : 0));
+    c.save(); c.translate(200 - 200, 200 - 200);
+    let gl = c.createRadialGradient(SX, SY, 10, SX, SY, 170); gl.addColorStop(0, 'rgba(255,190,60,' + (0.30 + 0.20 * br) + ')'); gl.addColorStop(1, 'rgba(255,170,40,0)'); c.fillStyle = gl; c.beginPath(); c.arc(SX, SY, 170, 0, TAU); c.fill();
+    let bg = c.createRadialGradient(180, 260, 5, 180, 260, 150); bg.addColorStop(0, 'rgba(140,185,255,' + (0.05 + 0.55 * F) + ')'); bg.addColorStop(1, 'rgba(120,170,255,0)'); c.fillStyle = bg; c.beginPath(); c.arc(180, 260, 150, 0, TAU); c.fill();
+    o.clearRect(0, 0, 400, 400); o.globalCompositeOperation = 'source-over'; o.drawImage(im, 0, 0);
+    o.globalCompositeOperation = 'source-atop'; let fl = o.createRadialGradient(185, 250, 10, 185, 250, 190); fl.addColorStop(0, 'rgba(215,230,255,' + 0.75 * F + ')'); fl.addColorStop(1, 'rgba(215,230,255,0)'); o.fillStyle = fl; o.fillRect(0, 0, 400, 400);
+    c.save(); c.translate(200, 200); c.scale(S, S); c.drawImage(_oc, -200, -200); c.restore();
+    c.save(); c.translate(178, 244); c.scale(1, 0.42); let nb = c.createRadialGradient(0, 0, 0, 0, 0, 40); nb.addColorStop(0, 'rgba(212,216,226,0.95)'); nb.addColorStop(0.6, 'rgba(205,210,222,0.7)'); nb.addColorStop(1, 'rgba(205,210,222,0)'); c.fillStyle = nb; c.beginPath(); c.arc(0, 0, 40, 0, TAU); c.fill(); c.restore();
+    const lay = (maskFn, rot, k, al) => { o2.globalCompositeOperation = 'source-over'; o2.clearRect(0, 0, 400, 400); o2.drawImage(im, 0, 0); o2.globalCompositeOperation = 'destination-in'; maskFn(); c.save(); c.translate(SX, SY); c.rotate(rot); c.scale(k, k); c.globalAlpha = al; c.globalCompositeOperation = 'lighter'; c.drawImage(_oc2, -SX, -SY); c.restore(); };
+    const rayMask = () => { let r = o2.createRadialGradient(SX, SY, 0, SX, SY, 112); r.addColorStop(0, 'rgba(0,0,0,0)'); r.addColorStop(0.5, 'rgba(0,0,0,0)'); r.addColorStop(0.66, 'rgba(0,0,0,1)'); r.addColorStop(1, 'rgba(0,0,0,0)'); o2.fillStyle = r; o2.fillRect(0, 0, 400, 400); o2.globalCompositeOperation = 'destination-in'; let h = o2.createLinearGradient(SX + 5, 0, SX + 60, 0); h.addColorStop(0, 'rgba(0,0,0,1)'); h.addColorStop(1, 'rgba(0,0,0,0)'); o2.fillStyle = h; o2.fillRect(0, 0, 400, 400); };
+    lay(rayMask, 0.05 * Math.sin(ph * TAU), 1.03, 0.34 * (0.6 + 0.4 * Math.sin(ph * TAU + 1))); lay(rayMask, -0.05 * Math.sin(ph * TAU + 0.6), 0.99, 0.26 * (0.6 + 0.4 * Math.cos(ph * TAU)));
+    drawBolt(c, BOLTS[0], S1.prog, S1.I); drawBolt(c, BOLTS[1], S2.prog, S2.I * 0.85);
+    c.restore();
+  }
+
   /* ---- streak rain (steady, straight) ---- */
   function rain(c, ph, p) {
     const r = rng(p.seed); c.save(); c.lineCap = 'round';
@@ -138,7 +178,8 @@
     { id: 'heavy-snow', k: 1.18, label: 'Heavy Snow', oy: 300, fn: (c, ph) => { snow(c, ph, { seed: 55928, n: 30, s0: 6, s1: 8, r0: 8.5, r1: 3.5 }); cloudImg(c, 200, 232, ph); } },
     { id: 'blizzard', k: 1.05, label: 'Blizzard', oy: 318, fn: (c, ph) => { blizzard(c, ph); cloudImg(c, 200, 232, ph); } },
     { id: 'mostly-sunny-rain', label: 'Mostly Sunny/Rain', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({})); } },
-    { id: 'mostly-sunny-showers', label: 'Mostly Sunny/Showers', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 })); } }
+    { id: 'mostly-sunny-showers', label: 'Mostly Sunny/Showers', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 })); } },
+    { id: 'sun-thunderstorms', label: 'Sun_Thunderstorms', k: 1.0, oy: 206, st: 0.205, fn: (c, ph) => sunStorm(c, ph) }
   ];
   /* same artwork, different wording (user's call): Light Rain / Light Showers reuse Showers, Snow Showers reuses Light Snow */
   const byId = {}; ICONS.forEach(i => { byId[i.id] = i; });
@@ -167,7 +208,7 @@
   const _from = Icons.fromText; Icons.fromText = (txt) => { const id = _from.call(Icons, txt, true); return ALIAS[id] || id; };   // day icons only
   Icons.draw = function (ctx, id, cx, cy, size, t) {
     id = ALIAS[id] || id; const e = HD[id]; if (!e) return _draw.call(Icons, ctx, id, cx, cy, size, t);
-    const ph = e.still ? STATIC_T / LOOP : (((t || 0) % LOOP) + LOOP) % LOOP / LOOP;
+    const ph = e.still ? (e.ic.st != null ? e.ic.st : STATIC_T / LOOP) : (((t || 0) % LOOP) + LOOP) % LOOP / LOOP;
     ctx.save(); try {
       ctx.translate(cx, cy); const s = size / 400; ctx.scale(s, s); ctx.scale(e.ic.k || 1, e.ic.k || 1); ctx.translate(-200, -e.ic.oy);
       ctx.lineJoin = 'round'; ctx.lineCap = 'round'; e.ic.fn(ctx, ph);
