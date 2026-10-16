@@ -35,7 +35,9 @@
     broadcastSatelliteSaturation:0, broadcastSatelliteContrast:.15,
     broadcastShowCities:true, broadcastUppercaseLabels:true, broadcastPlaceDensity:'towns', broadcastKeepMajorCities:true, broadcastMajorCityRank:9,
     broadcastLabelFont:'DIN Pro Bold', broadcastLabelDensity:'normal', broadcastLabelOpacity:1, broadcastLabelSpacing:1.25,
-    broadcastCitySize:20, broadcastTownSize:16, broadcastVillageSize:13, broadcastCityMinZoom:3, broadcastTownMinZoom:5, broadcastVillageMinZoom:7,
+    broadcastCitySize:20, broadcastTownSize:16, broadcastVillageSize:13,
+    broadcastCityMinZoom:3, broadcastCityMaxZoom:24, broadcastTownMinZoom:5, broadcastTownMaxZoom:24,
+    broadcastVillageMinZoom:7, broadcastVillageMaxZoom:24, broadcastMajorCityMinZoom:0,
     broadcastLabelColor:'#ffffff', broadcastLabelHaloColor:'#101820', broadcastLabelHaloWidth:2,
     broadcastShowPOI:false, broadcastShowRoadLabels:false, broadcastShowNaturalLabels:false,
     broadcastShowCoastline:true, broadcastCoastlineColor:'#050505', broadcastCoastlineWidth:1.5,
@@ -106,9 +108,19 @@
   function settlementLayer(id,cfg,source,types,size,minzoom,rankMode,maxzoom){
     const density=cfg.broadcastLabelDensity||'normal',major=rankMode==='major',spacing=+cfg.broadcastLabelSpacing||1.25;
     const cityD=density==='sparse'?1:density==='dense'?4:density==='maximum'?5:3,townD=density==='sparse'?1:density==='dense'?3:density==='maximum'?5:2,smallD=density==='sparse'?1:density==='dense'?2:density==='maximum'?5:1;
-    const densityRank=types.includes('city')?cityD:types.includes('town')?townD:smallD,rank=+cfg.broadcastMajorCityRank||9;
-    const filter=['all',['==',['get','class'],'settlement'],['match',['get','type'],types,true,false],['<=',['coalesce',['get','filterrank'],5],densityRank]];
-    if(rankMode==='major')filter.push(['<=',['coalesce',['get','symbolrank'],99],rank]);
+    const densityRank=types.includes('city')?cityD:types.includes('town')?townD:smallD,
+      rank=Math.max(1,Math.min(19,Number.isFinite(+cfg.broadcastMajorCityRank)?+cfg.broadcastMajorCityRank:9));
+    const densityFilter=['<=',['coalesce',['get','filterrank'],5],densityRank],
+      prominentCity=['<=',['coalesce',['get','symbolrank'],99],rank];
+    // At overview zooms Mapbox changes filterrank by zoom; filtering major
+    // settlements by BOTH filterrank and symbolrank can erase every city.
+    // Keep genuinely prominent cities by stable symbolrank even when their
+    // dynamic filterrank is outside the selected label-density range.
+    const visibility=major?prominentCity:
+      types.includes('city')&&cfg.broadcastKeepMajorCities!==false
+        ?['any',densityFilter,prominentCity]:densityFilter;
+    const filter=['all',['==',['get','class'],'settlement'],
+      ['match',['get','type'],types,true,false],visibility];
     const layer={id,type:'symbol',source,'source-layer':'place_label',minzoom:+minzoom||0,filter,
       layout:{'text-field':['coalesce',['get','name_en'],['get','name']],'text-font':wdFontStack(cfg.broadcastLabelFont),
         'text-transform':cfg.broadcastUppercaseLabels===false?'none':'uppercase','text-size':+size||14,'symbol-sort-key':['coalesce',['get','symbolrank'],99],
@@ -658,11 +670,25 @@
     installHillshade(map,cfg);installLandWaterFeatures(map,cfg,source);installTransportation(map,cfg,source);installOverlays(map,cfg);
     ['wd-major-city-labels','wd-city-labels','wd-town-labels','wd-small-place-labels'].forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch{}});
     if(source&&cfg.broadcastShowCities!==false){
-      const d=cfg.broadcastPlaceDensity||'towns',cityMin=Math.max(0,+cfg.broadcastCityMinZoom||3),add=l=>{try{map.addLayer(l);}catch(e){}};
-      if(d==='villages'||d==='all')add(settlementLayer('wd-small-place-labels',cfg,source,d==='all'?['village','hamlet','suburb','neighborhood']:['village'],cfg.broadcastVillageSize,cfg.broadcastVillageMinZoom));
-      if(d!=='cities')add(settlementLayer('wd-town-labels',cfg,source,['town'],cfg.broadcastTownSize,cfg.broadcastTownMinZoom));
-      add(settlementLayer('wd-city-labels',cfg,source,['city'],cfg.broadcastCitySize,cityMin));
-      if(cfg.broadcastKeepMajorCities!==false&&cityMin>0)add(settlementLayer('wd-major-city-labels',cfg,source,['city'],Math.max(10,+cfg.broadcastCitySize+2),0,'major',cityMin));
+      const d=cfg.broadcastPlaceDensity||'towns';
+      const minZoom=(value,fallback)=>Math.max(0,Math.min(23.99,Number.isFinite(+value)?+value:fallback));
+      const maxZoom=(value,min)=>Math.max(min+.01,Math.min(24,Number.isFinite(+value)?+value:24));
+      const cityMin=minZoom(cfg.broadcastCityMinZoom,3),cityMax=maxZoom(cfg.broadcastCityMaxZoom,cityMin);
+      const townMin=minZoom(cfg.broadcastTownMinZoom,5),townMax=maxZoom(cfg.broadcastTownMaxZoom,townMin);
+      const villageMin=minZoom(cfg.broadcastVillageMinZoom,7),villageMax=maxZoom(cfg.broadcastVillageMaxZoom,villageMin);
+      const majorMin=minZoom(cfg.broadcastMajorCityMinZoom,0);
+      const add=l=>{try{map.addLayer(l);}catch(e){console.warn('WX Studio label layer',l.id,e);}};
+      if(d==='villages'||d==='all')add(settlementLayer('wd-small-place-labels',cfg,source,
+        d==='all'?['village','hamlet','suburb','neighborhood']:['village'],
+        cfg.broadcastVillageSize,villageMin,null,villageMax));
+      if(d!=='cities')add(settlementLayer('wd-town-labels',cfg,source,['town'],
+        cfg.broadcastTownSize,townMin,null,townMax));
+      add(settlementLayer('wd-city-labels',cfg,source,['city'],cfg.broadcastCitySize,cityMin,null,cityMax));
+      // Separate fallback covers only zooms below the regular city minimum,
+      // without hiding Boston/New York/etc. when zooming out past level 6.
+      if(cfg.broadcastKeepMajorCities!==false&&majorMin<cityMin)
+        add(settlementLayer('wd-major-city-labels',cfg,source,['city'],
+          Math.max(10,+cfg.broadcastCitySize+2),majorMin,'major',cityMin));
     }
   }
 
