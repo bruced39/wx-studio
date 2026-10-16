@@ -722,7 +722,7 @@
 
   /* ---- Private Supabase cloud Assets. Keep local IndexedDB independent. ---- */
   const ASSET_CLOUD=()=>g.WXCloudAssets;
-  const AC={checked:false,uid:null,rows:{},loaded:{},loading:null,busy:false,
+  const AC={checked:false,uid:null,rows:{},loaded:{},attempted:{},loading:null,busy:false,
     status:'',thumbs:new Map()};
   const cloudKind=k=>k==='bg'?'background':k;
   const localKind=k=>k==='background'?'bg':k;
@@ -735,11 +735,12 @@
     try{
       const user=await ASSET_CLOUD().session();
       if(AC.uid!==user.user.id){
-        AC.uid=user.user.id;AC.rows={};AC.loaded={};AC.thumbs.clear();
+        AC.uid=user.user.id;AC.rows={};AC.loaded={};AC.attempted={};AC.thumbs.clear();
       }
+      AC.attempted[kind]=true;
       AC.rows[kind]=await ASSET_CLOUD().list(kind);
       AC.loaded[kind]=true;
-    }catch(e){AC.status='Could not load cloud assets: '+cloudFail(e);AC.loaded[kind]=false;}
+    }catch(e){AC.attempted[kind]=true;AC.status='Could not load cloud assets: '+cloudFail(e);AC.loaded[kind]=false;}
     finally{AC.loading=null;renderAssetCloud();}
   }
   async function cloudUploadPng(b){
@@ -870,14 +871,16 @@
       return;
     }
     if(AC.uid!==user.id){
-      AC.uid=user.id;AC.loaded={};AC.rows={};AC.thumbs.clear();
+      AC.uid=user.id;AC.loaded={};AC.rows={};AC.attempted={};AC.thumbs.clear();
     }
     p.append(h('div',{className:'hint',text:'Private to '+(user.email||'your account')+'. Click Download to add an item to this browser; your show uses the normal local asset ID.'}));
     const buttons=h('div',{className:'btnrow',style:'margin:8px 0'},
       h('button',{className:'sm',text:'Refresh cloud',on:{click:()=>loadCloudAssets(kind)}}),
       h('button',{className:'sm pri',text:'Upload all local items to cloud',on:{click:()=>uploadAllCloud(kind)}}));
     p.append(buttons);
-    if(!AC.loaded[kind]&&AC.loading!==kind)Promise.resolve().then(()=>loadCloudAssets(kind));
+    // Try automatically once per account/tab. On a network failure, wait
+    // for Refresh cloud instead of infinite fetch/re-render retries.
+    if(!AC.attempted[kind]&&AC.loading!==kind)Promise.resolve().then(()=>loadCloudAssets(kind));
     if(AC.loading===kind)p.append(h('div',{className:'hint',text:'Loading cloud library…'}));
     const rows=AC.rows[kind]||[];
     if(AC.loaded[kind]&&!rows.length)p.append(h('div',{className:'hint',text:'Nothing in your cloud '+kind+' library yet.'}));
