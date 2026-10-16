@@ -265,3 +265,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 - Click an item (or drag it onto the stage) to add an image object at Upper left/right, Lower left/right, Top/Bottom center or Center (safe margin `S.show.safe`, default 48px), sizes Original/75/50/33/20% of frame width, entrance Automatic (from nearest edge) or fixed. Object panel for images has Position buttons. Image resize handle now keeps aspect ratio (Shift = free).
 - New entrance animations in engine.js: in-left/in-right/in-top/in-bottom (slide from the frame edge).
 - NOT done: cloud sync of banners (needs a new Supabase table/storage bucket + RLS; existing cloud presets are in cloud_presets.js by ChatGPT). Files: studio/engine.js, studio/ui.js, studio/index.html. mapbox.js / cloud_presets.js untouched.
+
+## v0.9.39 – Text styles
+- Text objects: Outline (strokeW/strokeColor), Gradient fill (color→color2), Gloss highlight, and box styles (plain/titlebar/red/glass) plus a Preset dropdown (Title bar, Red alert panel, Glass panel, Outline, Gold, Chrome) via `E.applyTextPreset`. The old built-in text shadow was removed (the per-object drop shadow from v0.9.37 handles it). Built-in "Default sky" background uses fit=fill so its 3:2 shape is cropped, not letterboxed. Files: studio/engine.js, studio/ui.js.

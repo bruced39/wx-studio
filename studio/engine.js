@@ -125,6 +125,29 @@
     const w = Math.max(10, ...lines.map(l => mctx.measureText(l).width)), lh = o.size * 1.15;
     return { lines, w, h: lines.length * lh, lh };
   }
+  function mixHex(a, b, t) { const pa = hexRGB(a), pb = hexRGB(b); return 'rgb(' + [0, 1, 2].map(i => Math.round(pa[i] + (pb[i] - pa[i]) * t)).join(',') + ')'; }
+  function hexRGB(h) { h = String(h || '#ffffff'); if (/^#[0-9a-f]{3}$/i.test(h)) h = '#' + h[1] + h[1] + h[2] + h[2] + h[3] + h[3]; const m = /^#([0-9a-f]{6})/i.exec(h); if (m) { const n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; } const r = /(\d+)[, ]+(\d+)[, ]+(\d+)/.exec(h); return r ? [+r[1], +r[2], +r[3]] : [255, 255, 255]; }
+  function drawTextBox(c, o, b) {
+    const st = o.boxStyle || 'plain', r = o.size * 0.25; c.save();
+    if (st === 'titlebar') {
+      const gr = c.createLinearGradient(0, b.y, 0, b.y + b.h); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.55, '#dfe6f0'); gr.addColorStop(1, '#b9c5d6');
+      c.fillStyle = gr; rrect(c, b.x, b.y, b.w, b.h, r * 0.4); c.fill(); c.lineWidth = Math.max(2, o.size * 0.04); c.strokeStyle = '#0b3a8f'; c.stroke();
+      c.fillStyle = '#1b6dff'; c.fillRect(b.x + 3, b.y + b.h - Math.max(5, o.size * 0.09), b.w - 6, Math.max(3, o.size * 0.06));
+    } else if (st === 'red') {
+      const gr = c.createLinearGradient(0, b.y, 0, b.y + b.h); gr.addColorStop(0, '#ff6050'); gr.addColorStop(0.5, '#d01414'); gr.addColorStop(1, '#8a0000');
+      c.fillStyle = gr; rrect(c, b.x, b.y, b.w, b.h, r * 0.9); c.fill(); c.lineWidth = Math.max(2, o.size * 0.05); c.strokeStyle = '#f2b24a'; c.stroke();
+      const g2 = c.createLinearGradient(0, b.y, 0, b.y + b.h * 0.5); g2.addColorStop(0, 'rgba(255,255,255,0.38)'); g2.addColorStop(1, 'rgba(255,255,255,0.02)'); c.fillStyle = g2; rrect(c, b.x + 3, b.y + 3, b.w - 6, b.h * 0.5, r * 0.8); c.fill();
+    } else if (st === 'glass') {
+      c.fillStyle = 'rgba(255,255,255,0.16)'; rrect(c, b.x, b.y, b.w, b.h, r * 0.3); c.fill(); c.lineWidth = 2; c.strokeStyle = 'rgba(255,255,255,0.4)'; c.stroke();
+    } else { c.fillStyle = o.boxColor; rrect(c, b.x, b.y, b.w, b.h, r); c.fill(); }
+    c.restore();
+  }
+  E.TEXT_PRESETS = [['', 'Choose a style…'], ['plain', 'Plain'], ['titlebar', 'Title bar (silver, navy text)'], ['red', 'Red alert panel (glossy)'], ['glass', 'Glass panel'], ['outline', 'White text, dark outline'], ['gold', 'Gold gradient + gloss'], ['chrome', 'Chrome gloss']];
+  E.applyTextPreset = function (o, k) {
+    const base = { box: false, boxStyle: 'plain', grad: false, gloss: false, strokeW: 0 };
+    const P = { plain: {}, titlebar: { box: true, boxStyle: 'titlebar', color: '#0b2a5e', weight: 800 }, red: { box: true, boxStyle: 'red', color: '#ffffff', weight: 800 }, glass: { box: true, boxStyle: 'glass', color: '#ffffff', weight: 800 }, outline: { color: '#ffffff', strokeW: Math.max(3, o.size * 0.06), strokeColor: '#0a1a33', weight: 800 }, gold: { color: '#ffe27a', color2: '#d98a00', grad: true, gloss: true, strokeW: Math.max(2, o.size * 0.04), strokeColor: '#4a2a00', weight: 800 }, chrome: { color: '#f4f8ff', color2: '#7f93b0', grad: true, gloss: true, strokeW: Math.max(2, o.size * 0.04), strokeColor: '#0a1a33', weight: 800 } };
+    if (P[k]) Object.assign(o, base, P[k]);
+  };
   function ptsBox(pts, pad) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; pts.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }); if (x0 > x1) return { x: 0, y: 0, w: 1, h: 1 }; return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 }; }
   E.bounds = function (o) {
     switch (o.type) {
@@ -150,9 +173,12 @@
     switch (o.type) {
       case 'text': {
         const m = textMetrics(o); c.save(); c.font = fontFor(o); c.textBaseline = 'top'; c.textAlign = o.align || 'left';
-        if (o.box) { const b = E.bounds(o); c.fillStyle = o.boxColor; rrect(c, b.x, b.y, b.w, b.h, o.size * 0.25); c.fill(); }
-        c.fillStyle = o.color; c.shadowColor = 'rgba(0,0,0,0.55)'; c.shadowBlur = o.size * 0.16; c.shadowOffsetY = o.size * 0.04;
-        m.lines.forEach((l, i) => c.fillText(l, o.x, o.y + i * m.lh)); c.restore(); break;
+        if (o.box) drawTextBox(c, o, E.bounds(o));
+        let fill = o.color;
+        if (o.grad || o.gloss) { const gr = c.createLinearGradient(0, o.y, 0, o.y + m.h), c2 = o.color2 || o.color; if (o.gloss) { gr.addColorStop(0, mixHex(o.color, '#ffffff', 0.65)); gr.addColorStop(0.46, o.color); gr.addColorStop(0.5, mixHex(c2, '#000000', 0.18)); gr.addColorStop(1, c2); } else { gr.addColorStop(0, o.color); gr.addColorStop(1, c2); } fill = gr; }
+        c.lineJoin = 'round'; c.miterLimit = 2;
+        m.lines.forEach((l, i) => { if (o.strokeW > 0) { c.lineWidth = o.strokeW * 2; c.strokeStyle = o.strokeColor || '#000000'; c.strokeText(l, o.x, o.y + i * m.lh); } c.fillStyle = fill; c.fillText(l, o.x, o.y + i * m.lh); });
+        c.restore(); break;
       }
       case 'icon': g.Icons.draw(c, o.icon, o.x, o.y, o.size, t); break;
       case 'hl': g.Sym.drawHL(c, o.kind, o.x, o.y, o.size, o.value, t, { progress: o.animMode === 'draw' ? p : 1 }); break;
