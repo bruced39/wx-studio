@@ -610,18 +610,40 @@
           if(adminPlace||place){
             const overview=nativeOverviewRange(l);
             if(overview){
-              // Do not use our custom low-zoom filter here: Mapbox's native
-              // expression adapts symbolrank to zoom and places city names
-              // without collision with roads or other major settlements.
+              // Keep the native zoom-aware feature selection and collision
+              // logic so major city names do not disappear at zoom 6.
+              // But ALWAYS use WX Studio typography (not Mapbox's stock
+              // small fonts/sizes below zoom 7.5). Both native and custom
+              // labels must honor the same user settings at every zoom.
               try{map.setLayerZoomRange(l.id,overview.min,overview.max);}catch(e){}
               map.setLayoutProperty(l.id,'visibility','visible');
-              try{map.setPaintProperty(l.id,'text-color',cfg.broadcastLabelColor||'#fff');}catch(e){}
-              try{map.setPaintProperty(l.id,'text-halo-color',cfg.broadcastLabelHaloColor||'#101820');}catch(e){}
-              try{map.setPaintProperty(l.id,'text-halo-width',Math.max(0,+cfg.broadcastLabelHaloWidth||0));}catch(e){}
-              try{map.setPaintProperty(l.id,'text-opacity',Math.max(0,Math.min(1,Number.isFinite(+cfg.broadcastLabelOpacity)?+cfg.broadcastLabelOpacity:1)));}catch(e){}
-              try{map.setLayoutProperty(l.id,'text-transform',cfg.broadcastUppercaseLabels===false?'none':'uppercase');}catch(e){}
-              // Keep the built-in zoom-scaled text-size/font placement: it is
-              // specifically tuned for sparse national/regional overviews.
+              const size=overview.major?+cfg.broadcastCitySize:+cfg.broadcastTownSize,
+                density=cfg.broadcastLabelDensity||'normal',
+                spacing=+cfg.broadcastLabelSpacing||1.25;
+              const typography=[
+                ['text-font',wdFontStack(cfg.broadcastLabelFont)],
+                ['text-size',Number.isFinite(size)&&size>0?size:(overview.major?20:16)],
+                ['text-transform',cfg.broadcastUppercaseLabels===false?'none':'uppercase'],
+                ['text-padding',labelPadding(density,spacing)]
+              ];
+              for(const [property,value] of typography){
+                try{map.setLayoutProperty(l.id,property,value);}catch(e){
+                  console.warn('WX Studio overview label typography',property,e);
+                }
+              }
+              // Original Mapbox placement remains; the text appearance matches
+              // the WX Studio custom city/town layers above the handoff.
+              for(const [property,value] of [
+                ['text-color',cfg.broadcastLabelColor||'#fff'],
+                ['text-halo-color',cfg.broadcastLabelHaloColor||'#101820'],
+                ['text-halo-width',Math.max(0,Number.isFinite(+cfg.broadcastLabelHaloWidth)?+cfg.broadcastLabelHaloWidth:0)],
+                ['text-halo-blur',.15],
+                ['text-opacity',Math.max(0,Math.min(1,Number.isFinite(+cfg.broadcastLabelOpacity)?+cfg.broadcastLabelOpacity:1))]
+              ]){
+                try{map.setPaintProperty(l.id,property,value);}catch(e){
+                  console.warn('WX Studio overview label paint',property,e);
+                }
+              }
             }else map.setLayoutProperty(l.id,'visibility','none');
           }
           else if(roadLabel){
