@@ -521,7 +521,8 @@
           B('broadcastUppercaseLabels','check',{label:'Uppercase'}),
           B('broadcastPlaceDensity','select',{label:'Place types',options:[['cities','Cities only'],['towns','Cities + towns'],['villages','Cities + towns + villages'],['all','Maximum detail']]}),
           B('broadcastKeepMajorCities','check',{label:'Keep major cities'}),
-          B('broadcastMajorCityRank','range',{label:'Major-city rank',min:1,max:16,step:1}),
+          B('broadcastMajorCityRank','range',{label:'Major-city rank',min:1,max:19,step:1}),
+          B('broadcastMajorCityMinZoom','range',{label:'Major-city minimum zoom',min:0,max:12,step:.5}),
           B('broadcastLabelFont','select',{label:'Label font',options:[['DIN Pro Bold','DIN Pro Bold'],['DIN Pro Medium','DIN Pro Medium'],['Roboto Bold','Roboto Bold'],['Roboto Medium','Roboto Medium'],['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold']]}),
           B('broadcastLabelDensity','select',{label:'Label density',options:[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['maximum','Maximum']]}),
           B('broadcastLabelOpacity','range',{label:'Label opacity',min:0,max:1,step:.05}),
@@ -530,11 +531,15 @@
           B('broadcastLabelHaloColor','color',{label:'Label halo'}),
           B('broadcastLabelHaloWidth','range',{label:'Halo width',min:0,max:5,step:.25}),
           B('broadcastCitySize','range',{label:'City size',min:8,max:36,step:1}),
-          B('broadcastCityMinZoom','range',{label:'City min zoom',min:0,max:12,step:.5}),
+          B('broadcastCityMinZoom','range',{label:'City min zoom',min:0,max:22,step:.5}),
+          B('broadcastCityMaxZoom','range',{label:'City max zoom',min:0.5,max:24,step:.5}),
           B('broadcastTownSize','range',{label:'Town size',min:8,max:30,step:1}),
-          B('broadcastTownMinZoom','range',{label:'Town min zoom',min:0,max:14,step:.5}),
+          B('broadcastTownMinZoom','range',{label:'Town min zoom',min:0,max:22,step:.5}),
+          B('broadcastTownMaxZoom','range',{label:'Town max zoom',min:0.5,max:24,step:.5}),
           B('broadcastVillageSize','range',{label:'Village size',min:7,max:26,step:1}),
-          B('broadcastVillageMinZoom','range',{label:'Village min zoom',min:0,max:16,step:.5})
+          B('broadcastVillageMinZoom','range',{label:'Village min zoom',min:0,max:22,step:.5}),
+          B('broadcastVillageMaxZoom','range',{label:'Village max zoom',min:0.5,max:24,step:.5}),
+          h('div',{className:'hint',text:'Keep major cities displays prominent city labels below the City min zoom setting. Major-city minimum zoom sets how far out those labels can appear. Actual places also depend on Mapbox data and label collision spacing.'})
         ],false));
 
         // All four boundary width sliders share ONE physical pixel scale.
