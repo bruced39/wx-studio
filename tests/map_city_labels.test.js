@@ -17,17 +17,18 @@ const fontStack=name=>name==='Roboto Bold'
 const padding=(density,spacing)=>Math.max(0,
  (density==='sparse'?16:density==='dense'?5:density==='maximum'?2:9)*
  Math.max(.5,Math.min(3,+spacing||1)));
-const maker=new Function('wdFontStack','labelPadding',
- between('  function settlementLayer(','  // Natural Earth land polygons')+
- ';return settlementLayer;')(fontStack,padding);
+const labels=new Function('wdFontStack','labelPadding',
+ between('  function tierAppearance(','  // Natural Earth land polygons')+
+ ';return {settlementLayer,tierAppearance,addLabelDots,applyLabelBackground,tierFilter};')(fontStack,padding);
+const maker=labels.settlementLayer;
 const buildCode=between("    ['wd-major-city-labels'",'\n  }\n\n  MB.token');
-const build=new Function('cfg','map','source','settlementLayer',
+const build=new Function('cfg','map','source','settlementLayer','tierAppearance','addLabelDots','applyLabelBackground',
   'const nativeOverviewEnabled=false,nativeOverviewEnd=7.5;'+buildCode+';return map.layers;');
 function render(cfg){
  const map={layers:[],getLayer(id){return this.layers.find(l=>l.id===id)},
   removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},
   addLayer(layer){this.layers.push(layer)}};
- return build(cfg,map,'composite',maker);
+ return build(cfg,map,'composite',maker,labels.tierAppearance,labels.addLabelDots,()=>{});
 }
 const cfg={
  broadcastShowCities:true,broadcastPlaceDensity:'towns',
@@ -86,15 +87,16 @@ test('default city minimum still shows important cities at overview zoom',()=>{
 test('UI exposes editable min and max zoom ranges for every place type',()=>{
  for(const name of ['City','Town','Village'])
   for(const edge of ['Min','Max'])
-   assert.ok(ui.includes("B('broadcast"+name+edge+"Zoom','range'"),name+' '+edge);
+   assert.ok(ui.includes("prefix+'"+edge+"Zoom'"),name+' '+edge);
  assert.ok(ui.includes("B('broadcastMajorCityMinZoom','range'"));
 });
 
 test('Mapbox native settlement names remain visible at zoom 6.0; custom labels take over at 7.5',()=>{
  const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
  const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
-  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
-  nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding);
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground',
+  nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding,
+    labels.tierAppearance,labels.addLabelDots,()=>{});
  const orig=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
   minzoom:2,maxzoom:15,layout:{visibility:'visible'},paint:{}});
  const map={layers:[orig('settlement-major-label'),orig('settlement-minor-label'),orig('state-label')],
@@ -151,7 +153,7 @@ test('Mapbox native settlement names remain visible at zoom 6.0; custom labels t
  fn(map,{...styles,broadcastShowCities:false});
  assert.equal(get('settlement-major-label').layout.visibility,'none');
  assert.equal(get('wd-city-labels'),undefined);
- fn(map,{...styles,broadcastPlaceDensity:'cities'});
+ fn(map,{...styles,broadcastTownEnabled:false});
  assert.equal(get('settlement-minor-label').layout.visibility,'none');
  assert.equal(get('settlement-major-label').layout.visibility,'visible');
 });
@@ -159,8 +161,9 @@ test('Mapbox native settlement names remain visible at zoom 6.0; custom labels t
 test('overview city coverage increases eligible cities without ignoring collisions',()=>{
  const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
  const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
-  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
-  nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding);
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground',
+  nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding,
+    labels.tierAppearance,labels.addLabelDots,()=>{});
  // Simulate a Mapbox Streets v12 stock filter: these real built-in
  // constraints MUST survive every WX Studio rank/density setting.
  const stockMajor=['all',
@@ -238,4 +241,68 @@ test('overview controls have stored defaults and visible Settings inputs',()=>{
  assert.ok(source.includes('broadcastOverviewLabelGap:2'));
  assert.ok(ui.includes("B('broadcastOverviewCityDensity','select'"));
  assert.ok(ui.includes("B('broadcastOverviewLabelGap','range'"));
+ for(const tier of ['City','Town','Village']){
+  assert.ok(ui.includes("placeTier('"+tier+"'"),tier+' accordion');
+  for(const suffix of ['Font','Size','Color','HaloColor','HaloWidth','DensityPct','Population',
+   'TextBackground','DropShadow','Dots','DotColor','DotOutlineColor','DotOutlineWidth',
+   'DotSize','DotNameOffset','DotShadow'])
+   assert.ok(source.includes(suffix)||ui.includes(suffix),tier+' '+suffix);
+ }
+});
+
+test('saved legacy typography migrates to all three separate tiers without overwriting it',()=>{
+ const start=source.indexOf('  const WD_DEFAULTS = {');
+ const end=source.indexOf('  const wdConfigKey = bg =>',start);
+ const MB={};const factory=new Function('MB',source.slice(start,end)+';return MB;');
+ const model=factory(MB);
+ const legacy={broadcastPlaceDensity:'towns',broadcastLabelFont:'Roboto Bold',
+  broadcastLabelColor:'#e4f1ff',broadcastLabelHaloColor:'#020409',
+  broadcastLabelHaloWidth:2.75,broadcastLabelOpacity:.65,
+  broadcastLabelSpacing:1.65,broadcastUppercaseLabels:false,
+  broadcastCitySize:22,broadcastTownSize:18,broadcastVillageSize:14};
+ model.ensureConfig(legacy);
+ for(const tier of ['City','Town','Village']){
+  assert.equal(legacy['broadcast'+tier+'Font'],'Roboto Bold');
+  assert.equal(legacy['broadcast'+tier+'Color'],'#e4f1ff');
+  assert.equal(legacy['broadcast'+tier+'HaloWidth'],2.75);
+  assert.equal(legacy['broadcast'+tier+'Uppercase'],false);
+  assert.equal(legacy['broadcast'+tier+'Opacity'],.65);
+  assert.equal(legacy['broadcast'+tier+'Spacing'],1.65);
+ }
+ assert.equal(legacy.broadcastVillageEnabled,false);
+ legacy.broadcastCityFont='Open Sans Bold';
+ legacy.broadcastTownFont='Roboto Medium';
+ model.ensureConfig(legacy);
+ assert.equal(legacy.broadcastCityFont,'Open Sans Bold');
+ assert.equal(legacy.broadcastTownFont,'Roboto Medium');
+ assert.equal(legacy.broadcastVillageFont,'Roboto Bold');
+ assert.equal(model.DEFAULTS.broadcastCityFont,'DIN Pro Bold');
+});
+
+test('city, town and village paint, font and size settings are independent',()=>{
+ const one={...cfg,broadcastPlaceDensity:'all',
+  broadcastCityFont:'Roboto Bold',broadcastCitySize:29,broadcastCityColor:'#abcdef',
+  broadcastCityHaloColor:'#010101',broadcastCityHaloWidth:3,
+  broadcastTownFont:'DIN Pro Bold',broadcastTownSize:13,broadcastTownColor:'#fedcba',
+  broadcastVillageFont:'Open Sans Bold',broadcastVillageSize:11,broadcastVillageColor:'#aabbcc',
+  broadcastVillageEnabled:true,broadcastCityEnabled:true,broadcastTownEnabled:true};
+ const layers=render(one);
+ const city=layers.find(x=>x.id==='wd-city-labels'),
+   town=layers.find(x=>x.id==='wd-town-labels'),
+   village=layers.find(x=>x.id==='wd-small-place-labels');
+ assert.equal(city.layout['text-size'],29);
+ assert.equal(town.layout['text-size'],13);
+ assert.equal(village.layout['text-size'],11);
+ assert.equal(city.paint['text-color'],'#abcdef');
+ assert.equal(town.paint['text-color'],'#fedcba');
+ assert.equal(village.paint['text-color'],'#aabbcc');
+ assert.deepEqual(city.layout['text-font'],fontStack('Roboto Bold'));
+ assert.deepEqual(town.layout['text-font'],fontStack('DIN Pro Bold'));
+ assert.deepEqual(village.layout['text-font'],fontStack('Open Sans Bold'));
+ assert.equal(city.paint['text-halo-width'],3);
+ assert.equal(city.paint['text-halo-color'],'#010101');
+ const noTowns=render({...one,broadcastTownEnabled:false});
+ assert.equal(noTowns.some(x=>x.id==='wd-town-labels'),false);
+ assert.ok(noTowns.some(x=>x.id==='wd-city-labels'));
+ assert.ok(noTowns.some(x=>x.id==='wd-small-place-labels'));
 });
