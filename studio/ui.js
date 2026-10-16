@@ -1531,6 +1531,7 @@
     modal('Export image', h('div', {}, fld('Scenes', what), fld('Size', size), fld('Format', fmt), fld('Crop position', pos), hint, msg, res), [h('button', { text: 'Close', on: { click: closeModal } }), go]);
   }
   $('#bImg').onclick = imageDialog;
+  $('#bAddMap').onclick = () => { const src = cur(); if (!isMap(src.bg)) { toast('Select a scene that has a map first'); return; } const sc = E.newScene({ name: 'Map ' + (S.show.scenes.length + 1), bg: JSON.parse(JSON.stringify(src.bg)), title: { show: false, text: '', sub: '' } }); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); toast('New scene with the same map – draw on it'); };
   $('#bExport').onclick = exportDialog;
 
   /* ---------- top bar ---------- */

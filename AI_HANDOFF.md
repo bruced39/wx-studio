@@ -323,3 +323,6 @@ After publishing the v0.9.42 cloud Assets feature, identified a failed cloud lis
 - Source syntax and mocked Mapbox label-layer/zoom tests passed. Live Mapbox tile data/layout collision behaviour still needs user confirmation, particularly at zoom 2–6.
 - **Claude overlap:** touched `studio/ui.js` with a targeted change limited to City + Town Labels controls. Did **not** alter Claude's v0.9.44–0.9.47 Layer Style, banners, templates, image export, `studio/engine.js`, `studio/index.html`, or cloud presets/assets. Changed `studio/mapbox.js`, `studio/ui.js`, `VERSION`, `AI_HANDOFF.md` and one file under `tests/`.
 
+
+## v0.9.49 – "+ Map scene" button (Claude)
+- New **+ Map scene** button (index.html `#bAddMap`, ui.js): inserts a new scene after the current one using a copy of the current scene's map (style, view, layers) with no drawn objects/titles. Existing "+ Scene" (blank sky) and ⧉ duplicate unchanged. Did not touch ChatGPT's v0.9.48 city-zoom code (engine/map files) – only ui.js/index.html small additions.
