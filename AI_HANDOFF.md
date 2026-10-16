@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.51` (`VERSION`).
+- **Last reviewed application version:** `0.9.52` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -347,3 +347,12 @@ User supplied screenshots of WX Studio v0.9.50 showing **correct user-selected l
 - **Claude overlap:** Started from main v0.9.50 `4016884`; touched only `studio/mapbox.js`, `tests/map_city_labels.test.js`, `VERSION`, and `AI_HANDOFF.md`. Did not change `studio/ui.js`, `studio/engine.js`, `studio/index.html`, `cloud_assets.js`, cloud presets, the + Map button, banners, text features or widgets.
 - **Live QA still necessary:** confirm your saved map label font, size, halo and spacing stay visually consistent from zoom 8 → 7.5 → 7 → 6 → 5 while city names remain. Browser Mapbox glyph fetching and symbol collisions are not fully exercised by mocked tests.
 
+
+## v0.9.52 — more major cities at regional zoom (2026-10-16)
+
+User reported too few major city labels below zoom 5, despite v0.9.51 having fixed visibility/typography. Root cause: restored native Mapbox settlement layers still used Mapbox's restrictive stock place filters, so WX Studio's Major-city rank and Label density controls did not affect the low-zoom labels.
+
+- Mapbox: custom filter on native settlement-major/minor layers using Streets v8 class/type and symbolrank/filterrank. New `broadcastOverviewCityDensity` selection defaults to `more`: Standard uses configured Major-city rank (default 9), More cities uses rank+5 (default 14), Many cities allows rank 19. Existing Major-city rank now applies below zoom 7.5; native minor town density adapts too. `symbol-sort-key` prioritizes major cities, without forcing overlapping labels.
+- New `broadcastOverviewLabelGap:2` px (adjustable 0–20) relaxes overview collision spacing. Font, city/town size, casing, color, halo and opacity from user settings are unchanged; regular high-zoom spacing remains as previously configured. Map Style → City + Town Labels adds Overview city coverage and Overview label gap controls and improved guidance. `MB.ensureConfig` adds missing defaults to old cloud presets/saved shows automatically.
+- Extended `tests/map_city_labels.test.js` mocks with `setFilter`, rank 9/14/19 density modes, z5, no forced overlap, zero gap, preservation of typography, Show Places and Cities Only toggles. JS parse and simulated filter tests passed. Browser Mapbox layout/collision behavior and tile data still need live QA.
+- Starting main v0.9.51 `fc770ec`; touched only `studio/mapbox.js`, `studio/ui.js` (targeted Map Style controls), `tests/map_city_labels.test.js`, `VERSION` and `AI_HANDOFF.md`. Claude's `studio/engine.js`, `studio/index.html`, + Map, banners, clouds, templates and existing settings were not changed.
