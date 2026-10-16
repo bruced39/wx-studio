@@ -61,6 +61,7 @@
     if (!e) { e = imgCache[id] = { el: new Image(), ok: false }; e.el.onload = () => { e.ok = true; if (E.onAsset) E.onAsset(); }; e.el.src = show.assets[id]; }
     return e.ok ? e.el : null;
   };
+  const blurCache = new WeakMap();
   E.preload = function (show) {
     const ids = Object.keys(show.assets || {});
     return Promise.all(ids.map(id => new Promise(res => { E.img(show, id); const e = imgCache[id]; if (!e) return res(); if (e.ok) return res(); e.el.onload = () => { e.ok = true; res(); }; e.el.onerror = () => res(); })));
@@ -211,7 +212,15 @@
       if (g.WDMap.status !== 'ready') { c.save(); c.fillStyle = 'rgba(255,255,255,0.18)'; c.font = `600 26px ${SANS}`; c.textAlign = 'center'; c.fillText(g.WDMap.status === 'error' ? 'Map data could not be loaded (needs internet) – backgrounds still work' : 'Loading map…', W / 2, H - 40); c.restore(); }
     } else if (b.type === 'image') {
       c.fillStyle = '#000'; c.fillRect(0, 0, W, H); const im = E.img(show, b.asset);
-      if (im) { const s = Math.max(W / im.width, H / im.height) * (b.kenburns ? 1 + 0.06 * clamp(t / Math.max(1, scene.duration), 0, 1) : 1); const w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h); }
+      if (im) { const kb = b.kenburns ? 1 + 0.06 * clamp(t / Math.max(1, scene.duration), 0, 1) : 1;
+        const fit = b.fit || 'blur'; if (fit === 'stretch') { const w = W * kb, h = H * kb; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h); }
+        else if (fit === 'solid') { c.fillStyle = b.fitColor || '#0a1a3a'; c.fillRect(0, 0, W, H); const s = Math.min(W / im.width, H / im.height) * kb, w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h); }
+        else if (fit === 'blur') {
+          let sm = blurCache.get(im); if (!sm) { sm = document.createElement('canvas'); sm.width = 64; sm.height = Math.max(8, Math.round(64 * im.height / im.width)); const sx = sm.getContext('2d'); sx.imageSmoothingQuality = 'high'; sx.drawImage(im, 0, 0, sm.width, sm.height); blurCache.set(im, sm); }
+          const cs = Math.max(W / sm.width, H / sm.height) * 1.08; c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high'; c.drawImage(sm, (W - sm.width * cs) / 2, (H - sm.height * cs) / 2, sm.width * cs, sm.height * cs);
+          c.fillStyle = 'rgba(0,0,0,0.28)'; c.fillRect(0, 0, W, H);
+          const s = Math.min(W / im.width, H / im.height) * kb, w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h);
+        } else { const s = Math.max(W / im.width, H / im.height) * kb; const w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h); } }
     } else if (b.type === 'solid') { c.fillStyle = b.color || '#101820'; c.fillRect(0, 0, W, H); }
     else {
       const gc = E.GRADS[b.grad] || E.GRADS.sky, gr = c.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, gc[0]); gr.addColorStop(1, gc[1]); c.fillStyle = gr; c.fillRect(0, 0, W, H);

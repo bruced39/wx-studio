@@ -407,11 +407,14 @@
     if (b.type === 'gradient') bgNodes.push(bind(b, 'grad', 'select', { label: 'Preset', options: Object.keys(E.GRADS).map(k => [k, k]) }));
     if (b.type === 'solid') bgNodes.push(bind(b, 'color', 'color', { label: 'Colour' }));
     if (b.type === 'image') {
+      if (b.fit === 'solid' && !b.fitColor) b.fitColor = '#0a1a3a';
       bgNodes.push(
         fld('Image', h('select', { on: { change: e => { b.asset = e.target.value; commit(); } } },
           h('option', { value: '', text: '— choose —' }),
           Object.keys(S.show.assets).map((id, i) => h('option', { value: id, text: 'Image ' + (i + 1), selected: id === b.asset })))),
         h('div', { className: 'btnrow' }, h('button', { text: 'Upload background…', on: { click: () => pickImages('bg') } })),
+        bind(b, 'fit', 'select', { label: 'Image fit', rerender: true, options: [['blur', 'Fit whole image + blurred fill'], ['fill', 'Fill (crop edges)'], ['solid', 'Fit whole image + solid color'], ['stretch', 'Stretch to frame']] }),
+        ...((b.fit === 'solid') ? [bind(b, 'fitColor', 'color', { label: 'Bar color' })] : []),
         bind(b, 'kenburns', 'check', { label: 'Slow zoom' })
       );
     }

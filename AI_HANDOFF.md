@@ -250,3 +250,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.34 – Hint for multi-click drawing tools
 - Selecting Front/Arrow/Isobar shows a toast explaining: click each point, double-click or Enter to finish. Investigated "can't draw on the map": in headless (no Mapbox/internet) every bottom-bar tool creates objects on non-map scenes; map scenes could not be verified without a live map. No ChatGPT-modified code touched. File: studio/ui.js.
+
+## v0.9.35 – Background image fit modes
+- Image backgrounds have `bg.fit`: `blur` (default: whole image + blurred/darkened fill), `fill` (crop), `solid` (whole image + `bg.fitColor` bars), `stretch`. Switch is "Image fit" in Scene panel > Background (image backgrounds). 16:9 images look identical in all but stretch/fill-with-different-shape. Files: studio/engine.js, studio/ui.js. No ChatGPT-modified code touched.
