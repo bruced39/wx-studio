@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.50` (`VERSION`).
+- **Last reviewed application version:** `0.9.51` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -336,4 +336,14 @@ After publishing the v0.9.42 cloud Assets feature, identified a failed cloud lis
 - **Show Places Off** hides both native and custom place symbols, and **Cities Only** hides the native minor settlement layer. Older saved map styles and all existing City/Town/Village min/max settings remain compatible. No cloud, scene, show ID, or defaults changed.
 - `tests/map_city_labels.test.js` updated with an actual mocked Mapbox layer stack including `settlement-major-label` and `settlement-minor-label`, verifying they are visible at zoom 6.0, custom city labels begin at 7.5, and Show Places/Cities Only settings work. A separate source-level/mock V8 run passed the same cases. **The live browser has not been tested**: user must verify at zooms 5–8, and if still missing report the active style and settings.
 - **Files changed:** `studio/mapbox.js`, `tests/map_city_labels.test.js`, `VERSION`, `AI_HANDOFF.md`. Did **not** edit `studio/ui.js`, `studio/index.html`, `studio/engine.js`, cloud presets/assets, templates or Claude's `+ Map` button.
+
+
+## v0.9.51 — user label styling now consistent across EVERY zoom (2026-10-16)
+
+User supplied screenshots of WX Studio v0.9.50 showing **correct user-selected large label font/size at zoom 7.5, but much smaller default Mapbox font/size at zoom 7.0**. v0.9.50 deliberately restored native Mapbox settlement-major/minor layers below zoom 7.5 to fix *missing* city labels; however it only applied the user color/halo/opacity/uppercase and accidentally retained Mapbox's built-in zoom-variable **font and text-size**. This release closes that visual jump without undoing low-zoom label visibility.
+
+- `studio/mapbox.js`: The **native overview** `settlement-major-label` and `settlement-minor-label` layers now explicitly use **the same WX Studio label font stack** via `wdFontStack(cfg.broadcastLabelFont)`, **city size** `broadcastCitySize` for major cities and **town size** `broadcastTownSize` for minor cities/towns, `broadcastLabelSpacing` + `broadcastLabelDensity` via `labelPadding()`, `broadcastUppercaseLabels`, `broadcastLabelColor`, `broadcastLabelHaloColor`, `broadcastLabelHaloWidth`, `text-halo-blur=.15` and `broadcastLabelOpacity`. Exactly the same font/size/appearance now applies at zoom 7.0 (native) and zoom 7.5 (custom) without changes to the user's settings. Label color/font/size updates are re-applied on restyle. Native zoom-dependent **feature filtering and collision placement** are deliberately preserved to keep cities visible below zoom 6. Labels may still be less dense at national zoom due to collision avoidance.
+- Extended `tests/map_city_labels.test.js` with assertions comparing native vs custom city/town `text-size`, `text-font`, `text-padding`, casing, opacity, colors, halo and blur under altered saved-style values. Additional tests confirm style updates change both layers together and the important native city layer stays visible at zoom 6.0. Mocked Mapbox/V8 tests and JS syntax checks passed.
+- **Claude overlap:** Started from main v0.9.50 `4016884`; touched only `studio/mapbox.js`, `tests/map_city_labels.test.js`, `VERSION`, and `AI_HANDOFF.md`. Did not change `studio/ui.js`, `studio/engine.js`, `studio/index.html`, `cloud_assets.js`, cloud presets, the + Map button, banners, text features or widgets.
+- **Live QA still necessary:** confirm your saved map label font, size, halo and spacing stay visually consistent from zoom 8 → 7.5 → 7 → 6 → 5 while city names remain. Browser Mapbox glyph fetching and symbol collisions are not fully exercised by mocked tests.
 
