@@ -64,6 +64,24 @@
     roadServiceShow:true, roadServiceColor:'#5e5e5e', roadServiceWidth:.3, roadServiceOpacity:.30, roadServiceOutline:false, roadServiceOutlineColor:'#000000', roadServiceOutlineWidth:.3, roadServiceMinZoom:14, roadServiceMaxZoom:22,
     airportRunwaysShow:true, airportRunwaysColor:'#b3b3b3', airportRunwaysWidth:.6, airportRunwaysMinZoom:0, airportRunwaysMaxZoom:24
   };
+  // Independent label tiers. Legacy map styles with a single Label Font /
+  // Label Color are migrated in ensureConfig BEFORE defaults are applied.
+  // This preserves saved user typography rather than silently resetting it.
+  const LABEL_TIERS=['City','Town','Village'];
+  const LABEL_TIER_SUFFIXES={
+    Enabled:true,Font:'DIN Pro Bold',Color:'#ffffff',HaloColor:'#101820',
+    HaloWidth:2,Size:16,DensityPct:50,Population:'all',TextBackground:false,
+    BackgroundColor:'#101820',DropShadow:false,Uppercase:true,Opacity:1,
+    Spacing:1.25,Dots:false,DotColor:'#ffffff',DotOutlineColor:'#000000',
+    DotOutlineWidth:1,DotSize:3.5,DotNameOffset:4,DotShadow:false
+  };
+  for(const tier of LABEL_TIERS){
+    for(const [suffix,value] of Object.entries(LABEL_TIER_SUFFIXES))
+      WD_DEFAULTS['broadcast'+tier+suffix]=suffix==='Size'
+        ?(tier==='City'?20:tier==='Town'?16:13)
+        :suffix==='DensityPct'?(tier==='City'?60:tier==='Town'?40:20)
+        :suffix==='Enabled'?tier!=='Village':value;
+  }
   MB.DEFAULTS = WD_DEFAULTS;
   MB.ensureConfig = bg => {
     bg = bg || {};
@@ -75,6 +93,29 @@
         if(bg.overlayLatLonManualSpacing==null)bg.overlayLatLonManualSpacing=legacy;
         bg.overlayLatLonMode='on';
       }else bg.overlayLatLonMode='off';
+    }
+    // New independent-tier fields inherit ALL existing saved user settings
+    // once, before filling missing defaults. Repeated calls are idempotent:
+    // changing Cities never changes Towns or Villages afterwards.
+    const legacyPct={sparse:20,normal:60,dense:80,maximum:100};
+    const placeType=bg.broadcastPlaceDensity||WD_DEFAULTS.broadcastPlaceDensity;
+    for(const tier of LABEL_TIERS){
+      const p='broadcast'+tier;
+      const inherited={
+        Enabled:tier==='City'||(tier==='Town'&&placeType!=='cities')||
+          (tier==='Village'&&(placeType==='villages'||placeType==='all')),
+        Font:bg.broadcastLabelFont??WD_DEFAULTS.broadcastLabelFont,
+        Color:bg.broadcastLabelColor??WD_DEFAULTS.broadcastLabelColor,
+        HaloColor:bg.broadcastLabelHaloColor??WD_DEFAULTS.broadcastLabelHaloColor,
+        HaloWidth:bg.broadcastLabelHaloWidth??WD_DEFAULTS.broadcastLabelHaloWidth,
+        Uppercase:bg.broadcastUppercaseLabels??WD_DEFAULTS.broadcastUppercaseLabels,
+        Opacity:bg.broadcastLabelOpacity??WD_DEFAULTS.broadcastLabelOpacity,
+        Spacing:bg.broadcastLabelSpacing??WD_DEFAULTS.broadcastLabelSpacing,
+        DensityPct:legacyPct[bg.broadcastLabelDensity]??60,
+        Size:bg[p+'Size']??WD_DEFAULTS[p+'Size']
+      };
+      for(const [suffix,value] of Object.entries(inherited))
+        if(bg[p+suffix]==null)bg[p+suffix]=value;
     }
     Object.keys(WD_DEFAULTS).forEach(k => { if (bg[k] == null) bg[k] = WD_DEFAULTS[k]; });
     if (!bg.mbStyle) bg.mbStyle = 'broadcast';
@@ -105,30 +146,108 @@
     for(const [id,src] of Object.entries(st.sources||{}))if(src&&src.type==='vector'&&String(src.url||'').includes('mapbox-streets'))return id;
     return null;
   }
+  function tierAppearance(cfg,tier){
+    const p='broadcast'+tier;
+    const val=(key,fallback)=>cfg[p+key]??fallback;
+    const oldDensity=cfg.broadcastLabelDensity||'normal';
+    const pctDefaults={sparse:20,normal:60,dense:80,maximum:100};
+    const pct=Math.max(0,Math.min(100,+val('DensityPct',pctDefaults[oldDensity]??60)));
+    const place=cfg.broadcastPlaceDensity||'towns';
+    return {tier,
+      enabled:!!val('Enabled',tier==='City'||(tier==='Town'&&place!=='cities')||
+        (tier==='Village'&&(place==='villages'||place==='all'))),
+      font:val('Font',cfg.broadcastLabelFont||'DIN Pro Bold'),
+      size:+val('Size',tier==='City'?20:tier==='Town'?16:13),
+      color:val('Color',cfg.broadcastLabelColor||'#ffffff'),
+      halo:val('HaloColor',cfg.broadcastLabelHaloColor||'#101820'),
+      haloWidth:+val('HaloWidth',cfg.broadcastLabelHaloWidth??2),
+      uppercase:!!val('Uppercase',cfg.broadcastUppercaseLabels!==false),
+      opacity:Math.max(0,Math.min(1,+val('Opacity',cfg.broadcastLabelOpacity??1))),
+      spacing:+val('Spacing',cfg.broadcastLabelSpacing??1.25),
+      pct,population:val('Population','all'),
+      background:!!val('TextBackground',false),
+      backgroundColor:val('BackgroundColor','#101820'),
+      shadow:!!val('DropShadow',false),
+      dots:!!val('Dots',false),
+      dotColor:val('DotColor','#ffffff'),
+      dotOutline:val('DotOutlineColor','#000000'),
+      dotOutlineWidth:+val('DotOutlineWidth',1),
+      dotSize:+val('DotSize',3.5),
+      nameOffset:+val('DotNameOffset',4),
+      dotShadow:!!val('DotShadow',false)
+    };
+  }
+  function tierFilter(cfg,tier,types,rankMode){
+    const t=tierAppearance(cfg,tier);
+    const dens=Math.ceil(5*t.pct/100);
+    const filter=['all',['match',['get','class'],['settlement','disputed_settlement'],true,false],
+      ['match',['get','type'],types,true,false]];
+    if(t.population!=='all'){
+      const cap=t.population==='top'?4:9;
+      filter.push(['<=',['coalesce',['get','symbolrank'],99],cap]);
+    }
+    const prominence=['<=',['coalesce',['get','symbolrank'],99],
+      Math.max(1,Math.min(19,+cfg.broadcastMajorCityRank||9))];
+    if(rankMode==='major')filter.push(prominence);
+    else if(tier==='City'&&cfg.broadcastKeepMajorCities!==false)
+      filter.push(['any',['<=',['coalesce',['get','filterrank'],5],dens],prominence]);
+    else filter.push(['<=',['coalesce',['get','filterrank'],5],dens]);
+    return filter;
+  }
   function settlementLayer(id,cfg,source,types,size,minzoom,rankMode,maxzoom){
-    const density=cfg.broadcastLabelDensity||'normal',major=rankMode==='major',spacing=+cfg.broadcastLabelSpacing||1.25;
-    const cityD=density==='sparse'?1:density==='dense'?4:density==='maximum'?5:3,townD=density==='sparse'?1:density==='dense'?3:density==='maximum'?5:2,smallD=density==='sparse'?1:density==='dense'?2:density==='maximum'?5:1;
-    const densityRank=types.includes('city')?cityD:types.includes('town')?townD:smallD,
-      rank=Math.max(1,Math.min(19,Number.isFinite(+cfg.broadcastMajorCityRank)?+cfg.broadcastMajorCityRank:9));
-    const densityFilter=['<=',['coalesce',['get','filterrank'],5],densityRank],
-      prominentCity=['<=',['coalesce',['get','symbolrank'],99],rank];
-    // At overview zooms Mapbox changes filterrank by zoom; filtering major
-    // settlements by BOTH filterrank and symbolrank can erase every city.
-    // Keep genuinely prominent cities by stable symbolrank even when their
-    // dynamic filterrank is outside the selected label-density range.
-    const visibility=major?prominentCity:
-      types.includes('city')&&cfg.broadcastKeepMajorCities!==false
-        ?['any',densityFilter,prominentCity]:densityFilter;
-    const filter=['all',['==',['get','class'],'settlement'],
-      ['match',['get','type'],types,true,false],visibility];
-    const layer={id,type:'symbol',source,'source-layer':'place_label',minzoom:+minzoom||0,filter,
-      layout:{'text-field':['coalesce',['get','name_en'],['get','name']],'text-font':wdFontStack(cfg.broadcastLabelFont),
-        'text-transform':cfg.broadcastUppercaseLabels===false?'none':'uppercase','text-size':+size||14,'symbol-sort-key':['coalesce',['get','symbolrank'],99],
-        'text-anchor':'center','text-justify':'center','text-allow-overlap':false,'text-ignore-placement':false,'text-padding':major?Math.max(2,4*spacing):labelPadding(density,spacing)},
-      paint:{'text-color':cfg.broadcastLabelColor||'#fff','text-opacity':Math.max(0,Math.min(1,+cfg.broadcastLabelOpacity||0)),
-        'text-halo-color':cfg.broadcastLabelHaloColor||'#101820','text-halo-width':Math.max(0,+cfg.broadcastLabelHaloWidth||0),'text-halo-blur':.15}};
+    const tier=types.includes('city')?'City':types.includes('town')?'Town':'Village',
+      t=tierAppearance(cfg,tier),overview=rankMode==='major',
+      layer={id,type:'symbol',source,'source-layer':'place_label',minzoom:+minzoom||0,
+        filter:tierFilter(cfg,tier,types,rankMode),
+        layout:{'text-field':['coalesce',['get','name_en'],['get','name']],
+          'text-font':wdFontStack(t.font),
+          'text-transform':t.uppercase?'uppercase':'none',
+          'text-size':overview?Math.max(10,t.size+2):t.size,
+          'symbol-sort-key':['coalesce',['get','symbolrank'],99],
+          'text-anchor':'center','text-justify':'center',
+          'text-allow-overlap':false,'text-ignore-placement':false,
+          'text-padding':labelPadding(cfg.broadcastLabelDensity||'normal',t.spacing)},
+        paint:{'text-color':t.color,'text-opacity':t.opacity,
+          'text-halo-color':t.halo,'text-halo-width':t.haloWidth,
+          'text-halo-blur':t.shadow?1.3:.15}};
+    if(t.dots)layer.layout['text-offset']=[0,-Math.max(0,t.nameOffset)/Math.max(8,t.size)];
     if(maxzoom!=null&&isFinite(+maxzoom))layer.maxzoom=+maxzoom;
     return layer;
+  }
+  function addLabelDots(map,cfg,source,tier,types,minz,maxz){
+    const t=tierAppearance(cfg,tier);
+    if(!t.enabled||!t.dots||!source||maxz<=minz)return;
+    const layer={id:'wd-'+tier.toLowerCase()+'-dots',type:'circle',source,
+      'source-layer':'place_label',minzoom:minz,maxzoom:maxz,
+      filter:tierFilter(cfg,tier,types,null),
+      paint:{'circle-radius':Math.max(.25,t.dotSize/2),
+        'circle-color':t.dotColor,'circle-opacity':t.opacity,
+        'circle-stroke-color':t.dotOutline,
+        'circle-stroke-width':Math.max(0,t.dotOutlineWidth),
+        'circle-blur':t.dotShadow?.35:0}};
+    try{map.addLayer(layer);}catch(e){console.warn('WX Studio '+tier+' dots',e);}
+  }
+  function labelBackground(map,cfg,tier){
+    const t=tierAppearance(cfg,tier);
+    if(!t.background)return null;
+    const id='wd-text-bg-'+tier.toLowerCase();
+    if(map.getImage&&map.getImage(id))return id;
+    try{
+      const canvas=document.createElement('canvas');canvas.width=24;canvas.height=24;
+      const c=canvas.getContext('2d');if(!c)return null;
+      c.fillStyle=t.backgroundColor;c.globalAlpha=.8;
+      c.beginPath();c.roundRect(1,1,22,22,4);c.fill();
+      map.addImage(id,c.getImageData(0,0,24,24),{
+        stretchX:[[8,16]],stretchY:[[8,16]],content:[5,5,19,19],pixelRatio:1});
+      return id;
+    }catch(e){console.warn('WX Studio label background',e);return null;}
+  }
+  function applyLabelBackground(map,layerId,cfg,tier){
+    const id=labelBackground(map,cfg,tier);
+    const layout=id?{'icon-image':id,'icon-text-fit':'both','icon-text-fit-padding':[4,7,4,7]}:
+      {'icon-image':'','icon-text-fit':'none'};
+    for(const [key,value] of Object.entries(layout))
+      try{map.setLayoutProperty(layerId,key,value);}catch(e){}
   }
   // Natural Earth land polygons preserve continent and island coastline shapes
   // without the lakes/ponds that Mapbox Streets merges into its water polygons.
