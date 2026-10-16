@@ -161,8 +161,18 @@ test('overview city coverage increases eligible cities without ignoring collisio
  const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
   'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
   nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding);
+ // Simulate a Mapbox Streets v12 stock filter: these real built-in
+ // constraints MUST survive every WX Studio rank/density setting.
+ const stockMajor=['all',
+   ['match',['get','class'],['settlement','disputed_settlement'],true,false],
+   ['<=',['get','filterrank'],3],
+   ['<=',['get','symbolrank'],6]];
+ const nativeSort=['step',['get','symbolrank'],18,6,16,7,14];
  const orig=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
-  minzoom:2,maxzoom:15,layout:{visibility:'visible'},paint:{}});
+  minzoom:2,maxzoom:15,
+  filter:id==='settlement-major-label'?JSON.parse(JSON.stringify(stockMajor)):null,
+  layout:{visibility:'visible','text-allow-overlap':false,'text-ignore-placement':false,
+    'symbol-sort-key':JSON.parse(JSON.stringify(nativeSort))},paint:{}});
  const map={layers:[orig('settlement-major-label'),orig('settlement-minor-label')],
   getStyle(){return {layers:this.layers}},getLayer(id){return this.layers.find(l=>l.id===id)},
   setLayoutProperty(id,key,value){this.getLayer(id).layout[key]=value},
@@ -187,9 +197,31 @@ test('overview city coverage increases eligible cities without ignoring collisio
   assert.equal(layer.layout['text-allow-overlap'],false,'no colliding text');
   assert.equal(layer.layout['text-ignore-placement'],false,'do not block other labels');
   assert.equal(layer.layout['text-padding'],2,'tight low zoom gap');
-  assert.deepEqual(layer.layout['symbol-sort-key'],['coalesce',['get','symbolrank'],99]);
+  assert.deepEqual(layer.layout['symbol-sort-key'],nativeSort,
+    'must not override native Mapbox placement sorting');
   assert.equal(layer.layout['text-size'],conf.broadcastCitySize,'preserve user city font size');
  }
+ // The original Mapbox label must NEVER disappear, even if the user's
+ // requested extra rank is below its symbolrank or its type is unusual.
+ // This was the exact regression in 0.9.52.
+ fn(map,{...conf,broadcastMajorCityRank:1,broadcastOverviewCityDensity:'standard'});
+ const preserved={class:'settlement',type:'city',symbolrank:5,filterrank:2};
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,preserved),true,
+  'original major city remains eligible even with strict extra rank');
+ const baselineOnly={class:'disputed_settlement',type:'town',symbolrank:4,filterrank:2};
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,baselineOnly),true,
+  'original Mapbox disputed/city type is preserved by baseline OR');
+ const restoredFilter=map.getLayer('settlement-major-label').filter;
+ assert.deepEqual(restoredFilter[1],stockMajor,'stock filter was cached unmodified');
+ // Check repeated slider restyles don't overwrite stock cache with the
+ // already-modified filter, allowing standard to become cumulative.
+ fn(map,{...conf,broadcastMajorCityRank:9,broadcastOverviewCityDensity:'many'});
+ fn(map,{...conf,broadcastMajorCityRank:1,broadcastOverviewCityDensity:'standard'});
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,city(19)),false,
+  'reducing label density actually removes EXTRA cities again');
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,preserved),true,
+  'the original stock city survives a full density round trip');
+ assert.deepEqual(map.getLayer('settlement-major-label').layout['symbol-sort-key'],nativeSort);
  assert.deepEqual(ranks.map(x=>x[1].length),[2,4,6],'higher mode offers more candidates');
  fn(map,{...conf,broadcastMajorCityRank:13,broadcastOverviewCityDensity:'more'});
  assert.ok(evalFilter(map.getLayer('settlement-major-label').filter,city(18)),
