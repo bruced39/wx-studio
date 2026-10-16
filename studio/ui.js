@@ -744,7 +744,6 @@
   }
   async function saveAssetCloud(b,silent){
     const k=cloudKind(kindOf(b));
-    if(AC.busy&&!silent)return;
     try{
       const rows=await ASSET_CLOUD().list(k);
       if(!silent&&rows.some(x=>x.name===b.name)&&
