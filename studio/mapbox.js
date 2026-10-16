@@ -33,7 +33,7 @@
     overlayTimeZones:false, overlayTimeZonesColor:'#209e84', overlayTimeZonesLineType:'solid', overlayTimeZonesWidth:1.2, overlayTimeZonesOpacity:1, overlayTimeZonesMinZoom:2, overlayTimeZonesMaxZoom:8,
     overlayLatLonMode:'off', overlayLatLonColor:'#b9b9b9', overlayLatLonWidth:.75, overlayLatLonOpacity:.45, overlayLatLonAutoSpacing:true, overlayLatLonManualSpacing:5,
     broadcastSatelliteSaturation:0, broadcastSatelliteContrast:.15,
-    broadcastShowCities:true, broadcastUppercaseLabels:true, broadcastPlaceDensity:'towns', broadcastKeepMajorCities:true, broadcastMajorCityRank:9, broadcastOverviewCityDensity:'more',
+    broadcastShowCities:true, broadcastUppercaseLabels:true, broadcastPlaceDensity:'towns', broadcastKeepMajorCities:true, broadcastMajorCityRank:9, broadcastOverviewCityDensity:'more', broadcastOverviewLabelGap:2,
     broadcastLabelFont:'DIN Pro Bold', broadcastLabelDensity:'normal', broadcastLabelOpacity:1, broadcastLabelSpacing:1.25,
     broadcastCitySize:20, broadcastTownSize:16, broadcastVillageSize:13,
     broadcastCityMinZoom:3, broadcastCityMaxZoom:24, broadcastTownMinZoom:5, broadcastTownMaxZoom:24,
@@ -654,14 +654,17 @@
                   console.warn('WX Studio overview label placement',property,e);
                 }
               }
-              const size=overview.major?+cfg.broadcastCitySize:+cfg.broadcastTownSize,
-                density=cfg.broadcastLabelDensity||'normal',
-                spacing=+cfg.broadcastLabelSpacing||1.25;
+              const size=overview.major?+cfg.broadcastCitySize:+cfg.broadcastTownSize;
+              // A much tighter, separately configurable collision buffer
+              // improves regional place coverage while preserving the exact
+              // user-selected font, size, casing, halo and color.
+              const overviewGap=Number.isFinite(+cfg.broadcastOverviewLabelGap)
+                ?Math.max(0,Math.min(20,+cfg.broadcastOverviewLabelGap)):2;
               const typography=[
                 ['text-font',wdFontStack(cfg.broadcastLabelFont)],
                 ['text-size',Number.isFinite(size)&&size>0?size:(overview.major?20:16)],
                 ['text-transform',cfg.broadcastUppercaseLabels===false?'none':'uppercase'],
-                ['text-padding',labelPadding(density,spacing)]
+                ['text-padding',overviewGap]
               ];
               for(const [property,value] of typography){
                 try{map.setLayoutProperty(l.id,property,value);}catch(e){
