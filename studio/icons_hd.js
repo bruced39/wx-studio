@@ -115,14 +115,28 @@
   }
 
   /* ---- streak rain (steady, straight) ---- */
-  function rain(c, ph, p) {
-    const r = rng(p.seed); c.save(); c.lineCap = 'round';
-    for (let i = 0; i < p.n; i++) {
-      const x = p.x0 + p.xw * r(), spd = p.spd + (r() < p.spdP ? 1 : 0), f = ((ph * spd + r()) % 1), y = p.top + p.len * f,
-        a = Math.min(1, f * p.fk) * Math.sin(Math.PI * Math.min(1, f * p.fs)) ** 0.7, L = p.L * (0.8 + 0.5 * r()), w = p.w0 + p.w1 * r();
-      const gr = c.createLinearGradient(x, y, x - L * 0.25, y + L); gr.addColorStop(0, 'rgba(200,225,255,0)'); gr.addColorStop(1, 'rgba(214,234,255,' + (p.aS * a) + ')');
-      c.strokeStyle = gr; c.lineWidth = w; c.shadowColor = 'rgba(120,180,255,' + (p.aG * a) + ')'; c.shadowBlur = p.blur; c.beginPath(); c.moveTo(x, y); c.lineTo(x - L * 0.25, y + L); c.stroke();
+  /* ---- raindrops: glossy drop sprites (from the user's reference photo), falling along their own slant ---- */
+  const DROPS = [[44, 112, -19.8], [45, 111, -20.2], [44, 111, -20.0], [46, 112, -20.2], [48, 112, -20.3], [44, 112, -20.1], [46, 112, -20.2], [56, 112, -23.0], [42, 112, -20.1], [44, 112, -20.1], [48, 112, -20.2], [44, 112, -19.7]];   // [width, height, tilt-deg] of drop0..dropN art (sprite images in icons_hd_art.js)
+  const rainLay = {};
+  function rainLayout(p) {
+    const key = [p.seed, p.n, p.x0, p.xw, p.top, p.len, p.spd, p.spdP, p.L].join('|'); if (rainLay[key]) return rainLay[key];
+    const n = Math.max(4, Math.round(p.n * 0.5)), sz = Math.min(1.1, Math.max(0.9, p.L / 24)), tn = d => Math.tan(DROPS[d.si][2] * Math.PI / 180);
+    const pos = (d, ph) => { const f = (ph * d.spd + d.off) % 1; return [d.x + tn(d) * p.len * (f - 0.5), p.top + p.len * f]; };
+    let best = null, bs = -1;
+    for (let t = 0; t < 300; t++) {
+      const r = rng(p.seed * 131 + t + 1), L = [];
+      for (let i = 0; i < n; i++) L.push({ x: p.x0 + p.xw * r(), off: r(), spd: p.spd + (r() < p.spdP ? 1 : 0), h: (26 + 34 * r()) * sz, si: Math.floor(r() * DROPS.length) });
+      let ms = 1e9; for (let k = 0; k < 12; k++) { const P = L.map(d => pos(d, k / 12)); for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const dd = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]); if (dd < ms) ms = dd; } }
+      if (ms > bs) { bs = ms; best = L; }
     }
+    return rainLay[key] = { L: best, pos };
+  }
+  function rain(c, ph, p) {
+    if (!ok('drop0')) return; const lay = rainLayout(p); c.save();
+    lay.L.forEach(d => {
+      const f = (ph * d.spd + d.off) % 1, xy = lay.pos(d, ph), D = DROPS[d.si], a = Math.min(1, f * p.fk) * Math.sin(Math.PI * Math.min(1, f * p.fs)) ** 0.7, h = d.h, w = D[0] * h / D[1];
+      c.globalAlpha = 0.95 * a; c.drawImage(IMG['drop' + d.si], xy[0] - w * 0.2, xy[1] - h * 0.05, w, h);
+    });
     c.restore();
   }
   /* ---- wind-swept curved streaks ---- */
