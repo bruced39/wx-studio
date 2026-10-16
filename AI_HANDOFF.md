@@ -288,3 +288,7 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 - **Touched Claude-shared files:** `studio/ui.js` (minimal targeted Assets panel additions and PNG import branch), `studio/index.html` (one cloud script tag). **Not touched:** `studio/engine.js` and unrelated layouts/templates/text styling; no breaking object-ID migration.
 - **Future cautions:** Cloud items do NOT get inserted into the user's scene automatically; first download into local IndexedDB, then click local thumbnail to place. Delete cloud does not remove local files. The user's cloud login is the SAME map-presets login. Upload limit and PNG-only MIME apply to Storage bucket, not offline local photo workflows.
 
+
+## v0.9.43 — cloud Assets offline retry safeguard (2026-10-16)
+
+After publishing the v0.9.42 cloud Assets feature, identified a failed cloud list request could cause an automatic retry loop in the Assets panel. `studio/ui.js` now tracks attempted loads per signed-in account and Assets sub-tab, retries only when user clicks **Refresh cloud**, and resets attempt flags on account switch. The local IndexedDB library, map presets, engine, other Claude features, and all data remain unchanged. JavaScript syntax checked; user should test offline/online switching in the Assets panel.
