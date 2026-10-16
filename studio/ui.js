@@ -742,13 +742,31 @@
     }catch(e){AC.status='Could not load cloud assets: '+cloudFail(e);AC.loaded[kind]=false;}
     finally{AC.loading=null;renderAssetCloud();}
   }
+  async function cloudUploadPng(b){
+    // Existing JPG/photo background files stay unchanged in IndexedDB.
+    // Only a cloud BACKGROUND copy may be encoded as PNG; banner and
+    // graphic PNG bytes are returned untouched.
+    if(kindOf(b)!=='bg'||/^data:image\/png;base64,/i.test(b.data))return b.data;
+    return new Promise((resolve,reject)=>{
+      const img=new Image();
+      img.onerror=()=>reject(Error('Could not read background image for cloud PNG upload.'));
+      img.onload=()=>{
+        try{
+          const cv=document.createElement('canvas');cv.width=img.naturalWidth;cv.height=img.naturalHeight;
+          const context=cv.getContext('2d');if(!context)throw Error('Canvas unavailable.');
+          context.drawImage(img,0,0);resolve(cv.toDataURL('image/png'));
+        }catch(e){reject(e);}
+      };
+      img.src=b.data;
+    });
+  }
   async function saveAssetCloud(b,silent){
     const k=cloudKind(kindOf(b));
     try{
       const rows=await ASSET_CLOUD().list(k);
       if(!silent&&rows.some(x=>x.name===b.name)&&
          !confirm('Replace cloud '+k+' named "'+b.name+'"? Your local copy will be kept.'))return false;
-      await ASSET_CLOUD().save({name:b.name,kind:k,data:b.data});
+      await ASSET_CLOUD().save({name:b.name,kind:k,data:await cloudUploadPng(b)});
       AC.loaded[k]=false;AC.thumbs.clear();
       return true;
     }catch(e){if(!silent)toast('Cloud upload failed: '+cloudFail(e));throw e;}
