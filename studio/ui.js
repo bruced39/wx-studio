@@ -867,11 +867,13 @@
     rows.forEach(row=>{
       const image=h('img',{alt:row.name,style:'width:100%;aspect-ratio:16/9;object-fit:contain;border-radius:5px;display:block;background:repeating-conic-gradient(#2a3342 0% 25%,#1c2430 0% 50%) 0 0/16px 16px'});
       cloudThumb(row,image);
-      gr.append(h('div',{style:'padding:6px;border:1px solid #42516a;border-radius:6px;min-width:0'},
+      gr.append(h('div',{style:'padding:6px;border:1px solid #42516a;border-radius:6px;min-width:0;cursor:pointer',
+        title:'Download "'+row.name+'" to this browser',
+        on:{click:()=>downloadCloudAsset(row)}},
         image,h('div',{className:'hint',text:row.name,style:'margin:5px 0;overflow-wrap:anywhere'}),
-        h('button',{className:'sm pri',text:'Download',on:{click:()=>downloadCloudAsset(row)}}),
-        h('button',{className:'sm',text:'Rename',on:{click:()=>renameCloudAsset(row)}}),
-        h('button',{className:'sm dng',text:'Delete',on:{click:()=>deleteCloudAsset(row)}})
+        h('button',{className:'sm pri',text:'Download',on:{click:e=>{e.stopPropagation();downloadCloudAsset(row);}}}),
+        h('button',{className:'sm',text:'Rename',on:{click:e=>{e.stopPropagation();renameCloudAsset(row);}}}),
+        h('button',{className:'sm dng',text:'Delete',on:{click:e=>{e.stopPropagation();deleteCloudAsset(row);}}})
       ));
     });
     p.append(gr);
