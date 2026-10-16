@@ -727,20 +727,31 @@
     // additional eligible settlement features requested by the user.
     // Mapbox's native placement remains in charge of text collisions.
     const nativeOverviewFilter=(original,major)=>{
+      const appearance=tierAppearance(cfg,major?'City':'Town');
+      const scaledRank=Math.max(1,Math.min(19,Math.round(rankCap*
+        (appearance.pct/(major?60:40)))));
       const extras=major
         ?['all',['match',['get','class'],['settlement','disputed_settlement'],true,false],
             ['==',['get','type'],'city'],
-            ['<=',['coalesce',['get','symbolrank'],99],rankCap]]
+            ['<=',['coalesce',['get','symbolrank'],99],scaledRank]]
         :['all',['match',['get','class'],['settlement','disputed_settlement'],true,false],
             ['==',['get','type'],'town'],
             ['<=',['coalesce',['get','filterrank'],5],
-              overviewDensity==='standard'?townRank:overviewDensity==='more'?Math.max(4,townRank):5]];
-      return original?['any',original,extras]:extras;
+              Math.max(1,Math.min(5,Math.ceil(
+                (overviewDensity==='standard'?townRank:
+                 overviewDensity==='more'?Math.max(4,townRank):5)*
+                 (appearance.pct/40))))]];
+      const combined=original?['any',original,extras]:extras;
+      if(appearance.population!=='all')
+        return ['all',combined,['<=',['coalesce',['get','symbolrank'],99],
+          appearance.population==='top'?4:9]];
+      return combined;
     };
     const nativeOverviewRange=(l)=>{
       const major=overviewIsMajor(l),minor=overviewIsMinor(l);
       if(!nativeOverviewEnabled||(!major&&!minor))return null;
-      if(!tierAppearance(cfg,major?'City':'Town').enabled)return null;
+      const appearance=tierAppearance(cfg,major?'City':'Town');
+      if(!appearance.enabled||appearance.pct<=0)return null;
       const min=major?nativeMajorStart:nativeTownStart;
       return nativeOverviewEnd>min?{min,max:nativeOverviewEnd,major}:null;
     };
