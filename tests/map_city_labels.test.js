@@ -16,7 +16,8 @@ const maker=new Function('wdFontStack','labelPadding',
  between('  function settlementLayer(','  // Natural Earth land polygons')+
  ';return settlementLayer;')(()=>['DIN Pro Bold','Arial Unicode MS Bold'],()=>9);
 const buildCode=between("    ['wd-major-city-labels'",'\n  }\n\n  MB.token');
-const build=new Function('cfg','map','source','settlementLayer',buildCode+';return map.layers;');
+const build=new Function('cfg','map','source','settlementLayer',
+  'const nativeOverviewEnabled=false,nativeOverviewEnd=7.5;'+buildCode+';return map.layers;');
 function render(cfg){
  const map={layers:[],getLayer(id){return this.layers.find(l=>l.id===id)},
   removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},
