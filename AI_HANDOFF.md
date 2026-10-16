@@ -234,3 +234,7 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 - 7-Day Forecast Builder has a new per-day "Magenta" checkbox (`d.hl`). `E.build7DayBW` draws a semi-transparent magenta rect (`rgba(220,30,175,0.6)`) over that day's template panel (days 1-5: y 280-948; day 6: 280-628; day 7: 722-1070 in 1920x1080) beneath the header/content, so the background still shows through.
 - Template robustness: `ensureBG()` in ui.js re-registers `assets.bg7day` (window.WX_BG7DAY) on boot and loadShow whenever a scene references it; autosave no longer stores the 335 KB template in localStorage (avoids quota loss).
 - Files: studio/engine.js, studio/ui.js. No ChatGPT-modified code touched.
+
+## v0.9.30 – Magenta = #ff00c6 @ 65%; "+ Scene" inserts a blank scene
+- Magenta highlight panel now `rgba(255,0,198,0.65)` (user's #ff00c6 at the template's 65% opacity).
+- `+ Scene` (ui.js newScene) now inserts a blank scene (solid #101820 background, no title, no objects) instead of copying the previous scene's background. Files: studio/engine.js, studio/ui.js. No ChatGPT-modified code touched.

@@ -104,7 +104,7 @@
   function delObj() { const sc = cur(); if (!S.oid) return; sc.objects = sc.objects.filter(o => o.id !== S.oid); S.oid = null; commit(); renderPanels(); }
   function dupObj() { const o = selObj(); if (!o) return; const c = JSON.parse(JSON.stringify(o)); c.id = 'o' + Date.now().toString(36); const xf = E.xf(cur(), editT()); E.move(c, 30, 30, xf); cur().objects.push(c); S.oid = c.id; commit(); renderPanels(); }
   function layer(dir) { const a = cur().objects, i = a.findIndex(o => o.id === S.oid); if (i < 0) return; const j = dir === 'front' ? a.length - 1 : dir === 'back' ? 0 : clamp(i + dir, 0, a.length - 1); const [o] = a.splice(i, 1); a.splice(j, 0, o); commit(); }
-  function newScene(after) { const prev = cur(), sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: JSON.parse(JSON.stringify(prev.bg)), title: { show: true, text: '', sub: '' } }); sc.bg.view = prev.bg.view ? JSON.parse(JSON.stringify(prev.bg.view)) : null; sc.bg.view2 = null; S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
+  function newScene(after) { const sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: { type: 'solid', color: '#101820', kenburns: false }, title: { show: false, text: '', sub: '' } }); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
 
   /* ---------- assets ---------- */
   function readImage(file) {

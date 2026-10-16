@@ -363,7 +363,7 @@
     const f = 1920 / 1672, S = v => v * f, objs = [];
     const COLS = [[25, 281], [298, 553], [573, 828], [846, 1102], [1119, 1375]], RC = [1394, 1650], LOWS = [[206, 370], [480, 643], [754, 917], [1029, 1192]];
     const NAVY = 'rgba(8,36,92,0.97)', ORANGE = '#f28a1c', GREEN = '#25d450', LOWC = '#7fcfff';
-    const MAGENTA = 'rgba(220,30,175,0.6)';
+    const MAGENTA = 'rgba(255,0,198,0.65)';
     const mk = (d, i, x0, x1, y0, y1, delay, panelB) => {
       const add = (type, props, ex) => { const ob = E.newObject(type, props); ob.anim = { in: 'slide-up', delay: delay + (ex || 0), dur: 0.5 }; objs.push(ob); return ob; };
       const wk = /^(SAT|SUN)/i.test(d.day), x = S(x0), w = S(x1 - x0), cx = x + w / 2;
