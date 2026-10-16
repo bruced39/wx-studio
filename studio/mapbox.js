@@ -740,7 +740,7 @@
     const nativeOverviewRange=(l)=>{
       const major=overviewIsMajor(l),minor=overviewIsMinor(l);
       if(!nativeOverviewEnabled||(!major&&!minor))return null;
-      if(minor&&(cfg.broadcastPlaceDensity||'towns')==='cities')return null;
+      if(!tierAppearance(cfg,major?'City':'Town').enabled)return null;
       const min=major?nativeMajorStart:nativeTownStart;
       return nativeOverviewEnd>min?{min,max:nativeOverviewEnd,major}:null;
     };
@@ -776,7 +776,9 @@
               try{
                 // Even when the extra-density rule is too restrictive for a
                 // particular tile/zoom, the original settlement names remain.
-                map.setFilter(l.id,nativeOverviewFilter(original,overview.major));
+                const combined=nativeOverviewFilter(original,overview.major);
+                map.setFilter(l.id,overview.major?combined:
+                  ['all',combined,['==',['get','type'],'town']]);
               }catch(e){
                 console.warn('WX Studio extra overview labels unavailable; using stock filter',l.id,e);
                 try{map.setFilter(l.id,original);}catch(ignore){}
@@ -784,17 +786,16 @@
               // Preserve Mapbox's ORIGINAL symbol-sort-key and placement
               // expressions. Altering those alongside the filters can
               // destabilize which names survive collision at globe zooms.
-              const size=overview.major?+cfg.broadcastCitySize:+cfg.broadcastTownSize;
-              // A much tighter, separately configurable collision buffer
-              // improves regional place coverage while preserving the exact
-              // user-selected font, size, casing, halo and color.
+              const tier=overview.major?'City':'Town',appearance=tierAppearance(cfg,tier);
+              const size=appearance.size;
               const overviewGap=Number.isFinite(+cfg.broadcastOverviewLabelGap)
                 ?Math.max(0,Math.min(20,+cfg.broadcastOverviewLabelGap)):2;
               const typography=[
-                ['text-font',wdFontStack(cfg.broadcastLabelFont)],
-                ['text-size',Number.isFinite(size)&&size>0?size:(overview.major?20:16)],
-                ['text-transform',cfg.broadcastUppercaseLabels===false?'none':'uppercase'],
-                ['text-padding',overviewGap]
+                ['text-font',wdFontStack(appearance.font)],
+                ['text-size',size],
+                ['text-transform',appearance.uppercase?'uppercase':'none'],
+                ['text-padding',overviewGap],
+                ['text-offset',appearance.dots?[0,-Math.max(0,appearance.nameOffset)/Math.max(8,size)]:[0,0]]
               ];
               for(const [property,value] of typography){
                 try{map.setLayoutProperty(l.id,property,value);}catch(e){
@@ -804,16 +805,17 @@
               // Original Mapbox placement remains; the text appearance matches
               // the WX Studio custom city/town layers above the handoff.
               for(const [property,value] of [
-                ['text-color',cfg.broadcastLabelColor||'#fff'],
-                ['text-halo-color',cfg.broadcastLabelHaloColor||'#101820'],
-                ['text-halo-width',Math.max(0,Number.isFinite(+cfg.broadcastLabelHaloWidth)?+cfg.broadcastLabelHaloWidth:0)],
-                ['text-halo-blur',.15],
-                ['text-opacity',Math.max(0,Math.min(1,Number.isFinite(+cfg.broadcastLabelOpacity)?+cfg.broadcastLabelOpacity:1))]
+                ['text-color',appearance.color],
+                ['text-halo-color',appearance.halo],
+                ['text-halo-width',appearance.haloWidth],
+                ['text-halo-blur',appearance.shadow?1.3:.15],
+                ['text-opacity',appearance.opacity]
               ]){
                 try{map.setPaintProperty(l.id,property,value);}catch(e){
                   console.warn('WX Studio overview label paint',property,e);
                 }
               }
+              applyLabelBackground(map,l.id,cfg,tier);
             }else map.setLayoutProperty(l.id,'visibility','none');
           }
           else if(roadLabel){
@@ -899,9 +901,11 @@
       }
     }
     installHillshade(map,cfg);installLandWaterFeatures(map,cfg,source);installTransportation(map,cfg,source);installOverlays(map,cfg);
-    ['wd-major-city-labels','wd-city-labels','wd-town-labels','wd-small-place-labels'].forEach(id=>{try{if(map.getLayer(id))map.removeLayer(id);}catch{}});
+    ['wd-major-city-labels','wd-city-labels','wd-town-labels','wd-small-place-labels',
+      'wd-city-dots','wd-town-dots','wd-village-dots'].forEach(id=>{
+      try{if(map.getLayer(id))map.removeLayer(id);}catch{}
+    });
     if(source&&cfg.broadcastShowCities!==false){
-      const d=cfg.broadcastPlaceDensity||'towns';
       const minZoom=(value,fallback)=>Math.max(0,Math.min(23.99,Number.isFinite(+value)?+value:fallback));
       const maxZoom=(value,min)=>Math.max(min+.01,Math.min(24,Number.isFinite(+value)?+value:24));
       const cityMin=minZoom(cfg.broadcastCityMinZoom,3),cityMax=maxZoom(cfg.broadcastCityMaxZoom,cityMin);
@@ -910,23 +914,33 @@
       const majorMin=minZoom(cfg.broadcastMajorCityMinZoom,0);
       const customCityMin=nativeOverviewEnabled?Math.max(cityMin,nativeOverviewEnd):cityMin;
       const customTownMin=nativeOverviewEnabled?Math.max(townMin,nativeOverviewEnd):townMin;
-      const add=l=>{try{map.addLayer(l);}catch(e){console.warn('WX Studio label layer',l.id,e);}};
-      if(d==='villages'||d==='all')add(settlementLayer('wd-small-place-labels',cfg,source,
-        d==='all'?['village','hamlet','suburb','neighborhood']:['village'],
-        cfg.broadcastVillageSize,villageMin,null,villageMax));
-      if(d!=='cities'&&townMax>customTownMin)
+      const add=(layer,tier)=>{
+        try{
+          map.addLayer(layer);
+          applyLabelBackground(map,layer.id,cfg,tier);
+        }catch(e){console.warn('WX Studio label layer',layer.id,e);}
+      };
+      // Dots share each tier's filter, coordinates and configured zoom range.
+      addLabelDots(map,cfg,source,'City',['city'],majorMin,cityMax);
+      addLabelDots(map,cfg,source,'Town',['town'],townMin,townMax);
+      addLabelDots(map,cfg,source,'Village',['village','hamlet'],villageMin,villageMax);
+      if(tierAppearance(cfg,'Village').enabled)
+        add(settlementLayer('wd-small-place-labels',cfg,source,['village','hamlet'],
+          cfg.broadcastVillageSize,villageMin,null,villageMax),'Village');
+      if(tierAppearance(cfg,'Town').enabled&&townMax>customTownMin)
         add(settlementLayer('wd-town-labels',cfg,source,['town'],
-          cfg.broadcastTownSize,customTownMin,null,townMax));
-      if(cityMax>customCityMin)add(settlementLayer('wd-city-labels',cfg,source,['city'],cfg.broadcastCitySize,customCityMin,null,cityMax));
-      // Separate fallback covers only zooms below the regular city minimum,
-      // without hiding Boston/New York/etc. when zooming out past level 6.
-      // Only use our synthetic fallback if the active Mapbox style doesn't
-      // supply its own native overview settlement symbols, or if a gap above
-      // the native overview end needs to be bridged.
-      const syntheticMajorMin=nativeOverviewEnabled?Math.max(majorMin,nativeOverviewEnd):majorMin;
-      if(cfg.broadcastKeepMajorCities!==false&&syntheticMajorMin<cityMin)
-        add(settlementLayer('wd-major-city-labels',cfg,source,['city'],
-          Math.max(10,+cfg.broadcastCitySize+2),syntheticMajorMin,'major',cityMin));
+          cfg.broadcastTownSize,customTownMin,null,townMax),'Town');
+      if(tierAppearance(cfg,'City').enabled){
+        if(cityMax>customCityMin)
+          add(settlementLayer('wd-city-labels',cfg,source,['city'],
+            cfg.broadcastCitySize,customCityMin,null,cityMax),'City');
+        // If a style lacks native overview labels, the synthetic major layer
+        // retains city names below the regular city zoom minimum.
+        const syntheticMajorMin=nativeOverviewEnabled?Math.max(majorMin,nativeOverviewEnd):majorMin;
+        if(cfg.broadcastKeepMajorCities!==false&&syntheticMajorMin<cityMin)
+          add(settlementLayer('wd-major-city-labels',cfg,source,['city'],
+            cfg.broadcastCitySize,syntheticMajorMin,'major',cityMin),'City');
+      }
     }
   }
 
