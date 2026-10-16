@@ -306,3 +306,59 @@ test('city, town and village paint, font and size settings are independent',()=>
  assert.ok(noTowns.some(x=>x.id==='wd-city-labels'));
  assert.ok(noTowns.some(x=>x.id==='wd-small-place-labels'));
 });
+
+test('native low zoom uses independent City and Town fonts without duplicate city-in-town',()=>{
+ const code=between('  function addBroadcastCartography(','  MB.token =');
+ const install=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
+  'tierAppearance','addLabelDots','applyLabelBackground',
+  code+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},
+   labels.settlementLayer,fontStack,padding,labels.tierAppearance,labels.addLabelDots,()=>{});
+ const native=id=>({id,type:'symbol','source-layer':'place_label',
+  filter:['==',['get','class'],'settlement'],layout:{visibility:'visible'},paint:{}});
+ const map={layers:[native('settlement-major-label'),native('settlement-minor-label')],
+  getStyle(){return {layers:this.layers}},getLayer(id){return this.layers.find(l=>l.id===id)},
+  setLayoutProperty(id,k,v){this.getLayer(id).layout[k]=v},
+  setPaintProperty(id,k,v){this.getLayer(id).paint[k]=v},
+  setFilter(id,v){this.getLayer(id).filter=v},
+  setLayerZoomRange(id,a,b){Object.assign(this.getLayer(id),{minzoom:a,maxzoom:b})},
+  removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},
+  addLayer(l){this.layers.push(l)}};
+ const settings={...cfg,mbStyle:'broadcast',broadcastCityFont:'Roboto Bold',
+  broadcastTownFont:'Open Sans Bold',broadcastCitySize:29,broadcastTownSize:13,
+  broadcastCityColor:'#ffedcb',broadcastTownColor:'#123456',
+  broadcastCityHaloWidth:3,broadcastTownHaloWidth:1,
+  broadcastCityEnabled:true,broadcastTownEnabled:true,
+  broadcastCityDensityPct:60,broadcastTownDensityPct:40};
+ install(map,settings);
+ const city=map.getLayer('settlement-major-label'),town=map.getLayer('settlement-minor-label');
+ assert.deepEqual(city.layout['text-font'],fontStack('Roboto Bold'));
+ assert.deepEqual(town.layout['text-font'],fontStack('Open Sans Bold'));
+ assert.equal(city.layout['text-size'],29);
+ assert.equal(town.layout['text-size'],13);
+ assert.equal(city.paint['text-color'],'#ffedcb');
+ assert.equal(town.paint['text-color'],'#123456');
+ assert.equal(city.paint['text-halo-width'],3);
+ assert.equal(town.paint['text-halo-width'],1);
+ assert.equal(evalFilter(city.filter,{class:'settlement',type:'city',symbolrank:5,filterrank:2}),true);
+ assert.equal(evalFilter(town.filter,{class:'settlement',type:'city',symbolrank:5,filterrank:2}),false,
+  'a city must not also render in the different-style towns layer');
+ assert.equal(evalFilter(town.filter,{class:'settlement',type:'town',symbolrank:5,filterrank:2}),true);
+ assert.ok(city.minzoom<=6&&city.maxzoom>6);
+ install(map,{...settings,broadcastTownEnabled:false});
+ assert.equal(map.getLayer('settlement-minor-label').layout.visibility,'none');
+ assert.equal(map.getLayer('settlement-major-label').layout.visibility,'visible');
+});
+test('optional place dots render at the user-selected size and outline, never by default',()=>{
+ const off=render({...cfg,broadcastCityDots:false});
+ assert.ok(!off.some(x=>x.id==='wd-city-dots'));
+ const on=render({...cfg,broadcastCityDots:true,broadcastCityDotSize:5,
+  broadcastCityDotColor:'#ffffff',broadcastCityDotOutlineColor:'#000000',
+  broadcastCityDotOutlineWidth:1.5,broadcastCityDotShadow:true});
+ const dot=on.find(x=>x.id==='wd-city-dots');
+ assert.ok(dot,'city dots must create a Mapbox circle layer');
+ assert.equal(dot.paint['circle-radius'],2.5);
+ assert.equal(dot.paint['circle-stroke-width'],1.5);
+ assert.equal(dot.paint['circle-blur'],.35);
+ assert.equal(on.find(x=>x.id==='wd-city-labels').layout['text-offset'][1],-.2);
+});
