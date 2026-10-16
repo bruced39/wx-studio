@@ -33,7 +33,7 @@
     overlayTimeZones:false, overlayTimeZonesColor:'#209e84', overlayTimeZonesLineType:'solid', overlayTimeZonesWidth:1.2, overlayTimeZonesOpacity:1, overlayTimeZonesMinZoom:2, overlayTimeZonesMaxZoom:8,
     overlayLatLonMode:'off', overlayLatLonColor:'#b9b9b9', overlayLatLonWidth:.75, overlayLatLonOpacity:.45, overlayLatLonAutoSpacing:true, overlayLatLonManualSpacing:5,
     broadcastSatelliteSaturation:0, broadcastSatelliteContrast:.15,
-    broadcastShowCities:true, broadcastUppercaseLabels:true, broadcastPlaceDensity:'towns', broadcastKeepMajorCities:true, broadcastMajorCityRank:9,
+    broadcastShowCities:true, broadcastUppercaseLabels:true, broadcastPlaceDensity:'towns', broadcastKeepMajorCities:true, broadcastMajorCityRank:9, broadcastOverviewCityDensity:'more',
     broadcastLabelFont:'DIN Pro Bold', broadcastLabelDensity:'normal', broadcastLabelOpacity:1, broadcastLabelSpacing:1.25,
     broadcastCitySize:20, broadcastTownSize:16, broadcastVillageSize:13,
     broadcastCityMinZoom:3, broadcastCityMaxZoom:24, broadcastTownMinZoom:5, broadcastTownMaxZoom:24,
@@ -589,6 +589,27 @@
       ?Math.min(cityMinForOverview,majorMinForOverview):cityMinForOverview;
     const nativeTownStart=Math.max(0,Number.isFinite(+cfg.broadcastTownMinZoom)?+cfg.broadcastTownMinZoom:5);
     const nativeOverviewEnabled=hasNativeOverview&&cfg.broadcastShowCities!==false;
+    // Streets v8 ranks every available settlement. The stock native
+    // settlement layers can be much too selective under zoom 6. Use our own
+    // adjustable rank filter while preserving the native layer placement
+    // (no forced text overlap) and all of WX Studio's font/size styling.
+    const overviewDensity=['standard','more','many'].includes(cfg.broadcastOverviewCityDensity)
+      ?cfg.broadcastOverviewCityDensity:'more';
+    const rankBase=Math.max(1,Math.min(19,Number.isFinite(+cfg.broadcastMajorCityRank)
+      ?+cfg.broadcastMajorCityRank:9));
+    const rankCap=overviewDensity==='many'?19:
+      Math.min(19,rankBase+(overviewDensity==='more'?5:0));
+    const townRank=cfg.broadcastLabelDensity==='sparse'?1:
+      cfg.broadcastLabelDensity==='normal'?3:
+      cfg.broadcastLabelDensity==='dense'?4:5;
+    const nativeOverviewFilter=(major)=>major
+      ?['all',['==',['get','class'],'settlement'],
+          ['==',['get','type'],'city'],
+          ['<=',['coalesce',['get','symbolrank'],99],rankCap]]
+      :['all',['==',['get','class'],'settlement'],
+          ['==',['get','type'],'town'],
+          ['<=',['coalesce',['get','filterrank'],5],
+            overviewDensity==='standard'?townRank:overviewDensity==='more'?Math.max(4,townRank):5]];
     const nativeOverviewRange=(l)=>{
       const major=overviewIsMajor(l),minor=overviewIsMinor(l);
       if(!nativeOverviewEnabled||(!major&&!minor))return null;
@@ -617,6 +638,22 @@
               // labels must honor the same user settings at every zoom.
               try{map.setLayerZoomRange(l.id,overview.min,overview.max);}catch(e){}
               map.setLayoutProperty(l.id,'visibility','visible');
+              // Important: changing only "Major-city rank" in our synthetic
+              // layer does NOTHING at low zoom when native symbols are used.
+              // Explicitly broaden the native features too. Keep sort-key
+              // priority so Boston/NYC/etc. win collisions.
+              try{map.setFilter(l.id,nativeOverviewFilter(overview.major));}catch(e){
+                console.warn('WX Studio overview label filter',l.id,e);
+              }
+              for(const [property,value] of [
+                ['symbol-sort-key',['coalesce',['get','symbolrank'],99]],
+                ['text-allow-overlap',false],
+                ['text-ignore-placement',false]
+              ]){
+                try{map.setLayoutProperty(l.id,property,value);}catch(e){
+                  console.warn('WX Studio overview label placement',property,e);
+                }
+              }
               const size=overview.major?+cfg.broadcastCitySize:+cfg.broadcastTownSize,
                 density=cfg.broadcastLabelDensity||'normal',
                 spacing=+cfg.broadcastLabelSpacing||1.25;
