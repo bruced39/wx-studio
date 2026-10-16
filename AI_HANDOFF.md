@@ -244,3 +244,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.32 – Default background for new scenes
 - User's cloud-sky image (studio/bgdefault.js, `window.WX_BGDEFAULT`) is now the background of blank scenes made by "+ Scene" (asset id `bgdefault`, re-attached via `ensureBG`, kept out of localStorage autosave). Future: a saved-backgrounds section to choose from (requested, not built). Files: studio/bgdefault.js (new), studio/index.html, studio/ui.js. No ChatGPT-modified code touched.
+
+## v0.9.33 – Backgrounds tab (saved backgrounds)
+- New "Backgrounds" side tab: upload images (click or drop, multi-file; resized to <=1920 px wide JPEG, stored in IndexedDB `wxstudio-bgs`), click a thumbnail to apply it to the current scene, ✕ deletes uploads, ★ picks the background used by "+ Scene" (localStorage `wx_bg_default`). Built-ins: Default sky, Billerica 7-Day template. Files: studio/ui.js, studio/index.html. No ChatGPT-modified code touched.

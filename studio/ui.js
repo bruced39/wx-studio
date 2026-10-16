@@ -104,7 +104,7 @@
   function delObj() { const sc = cur(); if (!S.oid) return; sc.objects = sc.objects.filter(o => o.id !== S.oid); S.oid = null; commit(); renderPanels(); }
   function dupObj() { const o = selObj(); if (!o) return; const c = JSON.parse(JSON.stringify(o)); c.id = 'o' + Date.now().toString(36); const xf = E.xf(cur(), editT()); E.move(c, 30, 30, xf); cur().objects.push(c); S.oid = c.id; commit(); renderPanels(); }
   function layer(dir) { const a = cur().objects, i = a.findIndex(o => o.id === S.oid); if (i < 0) return; const j = dir === 'front' ? a.length - 1 : dir === 'back' ? 0 : clamp(i + dir, 0, a.length - 1); const [o] = a.splice(i, 1); a.splice(j, 0, o); commit(); }
-  function newScene(after) { const sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: g.WX_BGDEFAULT ? { type: 'image', asset: 'bgdefault', kenburns: false } : { type: 'solid', color: '#101820', kenburns: false }, title: { show: false, text: '', sub: '' } }); ensureBG({ scenes: [sc], assets: S.show.assets }); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
+  function newScene(after) { const sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: (() => { const b = bgDefaultSpec(); return b ? { type: 'image', asset: b.asset, kenburns: false } : { type: 'solid', color: '#101820', kenburns: false }; })(), title: { show: false, text: '', sub: '' } }); { const b = bgAll().find(x => x.asset === sc.bg.asset); if (b) S.show.assets[b.asset] = b.data; } S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
 
   /* ---------- assets ---------- */
   function readImage(file) {
@@ -642,6 +642,37 @@
     const cats = {}; g.Icons.list.forEach(i => (cats[i.cat] = cats[i.cat] || []).push(i));
     Object.keys(cats).forEach(c => { p.append(h('div', { className: 'h', text: c })); const gr = h('div', { className: 'igrid' }); cats[c].forEach(i => { const cv = h('canvas', { width: 120, height: 120 }); cv.dataset.icon = i.id; gr.append(h('div', { className: 'ic' + (S.opt.icon === i.id ? ' on' : ''), title: i.label, draggable: true, ondragstart: ev => { ev.dataTransfer.setData('application/x-wx-icon', i.id); ev.dataTransfer.effectAllowed = 'copy'; }, on: { click: () => { S.opt.icon = i.id; const o = selObj(); if (o && o.type === 'icon') { o.icon = i.id; commit(); } else setTool('icon'); renderPanels(); } } }, cv, h('div', { text: i.label }))); }); p.append(gr); });
   }
+  /* ---------- saved backgrounds ---------- */
+  const BGD_KEY = 'wx_bg_default'; let bgList = [], bgDefault = 'sky';
+  try { bgDefault = localStorage.getItem(BGD_KEY) || 'sky'; } catch (e) { /* ignore */ }
+  const builtinBgs = () => [{ id: 'sky', name: 'Default sky', data: g.WX_BGDEFAULT, asset: 'bgdefault', builtin: true }, { id: 't7', name: 'Billerica 7-Day template', data: g.WX_BG7DAY, asset: 'bg7day', builtin: true }].filter(b => b.data);
+  const bgAll = () => builtinBgs().concat(bgList);
+  function bgDB() { return new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-bgs', 1); r.onupgradeneeded = () => r.result.createObjectStore('bgs', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }); }
+  function bgTx(mode, fn) { return bgDB().then(db => new Promise((res, rej) => { const t = db.transaction('bgs', mode), s = t.objectStore('bgs'), q = fn(s); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); })); }
+  function bgLoad() { bgTx('readonly', s => s.getAll()).then(a => { bgList = (a || []).sort((x, y) => x.t - y.t).map(b => Object.assign(b, { asset: 'bg_' + b.id })); if (S.tab === 'bgs') renderPanels(); }).catch(() => { }); }
+  function bgScale(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onerror = rej; r.onload = () => { const im = new Image(); im.onerror = rej; im.onload = () => { const k = Math.min(1, 1920 / im.width), cv = document.createElement('canvas'); cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k); cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); res(cv.toDataURL('image/jpeg', 0.88)); }; im.src = r.result; }; r.readAsDataURL(file); }); }
+  async function bgAdd(files) {
+    for (const f of files) { if (!/^image\//.test(f.type)) continue; try { const data = await bgScale(f), b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: f.name.replace(/\.[^.]+$/, ''), data, t: Date.now() }; b.asset = 'bg_' + b.id; bgList.push(b); await bgTx('readwrite', s => s.put({ id: b.id, name: b.name, data, t: b.t })).catch(() => toast('Saved for this session only (browser storage unavailable)')); } catch (e) { toast('Could not read ' + f.name); } }
+    renderPanels();
+  }
+  function bgApply(b) { const sc = cur(); S.show.assets[b.asset] = b.data; sc.bg = Object.assign({}, sc.bg, { type: 'image', asset: b.asset, kenburns: false }); E.preload(S.show).then(() => thumbSoon(true)); commit(); refreshAll(); }
+  function bgDefaultSpec() { const b = bgAll().find(x => x.id === bgDefault) || builtinBgs()[0]; return b; }
+  function backgroundsPanel(p) {
+    p.append(h('div', { className: 'hint', text: 'Click a background to apply it to the current scene. The star marks the background used by + Scene. Uploads are saved in this browser (resized to 1920 px wide).' }));
+    const fi = h('input', { type: 'file', accept: 'image/*', multiple: true, style: 'display:none', onchange: e => { bgAdd([...e.target.files]); e.target.value = ''; } });
+    const dz = h('div', { id: 'drop', text: 'Upload backgrounds: click to browse or drop images here' }); dz.onclick = () => fi.click();
+    ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('hov'); })); dz.addEventListener('dragleave', () => dz.classList.remove('hov'));
+    dz.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('hov'); bgAdd([...e.dataTransfer.files]); });
+    p.append(fi, dz);
+    const gr = h('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px' });
+    bgAll().forEach(b => {
+      const star = h('button', { text: bgDefault === b.id ? '★' : '☆', title: 'Use for new scenes (+ Scene)', style: 'position:absolute;top:4px;left:4px;padding:0 6px', on: { click: e => { e.stopPropagation(); bgDefault = b.id; try { localStorage.setItem(BGD_KEY, b.id); } catch (x) { /* ignore */ } renderPanels(); } } });
+      const kids = [h('img', { src: b.data, style: 'width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:6px;display:block' }), h('div', { className: 'hint', text: b.name, style: 'margin:2px 0 0' }), star];
+      if (!b.builtin) kids.push(h('button', { text: '✕', title: 'Delete', style: 'position:absolute;top:4px;right:4px;padding:0 6px', on: { click: e => { e.stopPropagation(); if (!confirm('Delete this saved background?')) return; bgList = bgList.filter(x => x !== b); if (bgDefault === b.id) bgDefault = 'sky'; bgTx('readwrite', s => s.delete(b.id)).catch(() => { }); renderPanels(); } } }));
+      gr.append(h('div', { style: 'position:relative;cursor:pointer', on: { click: () => bgApply(b) } }, kids));
+    });
+    p.append(gr);
+  }
   function mediaPanel(p) {
     const dz = h('div', { id: 'drop', text: 'Drop your own graphics here (PNG, JPG, WebP) – or click to browse' });
     dz.onclick = () => pickImages('asset'); ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('hov'); })); dz.addEventListener('dragleave', () => dz.classList.remove('hov')); dz.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('hov'); addFiles([...e.dataTransfer.files], 'asset'); });
@@ -655,7 +686,7 @@
   function renderPanels() {
     const p=$('#panels'),sy=p.scrollTop;
     p.innerHTML='';
-    ({ scene: scenePanel, object: objectPanel, library: libraryPanel, media: mediaPanel })[S.tab](p);
+    ({ scene: scenePanel, object: objectPanel, library: libraryPanel, media: mediaPanel, bgs: backgroundsPanel })[S.tab](p);
     // Map styling now lives in the Map Style flyout, not in Scene settings.
     if(S.tab==='scene' && cur().bg.type==='mapbox'){
       const moved=['Map + Camera','Weather Director Base','Land + Water','City + Town Labels','Boundaries','Transportation','Overlays'];
@@ -1116,7 +1147,7 @@
 
   /* ---------- boot ---------- */
   function boot() {
-    buildTools(); let sh = null; try { const raw = localStorage.getItem(KEY); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
+    bgLoad(); buildTools(); let sh = null; try { const raw = localStorage.getItem(KEY); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
     if(sh){migrateMB(sh);migrateWDBroadcast(sh);}
     S.show=sh||newShowWithDefaultMap();
     const loadedDefault=applySavedDefaultOnStartup(S.show);
