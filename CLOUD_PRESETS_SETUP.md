@@ -46,7 +46,7 @@ Your cloud account for banners and graphics is **the same account** you use for 
 4. Below the local library, the **Cloud library** shows the banners or graphics saved in your signed-in account. Click a cloud thumbnail or **Download** to copy it into the local library. Then click the local thumbnail to place it in a scene normally. Cloud files are *not* automatically added to scenes when browsing.
 5. On another computer or browser, sign in to the **same WX Studio cloud account**, go to Assets → Banners/Graphics, click **Refresh cloud**, then **Download**. It will be available there like any local PNG.
 6. **Rename** changes a cloud item's display name. **Delete** removes only the cloud copy after confirmation; existing downloaded local items and placed graphics remain in your shows.
-7. Assets → Backgrounds also has a cloud list for **PNG backgrounds**. The existing browser-local photo background workflow still works normally, but JPG backgrounds cannot be uploaded to the PNG-only cloud bucket.
+7. Assets → Backgrounds also has a cloud list. The existing browser-local photo background workflow still works normally; when you upload a local JPG background to the cloud, only its **cloud copy** is converted into PNG. The local image is unchanged, and the 8 MB cloud limit still applies.
 
 **The cloud library does not lock your scene.** Place a downloaded banner, move/resize it, animate it, or use it in another scene. Existing overlay asset IDs remain `ov_<local-id>`. Saving cloud items does not alter your scene objects or show file.
 
