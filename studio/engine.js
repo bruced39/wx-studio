@@ -237,6 +237,7 @@
         let fill = o.color;
         if (o.grad || o.gloss) { const gr = c.createLinearGradient(0, o.y, 0, o.y + m.h), c2 = o.color2 || o.color; if (o.gloss) { gr.addColorStop(0, mixHex(o.color, '#ffffff', 0.65)); gr.addColorStop(0.46, o.color); gr.addColorStop(0.5, mixHex(c2, '#000000', 0.18)); gr.addColorStop(1, c2); } else { gr.addColorStop(0, o.color); gr.addColorStop(1, c2); } fill = gr; }
         c.lineJoin = 'round'; c.miterLimit = 2;
+        if (o.fx) { E.drawFxLines(c, m.lines, o.x, o.y, m.lh, o.fx, fill, o.size); c.restore(); break; }
         m.lines.forEach((l, i) => { if (o.strokeW > 0) { c.lineWidth = o.strokeW * 2; c.strokeStyle = o.strokeColor || '#000000'; c.strokeText(l, o.x, o.y + i * m.lh); } c.fillStyle = fill; c.fillText(l, o.x, o.y + i * m.lh); });
         c.restore(); break;
       }
@@ -343,6 +344,61 @@
     }
     if (b.dim > 0) { c.fillStyle = `rgba(0,0,0,${b.dim})`; c.fillRect(0, 0, W, H); }
   }
+
+  /* ---------- layer-style text effects (Photopea-like) + Title banner #2 ---------- */
+  E.fxDefault = () => ({
+    stroke: { on: true, size: 2, pos: 'outside', color: '#1f2f57', opacity: 100 },
+    shadow: { on: true, color: '#000000', opacity: 67, angle: 90, dist: 3, size: 6 },
+    coverlay: { on: false, color: '#ffffff', opacity: 100 },
+    goverlay: { on: false, c1: '#ffffff', c2: '#9fb4d6', angle: 90, opacity: 100 },
+    glow: { on: false, color: '#7fb4ff', opacity: 75, size: 12 }
+  });
+  const rgba = (hex, op) => { const q = hexRGB(hex); return 'rgba(' + q[0] + ',' + q[1] + ',' + q[2] + ',' + clamp((op == null ? 100 : op) / 100, 0, 1) + ')'; };
+  E.drawFxLines = function (c, lines, x, y, lh, fx, baseFill, size) {
+    fx = fx || E.fxDefault(); const st = fx.stroke || {}, sh = fx.shadow || {}, gl = fx.glow || {}, co = fx.coverlay || {}, go = fx.goverlay || {};
+    c.save(); c.lineJoin = 'round'; c.miterLimit = 2;
+    const each = fn => lines.forEach((l, i) => fn(l, y + i * lh));
+    if (gl.on) { c.save(); c.shadowColor = rgba(gl.color, gl.opacity); c.shadowBlur = Math.max(1, gl.size) * 2; c.fillStyle = rgba(gl.color, gl.opacity); each((l, yy) => { c.fillText(l, x, yy); c.fillText(l, x, yy); }); c.restore(); }
+    if (sh.on) {
+      c.save(); const a = (sh.angle || 0) * Math.PI / 180, d = sh.dist || 0;
+      c.shadowColor = rgba(sh.color, sh.opacity); c.shadowBlur = Math.max(0, sh.size || 0); c.shadowOffsetX = -Math.cos(a) * d; c.shadowOffsetY = Math.sin(a) * d;
+      if (st.on && st.size > 0 && st.pos !== 'inside') { c.lineWidth = (st.pos === 'center' ? st.size : st.size * 2); c.strokeStyle = rgba(st.color, 100); each((l, yy) => c.strokeText(l, x, yy)); } else { c.fillStyle = baseFill; each((l, yy) => c.fillText(l, x, yy)); }
+      c.restore();
+    }
+    if (st.on && st.size > 0 && st.pos !== 'center') { c.lineWidth = st.pos === 'inside' ? st.size : st.size * 2; c.strokeStyle = rgba(st.color, st.opacity); if (st.pos !== 'inside') each((l, yy) => c.strokeText(l, x, yy)); }
+    c.fillStyle = baseFill; each((l, yy) => c.fillText(l, x, yy));
+    if (co.on) { c.save(); c.fillStyle = rgba(co.color, co.opacity); each((l, yy) => c.fillText(l, x, yy)); c.restore(); }
+    if (go.on) { c.save(); const a = (go.angle == null ? 90 : go.angle) * Math.PI / 180, h2 = lines.length * lh, tw = Math.max(...lines.map(l => c.measureText(l).width)), al = c.textAlign, cx = al === 'center' ? x : al === 'right' || al === 'end' ? x - tw / 2 : x + tw / 2, dx = Math.cos(a), dy = Math.sin(a), rr = (Math.abs(dx) * tw + Math.abs(dy) * h2) / 2, cy = y + h2 / 2 - (c.textBaseline === 'middle' ? lh / 2 : 0), gr = c.createLinearGradient(cx - dx * rr, cy - dy * rr, cx + dx * rr, cy + dy * rr); gr.addColorStop(0, rgba(go.c1, go.opacity)); gr.addColorStop(1, rgba(go.c2, go.opacity)); c.fillStyle = gr; each((l, yy) => c.fillText(l, x, yy)); c.restore(); }
+    if (st.on && st.size > 0 && (st.pos === 'center' || st.pos === 'inside')) { c.lineWidth = st.size; c.strokeStyle = rgba(st.color, st.opacity); each((l, yy) => c.strokeText(l, x, yy)); }
+    c.restore();
+  };
+  E.title2Default = () => ({ show: true, text: '7 DAY FORECAST', pos: 'ul', width: 1150, y: 40, logo: true, logoScale: 1.05, align: 'center', size: 0, upper: true, color: '#07345a', font: 'Roboto Condensed', weight: 700, anim: 'auto', delay: 0.2, fx: E.fxDefault() });
+  const tb2Imgs = {};
+  function tb2Img(k) { const A = g.WX_TB2 && g.WX_TB2[k]; if (!A) return null; let e = tb2Imgs[k]; if (!e) { e = tb2Imgs[k] = { el: new Image(), ok: false }; e.el.onload = () => { e.ok = true; if (E.onAsset) E.onAsset(); }; e.el.src = A.src; } return e.ok ? e.el : null; }
+  function drawTitle2(c, show, scene, t, editing) {
+    const T = scene.title2; if (!T || !T.show) return; const A = g.WX_TB2; if (!A) return; const bar = tb2Img('bar'), logo = tb2Img('logo'); if (!bar) return;
+    const m = show.safe != null ? show.safe : 48, bb = A.bar.box, bw0 = bb[2] - bb[0], bh0 = bb[3] - bb[1];
+    const width = T.pos === 'full' ? W - 2 * m : (T.width || 1150), sb = width / bw0, chh = bh0 * sb;
+    const barL = T.pos === 'ur' ? W - m - width : m, barT = T.y == null ? 40 : T.y;
+    let p = 1; const mode = T.anim === 'auto' ? (T.pos === 'ur' ? 'in-right' : T.pos === 'full' ? 'in-top' : 'in-left') : (T.anim || 'none');
+    if (!editing) { const d = T.delay == null ? 0.2 : T.delay; if (t < d) return; p = ease.out(clamp((t - d) / 0.7, 0, 1)); }
+    c.save();
+    if (mode === 'fade') c.globalAlpha *= p; else if (mode === 'in-left') c.translate(-(1 - p) * (barL + width + 200), 0); else if (mode === 'in-right') c.translate((1 - p) * (W - barL + 200), 0); else if (mode === 'in-top') c.translate(0, -(1 - p) * (barT + chh + 300));
+    c.drawImage(bar, barL - bb[0] * sb, barT - bb[1] * sb, A.bar.w * sb, A.bar.h * sb);
+    let logoL = barL + width;
+    if (T.logo !== false && logo) { const lb = A.logo.box, lbw = lb[2] - lb[0], lbh = lb[3] - lb[1], sl = chh * (T.logoScale || 1.05) / lbh, lw = lbw * sl; logoL = barL + width + chh * 0.02 - lw; const ly = barT + chh / 2 - (lbh * sl) / 2; c.drawImage(logo, logoL - lb[0] * sl, ly - lb[1] * sl, A.logo.w * sl, A.logo.h * sl); }
+    // text inside the silver area, left of the logo
+    const silverTop = barT + chh * 0.06, silverH = chh * 0.58, padL = chh * 0.22, availL = barL + padL, availR = (T.logo !== false ? logoL : barL + width) - chh * 0.18, availW = Math.max(40, availR - availL);
+    let txt = String(T.text || ''); if (T.upper !== false) txt = txt.toUpperCase();
+    if (txt) {
+      let size = T.size > 0 ? T.size : silverH * 0.92; const fam = '"' + (T.font || 'Roboto Condensed') + '", "Barlow Condensed", Arial Narrow, sans-serif';
+      c.font = `${T.weight || 700} ${size}px ${fam}`; let tw = c.measureText(txt).width; if (tw > availW) { size = size * availW / tw; c.font = `${T.weight || 700} ${size}px ${fam}`; tw = c.measureText(txt).width; }
+      c.textBaseline = 'middle'; c.textAlign = 'left'; const tx = T.align === 'left' ? availL : T.align === 'right' ? availR - tw : availL + (availW - tw) / 2, ty = silverTop + silverH / 2 + size * 0.04;
+      E.drawFxLines(c, [txt], tx, ty, size * 1.1, T.fx, T.color || '#07345a', size);
+    }
+    c.restore();
+  }
+
   function drawTitle(c, show, scene, t, editing) {
     const T = scene.title; if (!T || !T.show || (!T.text && !T.sub)) return;
     const a = editing ? 1 : ease.out(clamp(t / 0.8, 0, 1)); if (a <= 0) return;
@@ -368,7 +424,7 @@
     const guard = (fn) => { try { fn(); } catch (err) { c.restore(); c.save(); E.lastErr = err; if (E.onDrawError) E.onDrawError(err); } };
     guard(() => drawBackground(c, show, scene, t, ct, opts));
     scene.objects.forEach(o => { if (!o.hidden) guard(() => drawObjectAnimated(c, o, scene, xf, t, show, editing)); });
-    guard(() => drawTitle(c, show, scene, t, editing)); guard(() => drawBug(c, show));
+    guard(() => drawTitle(c, show, scene, t, editing)); guard(() => drawTitle2(c, show, scene, t, editing)); guard(() => drawBug(c, show));
     c.restore();
   };
 

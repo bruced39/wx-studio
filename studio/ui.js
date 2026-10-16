@@ -387,7 +387,8 @@
       if (o.wrapW == null) o.wrapW = 0; B('wrapW', 'range', { min: 0, max: 1800, step: 20, label: 'Wrap width (0=off)' });
       if (o.strokeW == null) o.strokeW = 0; B('strokeW', 'range', { min: 0, max: 24, label: 'Outline' }); if (o.strokeW > 0) B('strokeColor', 'color', { label: 'Outline color' });
       if (!o.color2) o.color2 = o.color; B('grad', 'check', { label: 'Gradient fill', rerender: true }); if (o.grad || o.gloss) B('color2', 'color', { label: 'Bottom color' });
-      B('gloss', 'check', { label: 'Gloss highlight', rerender: true }); }
+      B('gloss', 'check', { label: 'Gloss highlight', rerender: true });
+      p.append(h('div', { className: 'btnrow' }, h('button', { text: 'Layer style… (Photopea-style)', on: { click: () => { if (!o.fx) { o.fx = E.fxDefault(); o.fx.stroke.on = false; o.fx.shadow.on = false; } openFxWindow(o.fx, 'Layer Style – text'); } } }), o.fx ? h('button', { text: 'Remove layer style', on: { click: () => { delete o.fx; commit(); renderPanels(); } } }) : null)); }
     if (T === 'icon') { B('icon', 'select', { options: g.Icons.list.map(i => [i.id, i.label]) }); B('size', 'range', { min: 60, max: 800 }); }
     if (T === 'hl') { B('kind', 'select', { options: [['H', 'H – High'], ['L', 'L – Low']] }); B('value', 'text', { label: 'Pressure (mb)' }); B('size', 'range', { min: 80, max: 500 }); }
     if (T === 'front') { B('kind', 'select', { options: g.Sym.FRONT_KINDS }); B('size', 'range', { min: 12, max: 70 }); B('flip', 'check', { label: 'Flip side' }); }
@@ -666,7 +667,25 @@
       bind(S.show, 'safe', 'range', { min: 0, max: 160, step: 4, label: 'Safe margin (px)' }),
       h('div', { className: 'btnrow' }, h('button', { text: 'Align & distribute…', on: { click: alignDialog } }))
     ], false));
-    p.append(mapAccordion('titleBanner','Title Banner',[
+    if (!sc.title2) sc.title2 = Object.assign(E.title2Default(), { show: false });
+    const T2 = sc.title2; if (!T2.fx) T2.fx = E.fxDefault();
+    p.append(mapAccordion('titleBanner2', 'Title banner #2 (your banner + logo)', [
+      bind(T2, 'show', 'check', { label: 'Show' }),
+      bind(T2, 'text', 'text', { label: 'Title' }),
+      bind(T2, 'pos', 'select', { label: 'Position', options: [['ul', 'Upper left'], ['ur', 'Upper right'], ['full', 'Full width']] }),
+      bind(T2, 'width', 'range', { min: 500, max: 1800, step: 10, label: 'Width (px)' }),
+      bind(T2, 'y', 'range', { min: 0, max: 300, label: 'Top offset' }),
+      bind(T2, 'logo', 'check', { label: 'Show logo', rerender: true }),
+      T2.logo !== false ? bind(T2, 'logoScale', 'range', { min: 0.6, max: 2, step: 0.05, label: 'Logo size' }) : null,
+      bind(T2, 'align', 'select', { label: 'Text align', options: [['center', 'Center'], ['left', 'Left'], ['right', 'Right']] }),
+      bind(T2, 'size', 'range', { min: 0, max: 160, label: 'Font size (0 = auto)' }),
+      bind(T2, 'upper', 'check', { label: 'ALL CAPS' }),
+      bind(T2, 'color', 'color', { label: 'Text color' }),
+      bind(T2, 'anim', 'select', { label: 'Entrance', options: [['auto', 'Automatic (from its edge)'], ['in-left', 'Slide from left'], ['in-right', 'Slide from right'], ['in-top', 'Slide from top'], ['fade', 'Fade'], ['none', 'None']] }),
+      bind(T2, 'delay', 'range', { min: 0, max: 10, step: 0.1, label: 'Delay (s)' }),
+      h('div', { className: 'btnrow' }, h('button', { text: 'Text layer style… (stroke, shadow, glow)', on: { click: () => openFxWindow(T2.fx, 'Layer Style – Title banner #2') } }))
+    ].filter(Boolean), false));
+    p.append(mapAccordion('titleBanner','Title banner #1',[
       bind(sc.title, 'show', 'check', { label: 'Show' }),
       bind(sc.title, 'text', 'text', { label: 'Title' }),
       bind(sc.title, 'sub', 'text', { label: 'Subtitle' }),
@@ -1395,6 +1414,31 @@
     const btn = (t, f) => h('button', { text: t, on: { click: f } });
     modal('Align & distribute', h('div', {}, h('div', { className: 'hint', text: 'Tick the objects, choose what to align to, then click an action.' }), list, fld('Reference', rel), h('div', { className: 'btnrow' }, btn('⇤ Left', () => doAlign('l')), btn('↔ Center', () => doAlign('c')), btn('⇥ Right', () => doAlign('r'))), h('div', { className: 'btnrow' }, btn('⤒ Top', () => doAlign('t')), btn('↕ Middle', () => doAlign('m')), btn('⤓ Bottom', () => doAlign('b'))), h('div', { className: 'btnrow' }, btn('Distribute horizontally', () => doDist('h')), btn('Distribute vertically', () => doDist('v')))), [h('button', { className: 'pri', text: 'Done', on: { click: closeModal } })]);
   }
+  /* ---------- Layer Style window (Photopea-like) ---------- */
+  function openFxWindow(fx, title, afterChange) {
+    const old = document.getElementById('fxwin'); if (old) old.remove();
+    const snap = JSON.stringify(fx), W2 = h('div', { id: 'fxwin', style: 'position:fixed;right:310px;top:70px;width:640px;z-index:80;background:#3d3d3d;color:#e6e6e6;border:1px solid #1e1e1e;border-radius:6px;box-shadow:0 12px 40px rgba(0,0,0,.6);font:13px sans-serif' });
+    let sel = 'stroke'; const body = h('div', { style: 'display:flex;gap:10px;padding:10px' }), list = h('div', { style: 'width:190px;background:#2f2f2f;border:1px solid #1e1e1e' }), pane = h('div', { style: 'flex:1;background:#444;border:1px solid #2a2a2a;padding:10px;min-height:300px' });
+    const changed = () => { if (afterChange) afterChange(); thumbSoon(); }, done = () => commit();
+    const ROWS = [['stroke', 'Stroke'], ['shadow', 'Drop Shadow'], ['coverlay', 'Color Overlay'], ['goverlay', 'Gradient Overlay'], ['glow', 'Outer Glow']];
+    fx.stroke = fx.stroke || {}; fx.shadow = fx.shadow || {}; fx.coverlay = fx.coverlay || {}; fx.goverlay = fx.goverlay || {}; fx.glow = fx.glow || {};
+    const num = (o, k, min, max, label, suf, step) => { const r = h('input', { type: 'range', min, max, step: step || 1, value: o[k] == null ? min : o[k], style: 'flex:1' }), n = h('input', { type: 'number', min, max, step: step || 1, value: o[k] == null ? min : o[k], style: 'width:60px;background:#222;color:#fff;border:1px solid #111' }); r.oninput = () => { o[k] = +r.value; n.value = r.value; changed(); }; n.oninput = () => { o[k] = +n.value; r.value = n.value; changed(); }; r.onchange = n.onchange = done; return h('div', { style: 'display:flex;align-items:center;gap:8px;margin:7px 0' }, h('span', { text: label, style: 'width:78px' }), r, n, h('span', { text: suf || '', style: 'width:22px' })); };
+    const col = (o, k, label) => { const i = h('input', { type: 'color', value: o[k] || '#000000' }); i.oninput = () => { o[k] = i.value; changed(); }; i.onchange = done; return h('div', { style: 'display:flex;align-items:center;gap:8px;margin:7px 0' }, h('span', { text: label, style: 'width:78px' }), i); };
+    const pick = (o, k, label, opts) => { const sl = h('select', { style: 'background:#222;color:#fff;border:1px solid #111' }, opts.map(x => h('option', { value: x[0], text: x[1], selected: (o[k] || opts[0][0]) === x[0] }))); sl.onchange = () => { o[k] = sl.value; changed(); done(); }; return h('div', { style: 'display:flex;align-items:center;gap:8px;margin:7px 0' }, h('span', { text: label, style: 'width:78px' }), sl); };
+    function drawPane() {
+      pane.innerHTML = ''; pane.append(h('div', { text: (ROWS.find(r => r[0] === sel) || [0, ''])[1], style: 'font-weight:700;border-bottom:1px solid #222;padding-bottom:6px;margin-bottom:8px' }));
+      if (sel === 'stroke') pane.append(num(fx.stroke, 'size', 0, 30, 'Size', 'px'), pick(fx.stroke, 'pos', 'Position', [['outside', 'Outside'], ['center', 'Center']]), num(fx.stroke, 'opacity', 0, 100, 'Opacity', '%'), col(fx.stroke, 'color', 'Color'));
+      if (sel === 'shadow') pane.append(col(fx.shadow, 'color', 'Color'), num(fx.shadow, 'opacity', 0, 100, 'Opacity', '%'), num(fx.shadow, 'angle', -180, 180, 'Angle', '°'), num(fx.shadow, 'dist', 0, 60, 'Distance', 'px'), num(fx.shadow, 'size', 0, 60, 'Size', 'px'));
+      if (sel === 'coverlay') pane.append(col(fx.coverlay, 'color', 'Color'), num(fx.coverlay, 'opacity', 0, 100, 'Opacity', '%'));
+      if (sel === 'goverlay') pane.append(col(fx.goverlay, 'c1', 'Color 1'), col(fx.goverlay, 'c2', 'Color 2'), num(fx.goverlay, 'angle', -180, 180, 'Angle', '°'), num(fx.goverlay, 'opacity', 0, 100, 'Opacity', '%'), h('div', { className: 'hint', text: 'Angle 90° = color 1 at the top, color 2 at the bottom.' }));
+      if (sel === 'glow') pane.append(col(fx.glow, 'color', 'Color'), num(fx.glow, 'opacity', 0, 100, 'Opacity', '%'), num(fx.glow, 'size', 0, 60, 'Size', 'px'));
+    }
+    function drawList() { list.innerHTML = ''; ROWS.forEach(([k, l]) => { const cb = h('input', { type: 'checkbox', checked: !!fx[k].on }); cb.onchange = () => { fx[k].on = cb.checked; sel = k; drawList(); drawPane(); changed(); done(); }; list.append(h('div', { style: 'display:flex;align-items:center;gap:8px;padding:7px 8px;cursor:pointer;border-bottom:1px solid #222;' + (sel === k ? 'background:#555' : ''), on: { click: () => { sel = k; drawList(); drawPane(); } } }, cb, h('span', { text: l }))); }); }
+    const head = h('div', { style: 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #222;cursor:move;font-size:15px;font-weight:700', text: title || 'Layer Style' }, h('span', { text: '✕', style: 'cursor:pointer', on: { click: () => { done(); W2.remove(); } } }));
+    let dr = null; head.onpointerdown = e => { dr = [e.clientX, e.clientY, W2.offsetLeft, W2.offsetTop]; head.setPointerCapture(e.pointerId); }; head.onpointermove = e => { if (dr) { W2.style.left = dr[2] + e.clientX - dr[0] + 'px'; W2.style.top = dr[3] + e.clientY - dr[1] + 'px'; W2.style.right = 'auto'; } }; head.onpointerup = () => { dr = null; };
+    const btns = h('div', { style: 'display:flex;gap:8px;justify-content:flex-end;padding:0 10px 10px' }, h('button', { text: 'Reset (Photopea style)', on: { click: () => { Object.keys(fx).forEach(k => delete fx[k]); Object.assign(fx, E.fxDefault()); drawList(); drawPane(); changed(); done(); } } }), h('button', { text: 'Cancel', on: { click: () => { Object.keys(fx).forEach(k => delete fx[k]); Object.assign(fx, JSON.parse(snap)); changed(); done(); W2.remove(); } } }), h('button', { className: 'pri', text: 'OK', on: { click: () => { done(); W2.remove(); } } }));
+    body.append(list, pane); W2.append(head, body, btns); document.body.append(W2); drawList(); drawPane();
+  }
   /* ---------- modals ---------- */
   function modal(title, body, buttons) { const m = $('#modal'); m.innerHTML = ''; m.append(h('h3', { text: title }), body, h('div', { className: 'mb' }, buttons || [])); $('#modalBg').style.display = 'flex'; }
   function closeModal() { $('#modalBg').style.display = 'none'; $('#modal').innerHTML = ''; }
@@ -1473,7 +1517,7 @@
       E.preload(S.show).then(()=>thumbSoon(true));
     }
     g.MB.onUpdate = () => thumbSoon(true); if (!g.MB.hasToken() && S.show.scenes.some(x => x.bg.type === 'mapbox')) setTimeout(mapboxSettings, 600); if (S.show.scenes.some(x => x.bg.type === 'mapbox') && g.MB.hasToken()) g.MB.init().then(() => thumbSoon(true)).catch(() => { }); g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
-    if (document.fonts) { ['800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
+    if (document.fonts) { ['700 40px "Roboto Condensed"', '800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
     requestAnimationFrame(loop);
   }
   g.WX = { S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog };
