@@ -701,9 +701,184 @@
   const kindOf = b => b.kind || 'bg';
   async function bgAdd(files, kind) {
     kind = kind || 'bg';
-    for (const f of files) { if (!/^image\//.test(f.type)) continue; try { const data = await bgScale(f, kind !== 'bg'), b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: f.name.replace(/\.[^.]+$/, ''), data, t: Date.now(), kind }; b.asset = (kind === 'bg' ? 'bg_' : 'ov_') + b.id; bgList.push(b); await bgTx('readwrite', s => s.put({ id: b.id, name: b.name, data, t: b.t, kind })).catch(() => toast('Saved for this session only (browser storage unavailable)')); } catch (e) { toast('Could not read ' + f.name); } }
+    for (const f of files) {
+      if(kind!=='bg'&&!(/\.png$/i.test(f.name)&&(!f.type||f.type==='image/png'))){
+        toast('Banners and graphics must be PNG files to keep transparency.');continue;
+      }
+      if(kind!=='bg'&&f.size>8*1024*1024){toast(f.name+': PNG exceeds the 8 MB limit.');continue;}
+      if(kind==='bg'&&!/^image\//.test(f.type))continue;
+      try {
+        // Keep original banner/graphic PNG bytes intact. Never canvas-resize,
+        // recompress or convert them to JPEG as with background photos.
+        const data=kind==='bg'?await bgScale(f,false):await new Promise((resolve,reject)=>{
+          const reader=new FileReader();
+          reader.onload=()=>resolve(reader.result);
+          reader.onerror=()=>reject(reader.error||Error('PNG read failed'));
+          reader.readAsDataURL(f);
+        });
+        const b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: f.name.replace(/\.[^.]+$/, ''), data, t: Date.now(), kind }; b.asset = (kind === 'bg' ? 'bg_' : 'ov_') + b.id; bgList.push(b); await bgTx('readwrite', s => s.put({ id: b.id, name: b.name, data, t: b.t, kind })).catch(() => toast('Saved for this session only (browser storage unavailable)')); } catch (e) { toast('Could not read ' + f.name); } }
     renderPanels();
   }
+
+  /* ---- Private Supabase cloud Assets. Keep local IndexedDB independent. ---- */
+  const ASSET_CLOUD=()=>g.WXCloudAssets;
+  const AC={checked:false,uid:null,rows:{},loaded:{},loading:null,busy:false,
+    status:'',thumbs:new Map()};
+  const cloudKind=k=>k==='bg'?'background':k;
+  const localKind=k=>k==='background'?'bg':k;
+  const assetsVisible=()=>S.show&&S.tab==='bgs';
+  const cloudFail=e=>String(e?.message||e||'Cloud unavailable');
+  const renderAssetCloud=()=>{if(assetsVisible())renderPanels();};
+  async function loadCloudAssets(kind){
+    if(!ASSET_CLOUD()?.configured()||AC.loading===kind)return;
+    AC.loading=kind;AC.status='';
+    try{
+      const user=await ASSET_CLOUD().session();
+      if(AC.uid!==user.user.id){
+        AC.uid=user.user.id;AC.rows={};AC.loaded={};AC.thumbs.clear();
+      }
+      AC.rows[kind]=await ASSET_CLOUD().list(kind);
+      AC.loaded[kind]=true;
+    }catch(e){AC.status='Could not load cloud assets: '+cloudFail(e);AC.loaded[kind]=false;}
+    finally{AC.loading=null;renderAssetCloud();}
+  }
+  async function saveAssetCloud(b,silent){
+    const k=cloudKind(kindOf(b));
+    if(AC.busy&&!silent)return;
+    try{
+      const rows=await ASSET_CLOUD().list(k);
+      if(!silent&&rows.some(x=>x.name===b.name)&&
+         !confirm('Replace cloud '+k+' named "'+b.name+'"? Your local copy will be kept.'))return false;
+      await ASSET_CLOUD().save({name:b.name,kind:k,data:b.data});
+      AC.loaded[k]=false;AC.thumbs.clear();
+      return true;
+    }catch(e){if(!silent)toast('Cloud upload failed: '+cloudFail(e));throw e;}
+  }
+  async function uploadOneCloud(b){
+    if(AC.busy)return;
+    AC.busy=true;AC.status='Uploading "'+b.name+'"…';renderAssetCloud();
+    try{
+      if(await saveAssetCloud(b,false)){
+        AC.status='Saved "'+b.name+'" to your private cloud library.';
+        await loadCloudAssets(cloudKind(kindOf(b)));
+      }else AC.status='Upload canceled.';
+    }catch(e){AC.status='Cloud upload failed: '+cloudFail(e);}
+    finally{AC.busy=false;renderAssetCloud();}
+  }
+  async function uploadAllCloud(kind){
+    if(AC.busy)return;
+    const local=bgList.filter(b=>kindOf(b)===localKind(kind));
+    if(!local.length)return;
+    if(!confirm('Upload '+local.length+' local '+kind+'(s) to cloud? Files with matching names will be replaced. Your browser copies stay intact.'))return;
+    AC.busy=true;let done=0,skipped=0;
+    try{
+      for(const item of local){
+        AC.status='Uploading '+(done+skipped+1)+' of '+local.length+': '+item.name;
+        renderAssetCloud();
+        try{await saveAssetCloud(item,true);done++;}
+        catch(e){skipped++;AC.status='Skipped '+item.name+': '+cloudFail(e);}
+      }
+      AC.status='Uploaded '+done+' '+kind+'(s). '+(skipped?skipped+' failed or skipped. ':'')+'Local copies kept.';
+      await loadCloudAssets(kind);
+    }catch(e){AC.status='Cloud upload interrupted: '+cloudFail(e);}
+    finally{AC.busy=false;renderAssetCloud();}
+  }
+  async function downloadCloudAsset(row){
+    if(AC.busy)return;AC.busy=true;AC.status='Downloading '+row.name+'…';renderAssetCloud();
+    try{
+      const existing=bgList.find(b=>b.cloudId===row.id);
+      if(existing){AC.status='"'+row.name+'" is already in this browser. The local copy was not changed.';return;}
+      const data=await ASSET_CLOUD().download(row);
+      const k=localKind(row.kind),id=Date.now().toString(36)+Math.random().toString(36).slice(2,9);
+      // IMPORTANT: local overlay identities are unchanged: ov_<local id>.
+      const b={id,name:row.name,data,t:Date.now(),kind:k,cloudId:row.id,
+        asset:(k==='bg'?'bg_':'ov_')+id};
+      bgList.push(b);
+      try{await bgTx('readwrite',store=>store.put({
+        id:b.id,name:b.name,data:b.data,t:b.t,kind:b.kind,cloudId:b.cloudId
+      }));}catch(e){toast('Downloaded for this session; IndexedDB save failed.');}
+      reattachLib();AC.status='"'+row.name+'" downloaded. Click it in your local library to use it.';
+    }catch(e){AC.status='Cloud download failed: '+cloudFail(e);}
+    finally{AC.busy=false;renderAssetCloud();}
+  }
+  async function deleteCloudAsset(row){
+    if(AC.busy||!confirm('Delete "'+row.name+'" from your cloud account? Browser copies will NOT be deleted.'))return;
+    AC.busy=true;
+    try{
+      await ASSET_CLOUD().remove(row);
+      AC.rows[row.kind]=(AC.rows[row.kind]||[]).filter(r=>r.id!==row.id);
+      AC.thumbs.clear();AC.status='Deleted cloud copy of "'+row.name+'".';
+    }catch(e){AC.status='Cloud delete failed: '+cloudFail(e);}
+    finally{AC.busy=false;renderAssetCloud();}
+  }
+  async function renameCloudAsset(row){
+    if(AC.busy)return;
+    const name=prompt('Rename cloud '+row.kind+':',row.name);
+    if(name==null||!name.trim()||name.trim()===row.name)return;
+    AC.busy=true;
+    try{
+      const updated=await ASSET_CLOUD().rename(row,name.trim());
+      Object.assign(row,updated||{name:name.trim()});
+      AC.status='Cloud asset renamed. Existing local copies are unchanged.';
+    }catch(e){AC.status='Cloud rename failed: '+cloudFail(e);}
+    finally{AC.busy=false;renderAssetCloud();}
+  }
+  function cloudThumb(row,img){
+    const key=row.id+'@'+row.updated_at;
+    const existing=AC.thumbs.get(key);
+    if(existing?.url){img.src=existing.url;return;}
+    if(existing?.pending)return;
+    AC.thumbs.set(key,{pending:true});
+    ASSET_CLOUD().signedThumbnail(row).then(url=>{
+      AC.thumbs.set(key,{url,pending:false});
+      if(img.isConnected)img.src=url;
+      else renderAssetCloud();
+    }).catch(()=>{AC.thumbs.delete(key);});
+  }
+  function cloudAssetsPanel(p,localTab){
+    const kind=cloudKind(localTab);
+    p.append(h('div',{style:'font-weight:700;margin:14px 0 6px',text:'☁ Cloud library — '+(localTab==='bg'?'Backgrounds':localTab==='banner'?'Banners':'Graphics')}));
+    if(!ASSET_CLOUD()?.configured()){
+      p.append(h('div',{className:'hint',text:'Cloud is unavailable. All local assets still work.'}));return;
+    }
+    const user=g.WXCloudPresets?.user();
+    if(!user?.id){
+      p.append(h('div',{className:'hint',text:'To use cloud assets, sign in at Map Style → Saved Styles → Cloud Presets. Local assets remain available without signing in.'}));
+      if(!AC.checked){
+        AC.checked=true;
+        ASSET_CLOUD().session().then(()=>{
+          AC.loaded={};renderAssetCloud();
+        }).catch(()=>{}); // signed-out is expected, no popup
+      }
+      return;
+    }
+    if(AC.uid!==user.id){
+      AC.uid=user.id;AC.loaded={};AC.rows={};AC.thumbs.clear();
+    }
+    p.append(h('div',{className:'hint',text:'Private to '+(user.email||'your account')+'. Click Download to add an item to this browser; your show uses the normal local asset ID.'}));
+    const buttons=h('div',{className:'btnrow',style:'margin:8px 0'},
+      h('button',{className:'sm',text:'Refresh cloud',on:{click:()=>loadCloudAssets(kind)}}),
+      h('button',{className:'sm pri',text:'Upload all local items to cloud',on:{click:()=>uploadAllCloud(kind)}}));
+    p.append(buttons);
+    if(!AC.loaded[kind]&&AC.loading!==kind)Promise.resolve().then(()=>loadCloudAssets(kind));
+    if(AC.loading===kind)p.append(h('div',{className:'hint',text:'Loading cloud library…'}));
+    const rows=AC.rows[kind]||[];
+    if(AC.loaded[kind]&&!rows.length)p.append(h('div',{className:'hint',text:'Nothing in your cloud '+kind+' library yet.'}));
+    const gr=h('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px'});
+    rows.forEach(row=>{
+      const image=h('img',{alt:row.name,style:'width:100%;aspect-ratio:16/9;object-fit:contain;border-radius:5px;display:block;background:repeating-conic-gradient(#2a3342 0% 25%,#1c2430 0% 50%) 0 0/16px 16px'});
+      cloudThumb(row,image);
+      gr.append(h('div',{style:'padding:6px;border:1px solid #42516a;border-radius:6px;min-width:0'},
+        image,h('div',{className:'hint',text:row.name,style:'margin:5px 0;overflow-wrap:anywhere'}),
+        h('button',{className:'sm pri',text:'Download',on:{click:()=>downloadCloudAsset(row)}}),
+        h('button',{className:'sm',text:'Rename',on:{click:()=>renameCloudAsset(row)}}),
+        h('button',{className:'sm dng',text:'Delete',on:{click:()=>deleteCloudAsset(row)}})
+      ));
+    });
+    p.append(gr);
+    if(AC.status)p.append(h('div',{className:'hint',style:'margin-top:8px;overflow-wrap:anywhere',text:AC.status}));
+  }
+
   function bgApply(b) { const sc = cur(); S.show.assets[b.asset] = b.data; sc.bg = Object.assign({}, sc.bg, { type: 'image', asset: b.asset, kenburns: false, fit: b.asset === 'bgdefault' ? 'fill' : sc.bg.fit }); E.preload(S.show).then(() => thumbSoon(true)); commit(); refreshAll(); }
   function bgDefaultSpec() { const b = bgAll().filter(x => kindOf(x) === 'bg').find(x => x.id === bgDefault) || builtinBgs()[0]; return b; }
 
@@ -747,10 +922,12 @@
     items.forEach(b => {
       const kids = [h('img', { src: b.data, draggable: false, style: 'width:100%;aspect-ratio:16/9;object-fit:' + (isBg ? 'cover' : 'contain') + ';border-radius:6px;display:block;' + (isBg ? '' : 'background:repeating-conic-gradient(#2a3342 0% 25%,#1c2430 0% 50%) 0 0/16px 16px') }), h('div', { className: 'hint', text: b.name, style: 'margin:2px 0 0' })];
       if (isBg) kids.push(h('button', { text: bgDefault === b.id ? '★' : '☆', title: 'Use for new scenes (+ Scene)', style: 'position:absolute;top:4px;left:4px;padding:0 6px', on: { click: e => { e.stopPropagation(); bgDefault = b.id; try { localStorage.setItem(BGD_KEY, b.id); } catch (x) { /* ignore */ } renderPanels(); } } }));
+      if (!b.builtin && !isBg) kids.push(h('button', { className:'sm', text:'☁ Save to cloud', title:'Save PNG to your private cloud account', style:'margin-top:4px;width:100%', on:{click:e=>{e.stopPropagation();uploadOneCloud(b);}} }));
       if (!b.builtin) kids.push(h('button', { text: '✕', title: 'Delete', style: 'position:absolute;top:4px;right:4px;padding:0 6px', on: { click: e => { e.stopPropagation(); if (!confirm('Delete this saved item?')) return; bgList = bgList.filter(x => x !== b); if (bgDefault === b.id) bgDefault = 'sky'; bgTx('readwrite', s => s.delete(b.id)).catch(() => { }); renderPanels(); } } }));
       gr.append(h('div', { style: 'position:relative;cursor:pointer', draggable: !isBg, ondragstart: ev => { ev.dataTransfer.setData('application/x-wx-overlay', b.id); ev.dataTransfer.effectAllowed = 'copy'; }, on: { click: () => (isBg ? bgApply(b) : addOverlay(b)) } }, kids));
     });
     p.append(gr);
+    cloudAssetsPanel(p,kind);
   }
   function mediaPanel(p) {
     const dz = h('div', { id: 'drop', text: 'Drop your own graphics here (PNG, JPG, WebP) – or click to browse' });
