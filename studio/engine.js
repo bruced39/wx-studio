@@ -180,12 +180,36 @@
     }
   }
   const PATHY = { front: 1, arrow: 1, line: 1, pen: 1, hl: 1 };
+  /* ---------- drop shadows (composited per object so glows/effects keep working) ---------- */
+  const SHADOW_OFF = { shape: 1, image: 1 };
+  E.shadowOf = function (o) {
+    const s = o.shadow; if (s === false) return null;
+    if (s && typeof s === 'object') return s.on === false ? null : s;
+    return SHADOW_OFF[o.type] ? null : { on: true, blur: 12, dist: 7, alpha: 0.6 };
+  };
+  let shadowCv = null;
+  function drawShadowed(c, o, o0, t, p, show) {
+    const sh = E.shadowOf(o0);
+    if (!sh) { drawObj(c, o, t, p, show); return; }
+    let b; try { b = E.bounds(o); } catch (e) { b = null; }
+    if (!b || !isFinite(b.x + b.y + b.w + b.h)) { drawObj(c, o, t, p, show); return; }
+    const blur = Math.max(0, +sh.blur || 0), dist = Math.max(0, +sh.dist || 0), pad = Math.ceil(blur * 2 + dist + 80 + (o.size || 0) * 0.3);
+    const tr = c.getTransform(), W2 = c.canvas.width, H2 = c.canvas.height;
+    if (!shadowCv || shadowCv.width !== W2 || shadowCv.height !== H2) { shadowCv = document.createElement('canvas'); shadowCv.width = W2; shadowCv.height = H2; }
+    const x0 = Math.max(0, Math.floor(b.x - pad)), y0 = Math.max(0, Math.floor(b.y - pad)), x1 = Math.min(W2, Math.ceil(b.x + b.w + pad)), y1 = Math.min(H2, Math.ceil(b.y + b.h + pad));
+    if (x1 <= x0 || y1 <= y0 || (tr.a !== 1 || tr.d !== 1 || tr.b !== 0 || tr.c !== 0)) { drawObj(c, o, t, p, show); return; }
+    const tc = shadowCv.getContext('2d'); tc.setTransform(1, 0, 0, 1, 0, 0); tc.clearRect(x0, y0, x1 - x0, y1 - y0);
+    tc.save(); tc.beginPath(); tc.rect(x0, y0, x1 - x0, y1 - y0); tc.clip(); tc.setTransform(tr); tc.globalAlpha = 1; drawObj(tc, o, t, p, show); tc.restore();
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+    c.shadowColor = 'rgba(0,0,0,' + clamp(sh.alpha == null ? 0.6 : sh.alpha, 0, 1) + ')'; c.shadowBlur = blur; c.shadowOffsetX = dist * 0.55; c.shadowOffsetY = dist;
+    c.drawImage(shadowCv, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0); c.restore();
+  }
   function drawObjectAnimated(c, o0, scene, xf, t, show, editing) {
     const o = toScreen(o0, xf), a = o0.anim || ANIM_DEFAULT();
     let p = 1, vis = true;
     if (!editing) { if (t < (a.delay || 0)) return; p = clamp((t - (a.delay || 0)) / Math.max(0.01, a.dur || 0.01), 0, 1); }
     const mode = a.in || 'none'; c.save();
-    if (mode === 'draw' && PATHY[o.type]) { const o2 = Object.assign({}, o, { animMode: 'draw' }); drawObj(c, o2, t, ease.out(p), show); c.restore(); return; }
+    if (mode === 'draw' && PATHY[o.type]) { const o2 = Object.assign({}, o, { animMode: 'draw' }); drawShadowed(c, o2, o0, t, ease.out(p), show); c.restore(); return; }
     const pe = mode === 'none' ? 1 : ease.out(p);
     if (mode === 'fade' || mode === 'draw') c.globalAlpha *= pe;
     else if (mode === 'pop' || mode === 'zoom' || mode === 'slide-up' || mode === 'slide-left') {
@@ -195,7 +219,7 @@
       else if (mode === 'slide-up') { c.globalAlpha *= pe; c.translate(0, (1 - pe) * 70); }
       else { c.globalAlpha *= pe; c.translate((1 - pe) * 120, 0); }
     }
-    drawObj(c, o, t, 1, show); c.restore();
+    drawShadowed(c, o, o0, t, 1, show); c.restore();
   }
 
   /* ---------- scene chrome: background, title, logo ---------- */

@@ -256,3 +256,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.36 – Resilient scene drawing + visible draw errors
 - User video (Streamlit, live Mapbox scene) showed Front/H clicks creating objects but nothing drawing, not even the draft dots or the scene title: consistent with renderScene throwing each frame (loop swallowed it into console.error). E.renderScene now guards background, each object, title and bug separately; the editor loop still draws the overlay after an error and shows a one-time "Drawing error: <message>" toast (E.onDrawError). With a stub projection in headless all tools work, so the real cause is still unconfirmed. Files: studio/engine.js, studio/ui.js. Touches map-adjacent drawing code but not the ChatGPT map files (mapbox.js).
+
+## v0.9.37 – Drop shadows on every object
+- New per-object `shadow` ({on, blur, dist, alpha}); default ON (blur 12, dist 7, opacity 0.6) for all types except `shape` and `image`. Composited in engine.js `drawShadowed` (object drawn to a scratch canvas then blitted with a canvas shadow, so existing glows still work). Object panel has a Shadow section (checkbox, Softness, Distance, Opacity). Files: studio/engine.js, studio/ui.js. No ChatGPT-modified files touched (mapbox.js untouched).
