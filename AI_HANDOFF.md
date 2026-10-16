@@ -247,3 +247,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.33 – Backgrounds tab (saved backgrounds)
 - New "Backgrounds" side tab: upload images (click or drop, multi-file; resized to <=1920 px wide JPEG, stored in IndexedDB `wxstudio-bgs`), click a thumbnail to apply it to the current scene, ✕ deletes uploads, ★ picks the background used by "+ Scene" (localStorage `wx_bg_default`). Built-ins: Default sky, Billerica 7-Day template. Files: studio/ui.js, studio/index.html. No ChatGPT-modified code touched.
+
+## v0.9.34 – Hint for multi-click drawing tools
+- Selecting Front/Arrow/Isobar shows a toast explaining: click each point, double-click or Enter to finish. Investigated "can't draw on the map": in headless (no Mapbox/internet) every bottom-bar tool creates objects on non-map scenes; map scenes could not be verified without a live map. No ChatGPT-modified code touched. File: studio/ui.js.

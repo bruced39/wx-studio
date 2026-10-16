@@ -135,6 +135,7 @@
   }
   function setTool(id) {
     finishDraft();S.tool=id;
+    if(S.show&&['front','arrow','line'].includes(id))toast('Click each point along the line, then double-click (or press Enter) to finish');
     document.querySelectorAll('#tools button[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===id));
     // Do not access cur() before S.show exists.
     ov.style.cursor=(id==='pan'||(id==='select'&&S.show?.scenes?.[S.si]?.bg?.type==='mapbox'))?'grab':id==='select'?'default':'crosshair';
