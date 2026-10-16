@@ -722,8 +722,9 @@
       if(d==='villages'||d==='all')add(settlementLayer('wd-small-place-labels',cfg,source,
         d==='all'?['village','hamlet','suburb','neighborhood']:['village'],
         cfg.broadcastVillageSize,villageMin,null,villageMax));
-      if(d!=='cities')add(settlementLayer('wd-town-labels',cfg,source,['town'],
-        cfg.broadcastTownSize,customTownMin,null,townMax));
+      if(d!=='cities'&&townMax>customTownMin)
+        add(settlementLayer('wd-town-labels',cfg,source,['town'],
+          cfg.broadcastTownSize,customTownMin,null,townMax));
       if(cityMax>customCityMin)add(settlementLayer('wd-city-labels',cfg,source,['city'],cfg.broadcastCitySize,customCityMin,null,cityMax));
       // Separate fallback covers only zooms below the regular city minimum,
       // without hiding Boston/New York/etc. when zooming out past level 6.
