@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.48` (`VERSION`).
+- **Last reviewed application version:** `0.9.49` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -322,4 +322,15 @@ After publishing the v0.9.42 cloud Assets feature, identified a failed cloud lis
 - New `tests/map_city_labels.test.js` (Node built-in test runner) tests custom symbol-rank filters, coverage across zooms 0–20 when City min zoom = 6, user-disabled major labels, correct town/village zoom windows and presence of all controls.
 - Source syntax and mocked Mapbox label-layer/zoom tests passed. Live Mapbox tile data/layout collision behaviour still needs user confirmation, particularly at zoom 2–6.
 - **Claude overlap:** touched `studio/ui.js` with a targeted change limited to City + Town Labels controls. Did **not** alter Claude's v0.9.44–0.9.47 Layer Style, banners, templates, image export, `studio/engine.js`, `studio/index.html`, or cloud presets/assets. Changed `studio/mapbox.js`, `studio/ui.js`, `VERSION`, `AI_HANDOFF.md` and one file under `tests/`.
+
+
+## v0.9.49 — restore actual city names at overview zoom (ChatGPT, 2026-10-16)
+
+User provided a screenshot of the deployed v0.9.48 app at **zoom 6.0** showing no city names at all despite roads/boundaries drawing. This confirmed v0.9.48 rank/zoom filter edits alone did **not** fix the actual rendering. The underlying code was hiding ALL Mapbox Streets/Satellite Streets native `place_label` layers and relying on a custom-only symbol stack that yielded no names at overview zoom.
+
+- `studio/mapbox.js`: when the classic Mapbox style has native `settlement-major-label` and/or `settlement-minor-label` layers, preserve these **only from the user's configured minimum** (major city min or city min; town min) **up to zoom 7.5**, with user-controlled label color, halo, opacity and uppercase. Their proven native zoom-dependent Mapbox `filter`, `text-size` and collision layout stay intact. Original state/country labels remain hidden as before. Both native settlement layers are hidden if Show Places is unchecked; Cities Only suppresses minor settlements.
+- At zoom >=7.5, WX Studio's existing fully styled custom city/town layers take over, with no conflicting duplicate zoom coverage. Existing custom major-city fallback is used when the underlying style does not offer native major settlements, and can bridge saved-user minzoom windows above the native range. The user-requested City/Town/Village min/max and Major City minimum sliders from v0.9.48 are preserved. Scene and cloud preset compatibility stays unchanged. No new default settings or migrations.
+- Tested in V8 with a mocked Mapbox style containing original native settlement layers: at zoom 6.0, both major and minor are visible; at >=7.5, custom city takes over; Show Places off removes both; Cities Only hides minor; a saved City min=6 still yields city labels at z6. The existing no-native synthetic fallback tests are retained and augmented in `tests/map_city_labels.test.js`.
+- **Live browser confirmation still required.** Real Mapbox styles, loaded glyphs and placement engine cannot be exercised fully in the mocked tests; ask user to validate zoom 5–8 and check city names appear near New England. No production token copied or modified.
+- Starting main was v0.9.48 `da4beb8`; no unrelated source files, Map presets/cloud assets, or Claude's export, templates, typography, banners and `studio/engine.js` or `studio/index.html` were touched. Changed `studio/mapbox.js`, `tests/map_city_labels.test.js`, `VERSION`, and this handoff.
 
