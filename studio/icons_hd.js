@@ -85,7 +85,7 @@
     if (!ok('stormcloud')) return; _oc3 = _oc3 || mkc(); const o = _oc3.getContext('2d');
     const S1 = strike(ph, 0.18), S2 = strike(ph, 0.62), F = Math.min(1, 0.9 * Math.max(S1.I > 0.3 ? S1.I : 0, S2.I > 0.3 ? S2.I * 0.8 : 0)), sc = 1 + 0.012 * Math.sin(ph * TAU);
     c.save(); c.translate(10, 0);
-    rain(c, ph, PM({ seed: 9, x0: 50, xw: 285, top: 212, len: 185, n: 30, spd: 4, spdP: 0.4, L: 26, w0: 2, w1: 1.6, aS: 0.78, aG: 0.35, blur: 3 }));
+    rain(c, ph, PM({ seed: 9, x0: 50, xw: 285, top: 212, len: 185, n: 30, spd: 4, spdP: 0.4, L: 26, mask: { k: 'stormcloud' } }));
     let bg = c.createRadialGradient(150, 270, 5, 150, 270, 150); bg.addColorStop(0, 'rgba(140,185,255,' + (0.03 + 0.5 * F) + ')'); bg.addColorStop(1, 'rgba(120,170,255,0)'); c.fillStyle = bg; c.beginPath(); c.arc(150, 270, 150, 0, TAU); c.fill();
     o.clearRect(0, 0, 400, 400); o.globalCompositeOperation = 'source-over'; o.drawImage(IMG.stormcloud, 0, 0);
     o.globalCompositeOperation = 'source-atop'; const fl = o.createRadialGradient(150, 215, 10, 150, 215, 190); fl.addColorStop(0, 'rgba(205,225,255,' + 0.55 * F + ')'); fl.addColorStop(1, 'rgba(205,225,255,0)'); o.fillStyle = fl; o.fillRect(0, 0, 400, 400);
@@ -103,6 +103,7 @@
     c.save(); c.translate(200 - 200, 200 - 200);
     let gl = c.createRadialGradient(SX, SY, 10, SX, SY, 170); gl.addColorStop(0, 'rgba(255,190,60,' + (0.30 + 0.20 * br) + ')'); gl.addColorStop(1, 'rgba(255,170,40,0)'); c.fillStyle = gl; c.beginPath(); c.arc(SX, SY, 170, 0, TAU); c.fill();
     let bg = c.createRadialGradient(180, 260, 5, 180, 260, 150); bg.addColorStop(0, 'rgba(140,185,255,' + (0.05 + 0.55 * F) + ')'); bg.addColorStop(1, 'rgba(120,170,255,0)'); c.fillStyle = bg; c.beginPath(); c.arc(180, 260, 150, 0, TAU); c.fill();
+    rain(c, ph, PM({ seed: 5, x0: 80, xw: 260, top: 228, len: 175, n: 30, spd: 4, spdP: 0.4, L: 26, mask: { k: 'sunstorm' } }));
     o.clearRect(0, 0, 400, 400); o.globalCompositeOperation = 'source-over'; o.drawImage(im, 0, 0);
     o.globalCompositeOperation = 'source-atop'; let fl = o.createRadialGradient(185, 250, 10, 185, 250, 190); fl.addColorStop(0, 'rgba(215,230,255,' + 0.75 * F + ')'); fl.addColorStop(1, 'rgba(215,230,255,0)'); o.fillStyle = fl; o.fillRect(0, 0, 400, 400);
     c.save(); c.translate(200, 200); c.scale(S, S); c.drawImage(_oc, -200, -200); c.restore();
@@ -117,24 +118,40 @@
   /* ---- streak rain (steady, straight) ---- */
   /* ---- raindrops: glossy drop sprites (from the user's reference photo), falling along their own slant ---- */
   const DROPS = [[44, 112, -19.8], [45, 111, -20.2], [44, 111, -20.0], [46, 112, -20.2], [48, 112, -20.3], [44, 112, -20.1], [46, 112, -20.2], [56, 112, -23.0], [42, 112, -20.1], [44, 112, -20.1], [48, 112, -20.2], [44, 112, -19.7]];   // [width, height, tilt-deg] of drop0..dropN art (sprite images in icons_hd_art.js)
-  const rainLay = {};
+  const rainLay = {}, baseCache = {};
+  /* underside of the cloud in an art image: per column, the lowest row of solid cloud (or -1) */
+  function cloudBase(k) {
+    if (baseCache[k]) return baseCache[k]; if (!ok(k)) return null;
+    const cv = document.createElement('canvas'); cv.width = cv.height = 400; const x = cv.getContext('2d'); x.drawImage(IMG[k], 0, 0);
+    const d = x.getImageData(0, 0, 400, 400).data, base = new Array(400).fill(-1);
+    for (let i = 0; i < 400; i++) { let n = 0, last = -1; for (let j = 0; j < 400; j++) if (d[(j * 400 + i) * 4 + 3] > 150) { n++; last = j; } if (n >= 20 && last >= 225) base[i] = last; }
+    return baseCache[k] = base;
+  }
   function rainLayout(p) {
-    const key = [p.seed, p.n, p.x0, p.xw, p.top, p.len, p.spd, p.spdP, p.L].join('|'); if (rainLay[key]) return rainLay[key];
+    const key = [p.seed, p.n, p.x0, p.xw, p.top, p.len, p.spd, p.spdP, p.L, p.mask ? p.mask.k : ''].join('|'); if (rainLay[key]) return rainLay[key];
     const n = Math.max(4, Math.round(p.n * 0.5)), sz = Math.min(1.1, Math.max(0.9, p.L / 24)), tn = d => Math.tan(DROPS[d.si][2] * Math.PI / 180);
-    const pos = (d, ph) => { const f = (ph * d.spd + d.off) % 1; return [d.x + tn(d) * p.len * (f - 0.5), p.top + p.len * f]; };
+    let cols = null, base = null;
+    if (p.mask) {   /* drops are born under the cloud body and appear right at its underside */
+      base = cloudBase(p.mask.k); if (!base) return null;
+      const v = []; base.forEach((b, i) => { if (b >= 0) v.push(i); }); const lo = v[0] + 14, hi = v[v.length - 1] - 14; cols = v.filter(i => i >= lo && i <= hi);
+    }
+    const yb = d => base ? base[d.cx] : p.top, endY = p.top + p.len;
+    const pos = (d, ph) => { const f = (ph * d.spd + d.off) % 1, y0 = yb(d) - 8, trav = base ? Math.max(90, endY - y0) : p.len; return base ? [d.x + tn(d) * trav * f, y0 + trav * f] : [d.x + tn(d) * p.len * (f - 0.5), p.top + p.len * f]; };
     let best = null, bs = -1;
     for (let t = 0; t < 300; t++) {
       const r = rng(p.seed * 131 + t + 1), L = [];
-      for (let i = 0; i < n; i++) L.push({ x: p.x0 + p.xw * r(), off: r(), spd: p.spd + (r() < p.spdP ? 1 : 0), h: (26 + 34 * r()) * sz, si: Math.floor(r() * DROPS.length) });
+      for (let i = 0; i < n; i++) { const cx = cols ? cols[Math.floor(r() * cols.length)] : 0; L.push({ cx, x: cols ? cx + 0.5 : p.x0 + p.xw * r(), off: r(), spd: p.spd + (r() < p.spdP ? 1 : 0), h: (26 + 34 * r()) * sz, si: Math.floor(r() * DROPS.length) }); }
       let ms = 1e9; for (let k = 0; k < 12; k++) { const P = L.map(d => pos(d, k / 12)); for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const dd = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]); if (dd < ms) ms = dd; } }
       if (ms > bs) { bs = ms; best = L; }
     }
-    return rainLay[key] = { L: best, pos };
+    return rainLay[key] = { L: best, pos, base };
   }
   function rain(c, ph, p) {
-    if (!ok('drop0')) return; const lay = rainLayout(p); c.save();
+    if (!ok('drop0')) return; const lay = rainLayout(p); if (!lay) return; c.save();
     lay.L.forEach(d => {
-      const f = (ph * d.spd + d.off) % 1, xy = lay.pos(d, ph), D = DROPS[d.si], a = Math.min(1, f * p.fk) * Math.sin(Math.PI * Math.min(1, f * p.fs)) ** 0.7, h = d.h, w = D[0] * h / D[1];
+      const f = (ph * d.spd + d.off) % 1, xy = lay.pos(d, ph), D = DROPS[d.si], h = d.h, w = D[0] * h / D[1];
+      const a = lay.base ? Math.min(1, Math.max(0, (xy[1] - lay.base[d.cx]) / 14)) * Math.min(1, (1 - f) * 4)
+        : Math.min(1, f * p.fk) * Math.sin(Math.PI * Math.min(1, f * p.fs)) ** 0.7;
       c.globalAlpha = 0.95 * a; c.drawImage(IMG['drop' + d.si], xy[0] - w * 0.2, xy[1] - h * 0.05, w, h);
     });
     c.restore();
