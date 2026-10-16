@@ -68,15 +68,32 @@
   }
   function strike(ph, s) { const d = ((ph - s) % 1 + 1) % 1; if (d > 0.32) return { prog: 0, I: 0 }; const lead = 0.020; if (d < lead) return { prog: d / lead, I: 0.18 }; const e = d - lead; let I = Math.exp(-e / 0.020); if (e > 0.05) I += 0.85 * Math.exp(-(e - 0.05) / 0.016); I += 0.16 * Math.exp(-e / 0.09); return { prog: 1, I: Math.min(1.6, I) }; }
   function strokePath(c, pts, upto, wd, col) { let acc = 0; c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) { const seg = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); if (acc + seg > upto) { const f = (upto - acc) / seg; c.lineTo(pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f); break; } c.lineTo(pts[i][0], pts[i][1]); acc += seg; } c.lineWidth = wd; c.strokeStyle = col; c.stroke(); }
-  function drawBolt(c, B, prog, I) {
-    if (I <= 0.01) return; const up = B.len * prog, a = Math.min(1, I); c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.globalCompositeOperation = 'lighter';
-    [[22, 'rgba(70,120,255,' + 0.16 * a + ')', 0], [11, 'rgba(120,170,255,' + 0.30 * a + ')', 0], [5, 'rgba(190,215,255,' + 0.65 * a + ')', 8], [2.4, 'rgba(255,255,255,' + Math.min(1, a * 1.1) + ')', 10]].forEach(([w, col, bl]) => {
+  function drawBolt(c, B, prog, I, wm) {
+    wm = wm || 1; if (I <= 0.01) return; const up = B.len * prog, a = Math.min(1, I); c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.globalCompositeOperation = 'lighter';
+    [[22, 'rgba(70,120,255,' + 0.16 * a + ')', 0], [11, 'rgba(120,170,255,' + 0.30 * a + ')', 0], [5, 'rgba(190,215,255,' + 0.65 * a + ')', 8], [2.4, 'rgba(255,255,255,' + Math.min(1, a * 1.1) + ')', 10]].forEach(([w0, col, bl]) => { const w = w0 * wm;
       c.shadowColor = 'rgba(120,170,255,' + a + ')'; c.shadowBlur = bl; strokePath(c, B.main, up, w, col);
       B.branches.forEach(br => { const bl2 = plen(br.pts), bp = Math.max(0, Math.min(1, (up - B.len * br.at) / bl2)); if (bp > 0) strokePath(c, br.pts, bl2 * bp, w * 0.55, col); });
     }); c.restore();
   }
   const mkc = () => { const o = document.createElement('canvas'); o.width = 400; o.height = 400; return o; };
   let _oc, _oc2;
+
+  /* ---- Thunderstorms: his cumulonimbus (sun removed, darkened) + falling rain + the lightning bolt. Art pixel space. ---- */
+  const BOLTS_T = [makeBolt(11, 150, 204, 126, 388), makeBolt(23, 180, 210, 192, 332)];
+  let _oc3;
+  function thunder(c, ph) {
+    if (!ok('stormcloud')) return; _oc3 = _oc3 || mkc(); const o = _oc3.getContext('2d');
+    const S1 = strike(ph, 0.18), S2 = strike(ph, 0.62), F = Math.min(1, 0.9 * Math.max(S1.I > 0.3 ? S1.I : 0, S2.I > 0.3 ? S2.I * 0.8 : 0)), sc = 1 + 0.012 * Math.sin(ph * TAU);
+    c.save(); c.translate(10, 0);
+    rain(c, ph, PM({ seed: 9, x0: 50, xw: 285, top: 212, len: 185, n: 30, spd: 4, spdP: 0.4, L: 26, w0: 2, w1: 1.6, aS: 0.78, aG: 0.35, blur: 3 }));
+    let bg = c.createRadialGradient(150, 270, 5, 150, 270, 150); bg.addColorStop(0, 'rgba(140,185,255,' + (0.03 + 0.5 * F) + ')'); bg.addColorStop(1, 'rgba(120,170,255,0)'); c.fillStyle = bg; c.beginPath(); c.arc(150, 270, 150, 0, TAU); c.fill();
+    o.clearRect(0, 0, 400, 400); o.globalCompositeOperation = 'source-over'; o.drawImage(IMG.stormcloud, 0, 0);
+    o.globalCompositeOperation = 'source-atop'; const fl = o.createRadialGradient(150, 215, 10, 150, 215, 190); fl.addColorStop(0, 'rgba(205,225,255,' + 0.55 * F + ')'); fl.addColorStop(1, 'rgba(205,225,255,0)'); o.fillStyle = fl; o.fillRect(0, 0, 400, 400);
+    c.save(); c.translate(190, 130); c.scale(sc, sc); c.shadowColor = 'rgba(6,24,66,0.35)'; c.shadowBlur = 16; c.shadowOffsetY = 7; c.drawImage(_oc3, -190, -130); c.restore();
+    drawBolt(c, BOLTS_T[0], S1.prog, S1.I, 1.3); drawBolt(c, BOLTS_T[1], S2.prog, S2.I * 0.85, 1.3);
+    c.restore();
+  }
+
   /* ---- Sun_Thunderstorms (his artwork, bolt removed and redrawn procedurally). Art pixel space, drawn at (0,0). ---- */
   const SX = 125, SY = 113, BOLTS = [makeBolt(11, 184, 238, 160, 392), makeBolt(23, 210, 238, 222, 360)];
   function sunStorm(c, ph) {
@@ -179,6 +196,7 @@
     { id: 'blizzard', k: 1.05, label: 'Blizzard', oy: 318, fn: (c, ph) => { blizzard(c, ph); cloudImg(c, 200, 232, ph); } },
     { id: 'mostly-sunny-rain', label: 'Mostly Sunny/Rain', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({})); } },
     { id: 'mostly-sunny-showers', label: 'Mostly Sunny/Showers', oy: 290, fn: (c, ph) => { mostlyImg(c, ph); rain(c, ph, PM({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 })); } },
+    { id: 'thunderstorm', label: 'Thunderstorms', k: 0.95, oy: 195, st: 0.205, fn: (c, ph) => thunder(c, ph) },
     { id: 'sun-thunderstorms', label: 'Sun_Thunderstorms', k: 1.0, oy: 206, st: 0.205, fn: (c, ph) => sunStorm(c, ph) }
   ];
   /* same artwork, different wording (user's call): Light Rain / Light Showers reuse Showers, Snow Showers reuses Light Snow */
