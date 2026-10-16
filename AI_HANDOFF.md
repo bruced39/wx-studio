@@ -5,9 +5,9 @@
 
 ## Last reviewed baseline
 
-- Review date: 2026-10-14 (America/New_York; commits below are UTC on 2026-10-15).
+- Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.19` (`VERSION`).
+- **Last reviewed application version:** `0.9.42` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -276,3 +276,15 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 - New object types (engine.js drawWidget, added from the toolbar "＋ Add…" dropdown): `citytemp` (name + value badge, optional color-by-temperature, pointer to the city; fields are plain strings so data can be bound later), `callout` (anchor dot + leader line + label/value box), `legend` (radar/precip/snow/temp gradient bar with left/right labels), `ticker` (scrolling alert band with tag). Text gained `auto` ('valid','datetime','date','clock' – evaluated at draw time) for the valid-time box, clock and date bugs, and `wrapW` (wrap width). 
 - "Templates…" button next to 7-Day…: Storm Update (red panels), Weather Headlines (glass panels), Storm Impacts (keeps the current map background; time frame box, red panels, valid time). Built by `E.buildTemplate`/`E.sceneFromTemplate`.
 - Files: studio/engine.js, studio/ui.js, studio/index.html. mapbox.js / cloud_presets.js untouched.
+
+## v0.9.42 — private cloud Assets (2026-10-16; ChatGPT)
+
+**Starting main:** Claude's v0.9.41 commit `c4707d9`; baseline verified before edits. Preserved Claude's v0.9.38–0.9.41 Assets/graphics, guides, templates, widgets, and typography features. `studio/engine.js` was NOT changed.
+
+- Created private PNG-only Supabase Storage bucket `wx-studio-banners` in dedicated WX Studio project `lcujugmyyuumrshdasla`, max **8 MiB** per file, and `public.wx_studio_assets` metadata (`id,user_id,kind,name,storage_path,width,height,created_at,updated_at`), unique `(user_id,kind,name)`. Applied owner-only RLS for metadata and each Storage action (SELECT/INSERT/UPDATE/DELETE), using `<auth.uid>/<kind>/<uuid>.png` paths. Anonymous table access revoked. Applied SQL tracked in `supabase/migrations/20261016_create_wx_studio_private_assets.sql`; table/bucket/policies verified in Supabase. No service-role keys or new cloud credentials committed.
+- Added `studio/cloud_assets.js` client that reuses the existing `WXCloudPresets.ensureSession()` and public project config, uploads/downloads PNG bytes without changing transparency, generates short-lived signed preview links for private thumbnail display, and supports list, save/upsert by name, rename, delete. PNG signature, dimensions, 8 MiB limit and owner-path validation built in. `studio/index.html` adds only a JS include after cloud_presets.js; `wxbuild.py` bundles it automatically.
+- Added targeted `studio/ui.js` Assets panel integration, leaving original IndexedDB `wxstudio-bgs`/`bgs` local library intact. Banners/Graphics now accept original PNGs (NO conversion/canvas downscale), have per-item **Save to cloud** and **Upload all local items to cloud**, while each Assets sub-tab (Backgrounds/Banners/Graphics) has **Cloud library** with authenticated thumbnail, click/download to local, rename and delete. Download creates a normal local asset `ov_<id>` (or `bg_<id>`) without modifying existing scenes. An optional JPG background **cloud copy only** converts to PNG; local file unaffected. Offline failures do not delete local assets.
+- `CLOUD_PRESETS_SETUP.md` extended with user-facing first-use instructions, account sign-in reuse, cross-browser test checklist and confirmations. `tests/cloud_assets.test.js` adds Node built-in test runner coverage. Helper functions tested with mocked Supabase auth/REST/storage for original PNG byte equality, owner separation, CRUD, temporary signed thumbnail links, invalid MIME and paths. **Real two-device/browser validation still required.**
+- **Touched Claude-shared files:** `studio/ui.js` (minimal targeted Assets panel additions and PNG import branch), `studio/index.html` (one cloud script tag). **Not touched:** `studio/engine.js` and unrelated layouts/templates/text styling; no breaking object-ID migration.
+- **Future cautions:** Cloud items do NOT get inserted into the user's scene automatically; first download into local IndexedDB, then click local thumbnail to place. Delete cloud does not remove local files. The user's cloud login is the SAME map-presets login. Upload limit and PNG-only MIME apply to Storage bucket, not offline local photo workflows.
+
