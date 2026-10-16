@@ -1493,20 +1493,16 @@
       try {
         const r = await g.Exporter.run(S.show, { width: w, height: hh, bitrate: +br.value * 1e6, fps: 30, signal: ac.signal, onProgress: p => { bar.style.width = (p * 100).toFixed(0) + '%'; msg.textContent = `Rendering… ${(p * 100).toFixed(0)}%`; } });
         const url = URL.createObjectURL(r.blob), name = (S.show.name || 'weather').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + '.' + r.ext;
-        msg.textContent = `Done – ${(r.blob.size / 1048576).toFixed(1)} MB. ${r.note}`; res.append(h('video', { src: url, controls: true, style: 'width:100%;max-width:640px;border-radius:8px;margin-top:8px' }), h('div', { className: 'mb' }, h('a', { href: url, download: name }, h('button', { className: 'pri', text: 'Download ' + name }))));
+        msg.textContent = `Done – ${(r.blob.size / 1048576).toFixed(1)} MB. ${r.note}`; saveFile(r.blob, name); msg.textContent += ' Saved to your Downloads folder.'; res.append(h('video', { src: url, controls: true, style: 'width:100%;max-width:640px;border-radius:8px;margin-top:8px' }), h('div', { className: 'mb' }, h('a', { href: url, download: name }, h('button', { text: 'Download again' }))));
       } catch (e) { msg.textContent = 'Export failed: ' + (e && e.message || e); } go.disabled = false;
     };
     modal('Export video', h('div', {}, fld('Size', size), fld('Quality', br), info, h('div', { className: 'prog' }, bar), msg, res), [h('button', { text: 'Close', on: { click: () => { ac.abort(); closeModal(); } } }), go]);
   }
   /* ---------- still image export (PNG/JPG) for X / Facebook ---------- */
-  function crc32(b) { let c, crc = -1; if (!crc32.t) { crc32.t = []; for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; crc32.t[n] = c; } } for (let i = 0; i < b.length; i++) crc = crc32.t[(crc ^ b[i]) & 255] ^ (crc >>> 8); return (crc ^ -1) >>> 0; }
-  function zipStore(files) { const enc = new TextEncoder(), parts = [], cen = []; let off = 0; const u16 = n => [n & 255, n >> 8 & 255], u32 = n => [n & 255, n >> 8 & 255, n >> 16 & 255, n >>> 24 & 255];
-    files.forEach(f => { const nm = enc.encode(f.name), cr = crc32(f.data), hd = new Uint8Array([0x50, 0x4b, 3, 4, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...u32(cr), ...u32(f.data.length), ...u32(f.data.length), ...u16(nm.length), 0, 0]); parts.push(hd, nm, f.data);
-      cen.push(new Uint8Array([0x50, 0x4b, 1, 2, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...u32(cr), ...u32(f.data.length), ...u32(f.data.length), ...u16(nm.length), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...u32(off)]), nm); off += hd.length + nm.length + f.data.length; });
-    const cl = cen.reduce((a, b) => a + b.length, 0); return new Blob([...parts, ...cen, new Uint8Array([0x50, 0x4b, 5, 6, 0, 0, 0, 0, ...u16(files.length), ...u16(files.length), ...u32(cl), ...u32(off), 0, 0])], { type: 'application/zip' }); }
+  function saveFile(blob, name) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000); return url; }
   async function imageDialog() {
     const SZ = [['1920x1080', '16:9 – 1920×1080 (X and Facebook, best quality)'], ['1200x675', '16:9 – 1200×675 (smaller file, fine for X)'], ['1080x1080', 'Square 1:1 – 1080×1080 (Facebook feed)'], ['1080x1350', 'Portrait 4:5 – 1080×1350 (tall Facebook post)']];
-    const size = h('select', {}, SZ.map(o => h('option', { value: o[0], text: o[1] }))), fmt = h('select', {}, [['png', 'PNG (sharpest text)'], ['jpeg', 'JPG (smaller file)']].map(o => h('option', { value: o[0], text: o[1] }))), what = h('select', {}, [['one', 'Current scene only'], ['all', 'All scenes (zip file)']].map(o => h('option', { value: o[0], text: o[1] })));
+    const size = h('select', {}, SZ.map(o => h('option', { value: o[0], text: o[1] }))), fmt = h('select', {}, [['png', 'PNG (sharpest text)'], ['jpeg', 'JPG (smaller file)']].map(o => h('option', { value: o[0], text: o[1] }))), what = h('select', {}, [['one', 'Current scene only'], ['all', 'All scenes (one PNG each)']].map(o => h('option', { value: o[0], text: o[1] })));
     const pos = h('input', { type: 'range', min: 0, max: 100, value: 50 }), msg = h('div', { className: 'hint', text: 'Saves the finished look of the scene (everything animated in).' }), res = h('div'), go = h('button', { className: 'pri', text: 'Create image' });
     const hint = h('div', { className: 'hint', text: 'Square and portrait crop the 16:9 scene. The slider picks which part is kept (50 = center).' });
     go.onclick = async () => {
@@ -1522,10 +1518,9 @@
           const blob = await new Promise(r => out.toBlob(r, type, 0.92)); files.push({ name: String(i + 1).padStart(2, '0') + '_' + (sc.name || 'scene').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + '.' + ext, blob });
         }
         const base = (S.show.name || 'weather').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_');
-        let blob, name; if (files.length === 1) { blob = files[0].blob; name = base + '_' + files[0].name; } else { const arr = []; for (const f of files) arr.push({ name: f.name, data: new Uint8Array(await f.blob.arrayBuffer()) }); blob = zipStore(arr); name = base + '_images.zip'; }
-        const url = URL.createObjectURL(blob); msg.textContent = `Done – ${files.length} image${files.length > 1 ? 's' : ''}, ${(blob.size / 1048576).toFixed(1)} MB.` + (warn.length ? ' Note – map not ready for scene ' + warn.join('; ') : '');
-        if (files.length === 1) res.append(h('img', { src: url, style: 'width:100%;max-width:560px;border-radius:8px;margin-top:8px' }));
-        res.append(h('div', { className: 'mb' }, h('a', { href: url, download: name }, h('button', { className: 'pri', text: 'Download ' + name }))));
+        let last = null; for (const f of files) { last = saveFile(f.blob, base + '_' + f.name); await new Promise(r => setTimeout(r, 400)); }
+        msg.textContent = `Saved ${files.length} image${files.length > 1 ? 's' : ''} to your Downloads folder.` + (warn.length ? ' Note – map not ready for scene ' + warn.join('; ') : '');
+        if (files.length === 1) res.append(h('img', { src: last, style: 'width:100%;max-width:560px;border-radius:8px;margin-top:8px' }));
       } catch (e) { msg.textContent = 'Image export failed: ' + (e && e.message || e); } go.disabled = false;
     };
     modal('Export image', h('div', {}, fld('Scenes', what), fld('Size', size), fld('Format', fmt), fld('Crop position', pos), hint, msg, res), [h('button', { text: 'Close', on: { click: closeModal } }), go]);

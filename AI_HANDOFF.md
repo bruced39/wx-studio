@@ -308,3 +308,6 @@ After publishing the v0.9.42 cloud Assets feature, identified a failed cloud lis
 - New **Export image** button (index.html `#bImg`) → `imageDialog` in ui.js. Renders the finished look of the current scene or all scenes (zip, tiny store-only zip writer) as PNG/JPG at 1920x1080, 1200x675, 1080x1080 or 1080x1350 (center crop with position slider).
 - Uses `E.prepareFrame` + `E.renderScene` at scene end; if a map isn't ready (e.g. no Mapbox token) it still renders and notes it.
 - Touched only ui.js + index.html; ChatGPT cloud files untouched.
+
+## v0.9.47 – No zip: Export image saves plain PNG/JPG; MP4 auto-saves (Claude)
+- Removed the zip writer. "All scenes" now saves one PNG/JPG per scene. Image and MP4 exports download automatically when finished (MP4 dialog keeps a "Download again" button). ui.js only; ChatGPT files untouched.
