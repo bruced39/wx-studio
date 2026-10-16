@@ -268,3 +268,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.39 – Text styles
 - Text objects: Outline (strokeW/strokeColor), Gradient fill (color→color2), Gloss highlight, and box styles (plain/titlebar/red/glass) plus a Preset dropdown (Title bar, Red alert panel, Glass panel, Outline, Gold, Chrome) via `E.applyTextPreset`. The old built-in text shadow was removed (the per-object drop shadow from v0.9.37 handles it). Built-in "Default sky" background uses fit=fill so its 3:2 shape is cropped, not letterboxed. Files: studio/engine.js, studio/ui.js.
+
+## v0.9.40 – Snap, guides, safe margin, align & distribute
+- Dragging an object snaps to the frame edges/center, the safe-margin box (`S.show.safe`, default 48 px) and other objects' edges/centers (12 px threshold, magenta snap lines; guide box shows while dragging). Scene panel > "Layout & Guides": Snap on/off, Show guides, Safe margin slider, and "Align & distribute…" dialog (tick objects; align to selection or frame; left/center/right/top/middle/bottom; distribute H/V). Toggles saved in localStorage `wx_snap`. Files: studio/ui.js. mapbox.js untouched.

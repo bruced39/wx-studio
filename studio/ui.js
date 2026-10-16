@@ -220,7 +220,13 @@
       v.p = clamp((v.p || 0) - dy * 0.12, 0, 70);
       d.last = p; d.moved = d.moved || Math.abs(dx) + Math.abs(dy) > 0.5;
     }
-    else if (d.k === 'move' && o) { E.move(o, p[0] - d.last[0], p[1] - d.last[1], xf); d.last = p; d.moved = true; }
+    else if (d.k === 'move' && o) {
+      if (!SNAP.on) { E.move(o, p[0] - d.last[0], p[1] - d.last[1], xf); S.snapLines = null; }
+      else { if (!d.b0) { d.b0 = E.bounds(E.toScreen(o, xf)); d.raw = [0, 0]; }
+        d.raw[0] += p[0] - d.last[0]; d.raw[1] += p[1] - d.last[1];
+        const cb = E.bounds(E.toScreen(o, xf)), want = { x: d.b0.x + d.raw[0], y: d.b0.y + d.raw[1], w: d.b0.w, h: d.b0.h }, sn = snapBounds(want, o, xf);
+        E.move(o, want.x + sn.dx - cb.x, want.y + sn.dy - cb.y, xf); S.snapLines = sn.lines; }
+      d.last = p; d.moved = true; }
     else if (d.k === 'vert' && o) { const k = (o.geo && xf.map) ? xf.k : 1, q = o.geo && xf.map ? xf.inv(p[0], p[1]) : p; o.pts[d.i] = [q[0], q[1]]; }
     else if (d.k === 'resize' && o) {
       const so = E.toScreen(o, xf), k = (o.geo && xf.map) ? (xf.kOf ? xf.kOf(o) : xf.k) : 1;
@@ -240,7 +246,7 @@
     else if (d.k === 'pen' && S.draft) { const l = S.draft.pts[S.draft.pts.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 3) S.draft.pts.push(p); }
     else if (d.k === 'shape' && S.draft) { S.draft.x = Math.min(d.o[0], p[0]); S.draft.y = Math.min(d.o[1], p[1]); S.draft.w = Math.abs(p[0] - d.o[0]); S.draft.h = Math.abs(p[1] - d.o[1]); }
   });
-  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
+  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; S.snapLines = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
   ov.addEventListener('pointercancel', () => { const d=S.drag; S.drag = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if(d&&(d.k==='orbit'||d.k==='pan'))g.MB.setInteractive(false); });
   ov.addEventListener('contextmenu', e => { if (cur().bg.type === 'mapbox') e.preventDefault(); });
   ov.addEventListener('dblclick', () => { if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); } });
@@ -323,6 +329,8 @@
     if (o && !d) { const so = E.toScreen(o, xf), hd = handles(so), b = hd.box; octx.strokeStyle = '#2f9bff'; octx.setLineDash([10, 7]); octx.strokeRect(b.x, b.y, b.w, b.h); octx.setLineDash([]); octx.fillStyle = '#fff'; octx.strokeStyle = '#2f9bff';
       if (hd.verts) hd.verts.forEach(v => { octx.beginPath(); octx.arc(v[0], v[1], 9, 0, 6.3); octx.fill(); octx.stroke(); });
       if (hd.resize) { octx.fillRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); octx.strokeRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); } }
+    if ((SNAP.guides || (S.drag && S.drag.k === 'move' && S.drag.moved)) && S.mode === 'edit') { const m = SAFE(); octx.save(); octx.setLineDash([14, 10]); octx.lineWidth = 2; octx.strokeStyle = 'rgba(255,255,255,0.35)'; octx.strokeRect(m, m, W - 2 * m, H - 2 * m); octx.strokeStyle = 'rgba(255,255,255,0.18)'; octx.beginPath(); octx.moveTo(W / 2, 0); octx.lineTo(W / 2, H); octx.moveTo(0, H / 2); octx.lineTo(W, H / 2); octx.stroke(); octx.restore(); }
+    if (S.snapLines && S.snapLines.length) { octx.save(); octx.strokeStyle = '#ff2fd0'; octx.lineWidth = 2; octx.setLineDash([]); S.snapLines.forEach(l => { octx.beginPath(); if (l.x != null) { octx.moveTo(l.x, 0); octx.lineTo(l.x, H); } else { octx.moveTo(0, l.y); octx.lineTo(W, l.y); } octx.stroke(); }); octx.restore(); }
     if (isMap(sc.bg) && sc.bg.view2) { octx.fillStyle = 'rgba(8,20,38,.8)'; octx.fillRect(W - 330, H - 52, 310, 36); octx.fillStyle = '#9fd0ff'; octx.font = '600 22px sans-serif'; octx.fillText('Editing camera ' + (S.editEnd ? 'END' : 'START') + ' view', W - 318, H - 27); }
     octx.restore();
   }
@@ -366,7 +374,7 @@
     if (T === 'text') { B('text', 'area', { label: 'Text' }); B('size', 'range', { min: 16, max: 300 }); B('color', 'color'); B('weight', 'select', { options: OPT.weight }); B('align', 'select', { options: OPT.align }); B('font', 'select', { options: [['display', 'Condensed'], ['sans', 'Standard']] }); B('box', 'check', { label: 'Background box', rerender: true });
       if (o.box) B('boxStyle', 'select', { label: 'Box style', options: [['plain', 'Plain tint'], ['titlebar', 'Title bar'], ['red', 'Red glossy'], ['glass', 'Glass']] });
       p.append(h('div', { className: 'h', text: 'Text style' }), fld('Preset', h('select', { on: { change: e => { E.applyTextPreset(o, e.target.value); commit(); renderPanels(); } } }, E.TEXT_PRESETS.map(x => h('option', { value: x[0], text: x[1] })))));
-      B('strokeW', 'range', { min: 0, max: 24, label: 'Outline' }); if (o.strokeW > 0) B('strokeColor', 'color', { label: 'Outline color' });
+      if (o.strokeW == null) o.strokeW = 0; B('strokeW', 'range', { min: 0, max: 24, label: 'Outline' }); if (o.strokeW > 0) B('strokeColor', 'color', { label: 'Outline color' });
       if (!o.color2) o.color2 = o.color; B('grad', 'check', { label: 'Gradient fill', rerender: true }); if (o.grad || o.gloss) B('color2', 'color', { label: 'Bottom color' });
       B('gloss', 'check', { label: 'Gloss highlight', rerender: true }); }
     if (T === 'icon') { B('icon', 'select', { options: g.Icons.list.map(i => [i.id, i.label]) }); B('size', 'range', { min: 60, max: 800 }); }
@@ -636,6 +644,13 @@
       p.append(mapAccordion('cameraMove','Camera Move',cameraNodes,false));
     }
 
+    if (S.show.safe == null) S.show.safe = 48;
+    p.append(mapAccordion('layout', 'Layout & Guides', [
+      h('div', { className: 'row' }, h('label', { text: 'Snap to guides' }), h('input', { type: 'checkbox', checked: SNAP.on, onchange: e => { SNAP.on = e.target.checked; saveSnap(); } })),
+      h('div', { className: 'row' }, h('label', { text: 'Show guides' }), h('input', { type: 'checkbox', checked: SNAP.guides, onchange: e => { SNAP.guides = e.target.checked; saveSnap(); } })),
+      bind(S.show, 'safe', 'range', { min: 0, max: 160, step: 4, label: 'Safe margin (px)' }),
+      h('div', { className: 'btnrow' }, h('button', { text: 'Align & distribute…', on: { click: alignDialog } }))
+    ], false));
     p.append(mapAccordion('titleBanner','Title Banner',[
       bind(sc.title, 'show', 'check', { label: 'Show' }),
       bind(sc.title, 'text', 'text', { label: 'Title' }),
@@ -1138,6 +1153,34 @@
   /* ---------- icon thumbnails animation ---------- */
   setInterval(() => { if (S.tab !== 'library') return; document.querySelectorAll('canvas[data-icon]').forEach(cv => { const c = cv.getContext('2d'); c.clearRect(0, 0, 120, 120); g.Icons.draw(c, cv.dataset.icon, 60, 62, 100, clock()); }); }, 66);
 
+  /* ---------- snapping, guides, align ---------- */
+  const SNAP = { on: true, guides: false };
+  try { const q = JSON.parse(localStorage.getItem('wx_snap') || '{}'); if (q.on != null) SNAP.on = !!q.on; if (q.guides != null) SNAP.guides = !!q.guides; } catch (e) { /* ignore */ }
+  const saveSnap = () => { try { localStorage.setItem('wx_snap', JSON.stringify(SNAP)); } catch (e) { /* ignore */ } };
+  function snapBounds(b, o, xf) {
+    const T = 12, m = SAFE(), xs = [0, m, W / 2, W - m, W], ys = [0, m, H / 2, H - m, H];
+    cur().objects.forEach(q => { if (q === o || q.hidden) return; let r; try { r = E.bounds(E.toScreen(q, xf)); } catch (e) { return; } if (!isFinite(r.x + r.y + r.w + r.h) || r.w > W * 1.5) return; xs.push(r.x, r.x + r.w / 2, r.x + r.w); ys.push(r.y, r.y + r.h / 2, r.y + r.h); });
+    const best = (edges, targets) => { let bd = T + 1, bo = 0, bt = null; edges.forEach(e => targets.forEach(t => { const d = t - e; if (Math.abs(d) < Math.abs(bd) && Math.abs(d) <= T) { bd = d; bo = d; bt = t; } })); return bt == null ? { off: 0, t: null } : { off: bo, t: bt }; };
+    const sx = best([b.x, b.x + b.w / 2, b.x + b.w], xs), sy = best([b.y, b.y + b.h / 2, b.y + b.h], ys), lines = [];
+    if (sx.t != null) lines.push({ x: sx.t }); if (sy.t != null) lines.push({ y: sy.t });
+    return { dx: sx.off, dy: sy.off, lines };
+  }
+  function alignDialog() {
+    const sc = cur(), xf = E.xf(sc, editT()), items = sc.objects.map((o, i) => ({ o, i })).filter(x => !x.o.hidden), checks = [];
+    const label = o => o.type + (o.text ? ': ' + String(o.text).slice(0, 22) : o.icon ? ': ' + o.icon : o.value ? ': ' + o.value : '');
+    const list = h('div', { style: 'max-height:240px;overflow:auto;margin:6px 0;border:1px solid #2a3a52;border-radius:6px;padding:4px' }, items.map(x => { const cb = h('input', { type: 'checkbox', checked: x.o.id === S.oid }); checks.push([cb, x.o]); return h('label', { style: 'display:block;padding:2px 4px;cursor:pointer' }, cb, ' ' + (x.i + 1) + '. ' + label(x.o)); }));
+    const rel = h('select', {}, [['sel', 'Align to the selection'], ['frame', 'Align to the frame safe area']].map(o => h('option', { value: o[0], text: o[1] })));
+    const sel = () => checks.filter(c => c[0].checked).map(c => c[1]);
+    const bnd = o => E.bounds(E.toScreen(o, xf));
+    const doAlign = k => { const os = sel(); if (!os.length) return toast('Tick the objects to align'); const bs = os.map(bnd), m = SAFE();
+      const L = rel.value === 'frame' ? m : Math.min(...bs.map(b => b.x)), R = rel.value === 'frame' ? W - m : Math.max(...bs.map(b => b.x + b.w)), Tp = rel.value === 'frame' ? m : Math.min(...bs.map(b => b.y)), Bt = rel.value === 'frame' ? H - m : Math.max(...bs.map(b => b.y + b.h));
+      os.forEach((o, i) => { const b = bs[i]; let dx = 0, dy = 0; if (k === 'l') dx = L - b.x; if (k === 'r') dx = R - (b.x + b.w); if (k === 'c') dx = (L + R) / 2 - (b.x + b.w / 2); if (k === 't') dy = Tp - b.y; if (k === 'b') dy = Bt - (b.y + b.h); if (k === 'm') dy = (Tp + Bt) / 2 - (b.y + b.h / 2); E.move(o, dx, dy, xf); }); commit(); };
+    const doDist = ax => { const os = sel(); if (os.length < 3) return toast('Tick at least 3 objects to distribute'); const rows = os.map(o => ({ o, b: bnd(o) })).sort((a, b) => ax === 'h' ? a.b.x - b.b.x : a.b.y - b.b.y); const first = rows[0].b, last = rows[rows.length - 1].b;
+      const tot = rows.reduce((s2, r) => s2 + (ax === 'h' ? r.b.w : r.b.h), 0), span = ax === 'h' ? (last.x + last.w - first.x) : (last.y + last.h - first.y), gap = (span - tot) / (rows.length - 1); let pos = ax === 'h' ? first.x : first.y;
+      rows.forEach(r => { const cp = ax === 'h' ? r.b.x : r.b.y; if (ax === 'h') E.move(r.o, pos - cp, 0, xf); else E.move(r.o, 0, pos - cp, xf); pos += (ax === 'h' ? r.b.w : r.b.h) + gap; }); commit(); };
+    const btn = (t, f) => h('button', { text: t, on: { click: f } });
+    modal('Align & distribute', h('div', {}, h('div', { className: 'hint', text: 'Tick the objects, choose what to align to, then click an action.' }), list, fld('Reference', rel), h('div', { className: 'btnrow' }, btn('⇤ Left', () => doAlign('l')), btn('↔ Center', () => doAlign('c')), btn('⇥ Right', () => doAlign('r'))), h('div', { className: 'btnrow' }, btn('⤒ Top', () => doAlign('t')), btn('↕ Middle', () => doAlign('m')), btn('⤓ Bottom', () => doAlign('b'))), h('div', { className: 'btnrow' }, btn('Distribute horizontally', () => doDist('h')), btn('Distribute vertically', () => doDist('v')))), [h('button', { className: 'pri', text: 'Done', on: { click: closeModal } })]);
+  }
   /* ---------- modals ---------- */
   function modal(title, body, buttons) { const m = $('#modal'); m.innerHTML = ''; m.append(h('h3', { text: title }), body, h('div', { className: 'mb' }, buttons || [])); $('#modalBg').style.display = 'flex'; }
   function closeModal() { $('#modalBg').style.display = 'none'; $('#modal').innerHTML = ''; }
