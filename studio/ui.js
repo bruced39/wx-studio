@@ -25,8 +25,8 @@
   function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
-  function ensureBG(sh) { if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } }
-  function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show, (k, v) => (k === 'bg7day' && typeof v === 'string' && v === g.WX_BG7DAY) ? undefined : v)); } catch (e) { /* quota or blocked */ } }
+  function ensureBG(sh) { if (g.WX_BGDEFAULT && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bgdefault')) { sh.assets = sh.assets || {}; sh.assets.bgdefault = g.WX_BGDEFAULT; } if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } }
+  function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show, (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT)) ? undefined : v)); } catch (e) { /* quota or blocked */ } }
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
   function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
   function builtInDefaultMapBg(){
@@ -104,7 +104,7 @@
   function delObj() { const sc = cur(); if (!S.oid) return; sc.objects = sc.objects.filter(o => o.id !== S.oid); S.oid = null; commit(); renderPanels(); }
   function dupObj() { const o = selObj(); if (!o) return; const c = JSON.parse(JSON.stringify(o)); c.id = 'o' + Date.now().toString(36); const xf = E.xf(cur(), editT()); E.move(c, 30, 30, xf); cur().objects.push(c); S.oid = c.id; commit(); renderPanels(); }
   function layer(dir) { const a = cur().objects, i = a.findIndex(o => o.id === S.oid); if (i < 0) return; const j = dir === 'front' ? a.length - 1 : dir === 'back' ? 0 : clamp(i + dir, 0, a.length - 1); const [o] = a.splice(i, 1); a.splice(j, 0, o); commit(); }
-  function newScene(after) { const sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: { type: 'solid', color: '#101820', kenburns: false }, title: { show: false, text: '', sub: '' } }); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
+  function newScene(after) { const sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: g.WX_BGDEFAULT ? { type: 'image', asset: 'bgdefault', kenburns: false } : { type: 'solid', color: '#101820', kenburns: false }, title: { show: false, text: '', sub: '' } }); ensureBG({ scenes: [sc], assets: S.show.assets }); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
 
   /* ---------- assets ---------- */
   function readImage(file) {

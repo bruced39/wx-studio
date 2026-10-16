@@ -241,3 +241,6 @@ A broadcast-quality weather studio whose map is comparable to AguaceroWX: sharp 
 
 ## v0.9.31 – Drag icons from the Library onto the canvas
 - Library icons are now `draggable`; dropping one on the stage places an icon object at the drop point (selected, default size 220, resizable/movable afterwards). Click-to-place still works. Drop handler in ui.js reuses the existing file-drop listener (`application/x-wx-icon`). File: studio/ui.js. No ChatGPT-modified code touched.
+
+## v0.9.32 – Default background for new scenes
+- User's cloud-sky image (studio/bgdefault.js, `window.WX_BGDEFAULT`) is now the background of blank scenes made by "+ Scene" (asset id `bgdefault`, re-attached via `ensureBG`, kept out of localStorage autosave). Future: a saved-backgrounds section to choose from (requested, not built). Files: studio/bgdefault.js (new), studio/index.html, studio/ui.js. No ChatGPT-modified code touched.
