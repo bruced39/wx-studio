@@ -602,14 +602,22 @@
     const townRank=cfg.broadcastLabelDensity==='sparse'?1:
       cfg.broadcastLabelDensity==='normal'?3:
       cfg.broadcastLabelDensity==='dense'?4:5;
-    const nativeOverviewFilter=(major)=>major
-      ?['all',['==',['get','class'],'settlement'],
-          ['==',['get','type'],'city'],
-          ['<=',['coalesce',['get','symbolrank'],99],rankCap]]
-      :['all',['==',['get','class'],'settlement'],
-          ['==',['get','type'],'town'],
-          ['<=',['coalesce',['get','filterrank'],5],
-            overviewDensity==='standard'?townRank:overviewDensity==='more'?Math.max(4,townRank):5]];
+    // Never replace Mapbox's known-good settlement filters wholesale:
+    // doing so in v0.9.52 made ALL cities disappear around zoom 6.
+    // Preserve the untouched stock style filter as a baseline, then OR in
+    // additional eligible settlement features requested by the user.
+    // Mapbox's native placement remains in charge of text collisions.
+    const nativeOverviewFilter=(original,major)=>{
+      const extras=major
+        ?['all',['match',['get','class'],['settlement','disputed_settlement'],true,false],
+            ['==',['get','type'],'city'],
+            ['<=',['coalesce',['get','symbolrank'],99],rankCap]]
+        :['all',['match',['get','class'],['settlement','disputed_settlement'],true,false],
+            ['==',['get','type'],'town'],
+            ['<=',['coalesce',['get','filterrank'],5],
+              overviewDensity==='standard'?townRank:overviewDensity==='more'?Math.max(4,townRank):5]];
+      return original?['any',original,extras]:extras;
+    };
     const nativeOverviewRange=(l)=>{
       const major=overviewIsMajor(l),minor=overviewIsMinor(l);
       if(!nativeOverviewEnabled||(!major&&!minor))return null;
@@ -619,6 +627,7 @@
     };
     if(!map.__wdOriginalZoomRanges)map.__wdOriginalZoomRanges={};
     if(!map.__wdOriginalRasterVisibility)map.__wdOriginalRasterVisibility={};
+    if(!map.__wdOriginalOverviewFilters)map.__wdOriginalOverviewFilters={};
     for(const l of layers){
       const id=String(l.id||'').toLowerCase(),sl=String(l['source-layer']||'').toLowerCase(); if(id.startsWith('wd-'))continue;
       try{
@@ -638,22 +647,24 @@
               // labels must honor the same user settings at every zoom.
               try{map.setLayerZoomRange(l.id,overview.min,overview.max);}catch(e){}
               map.setLayoutProperty(l.id,'visibility','visible');
-              // Important: changing only "Major-city rank" in our synthetic
-              // layer does NOTHING at low zoom when native symbols are used.
-              // Explicitly broaden the native features too. Keep sort-key
-              // priority so Boston/NYC/etc. win collisions.
-              try{map.setFilter(l.id,nativeOverviewFilter(overview.major));}catch(e){
-                console.warn('WX Studio overview label filter',l.id,e);
+              // Capture the pristine Mapbox filter ONCE, before changing it.
+              // This persists through slider edits but is reset when the map
+              // loads a different base style (see setup() below).
+              if(!Object.prototype.hasOwnProperty.call(map.__wdOriginalOverviewFilters,l.id))
+                map.__wdOriginalOverviewFilters[l.id]=l.filter
+                  ?JSON.parse(JSON.stringify(l.filter)):null;
+              const original=map.__wdOriginalOverviewFilters[l.id];
+              try{
+                // Even when the extra-density rule is too restrictive for a
+                // particular tile/zoom, the original settlement names remain.
+                map.setFilter(l.id,nativeOverviewFilter(original,overview.major));
+              }catch(e){
+                console.warn('WX Studio extra overview labels unavailable; using stock filter',l.id,e);
+                try{map.setFilter(l.id,original);}catch(ignore){}
               }
-              for(const [property,value] of [
-                ['symbol-sort-key',['coalesce',['get','symbolrank'],99]],
-                ['text-allow-overlap',false],
-                ['text-ignore-placement',false]
-              ]){
-                try{map.setLayoutProperty(l.id,property,value);}catch(e){
-                  console.warn('WX Studio overview label placement',property,e);
-                }
-              }
+              // Preserve Mapbox's ORIGINAL symbol-sort-key and placement
+              // expressions. Altering those alongside the filters can
+              // destabilize which names survive collision at globe zooms.
               const size=overview.major?+cfg.broadcastCitySize:+cfg.broadcastTownSize;
               // A much tighter, separately configurable collision buffer
               // improves regional place coverage while preserving the exact
@@ -888,7 +899,7 @@
   }
   async function setup(bg) {
     MB.ensureConfig(bg);const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
-    if(styleKey!==curStyleKey){D.setStyle('mapbox://styles/mapbox/'+st);await once(D,'style.load');curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;D.__wdOriginalZoomRanges={};D.__wdOriginalRasterVisibility={};}
+    if(styleKey!==curStyleKey){D.setStyle('mapbox://styles/mapbox/'+st);await once(D,'style.load');curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;D.__wdOriginalZoomRanges={};D.__wdOriginalRasterVisibility={};D.__wdOriginalOverviewFilters={};}
     if(pr!==curProj){D.setProjection(pr);curProj=pr;}
     fog(bg);applyTerrain(D,bg);
     if(bg.mbStyle==='broadcast'&&cfgKey!==curCfgKey){addBroadcastCartography(D,bg);curCfgKey=cfgKey;}
