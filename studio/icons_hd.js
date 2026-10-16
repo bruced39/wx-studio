@@ -151,14 +151,18 @@
     stat.push({ id: ic.id + '-static', label: ic.label + ' (Static)', cat: 'Static' });
   });
   /* replaced originals leave their old category; the new Animated / Static groups come first */
-  const rest = Icons.list.filter(i => !HD[i.id]);
+  /* Day-only graphics for now: the new Showers stands in for both original showers icons, and
+     night variants are hidden from the library (saved scenes that use them still draw). */
+  const ALIAS = { 'showers-day': 'showers', 'showers-night': 'showers' };
+  const rest = Icons.list.filter(i => !HD[i.id] && !ALIAS[i.id] && !/night/.test(i.id));
   Icons.list.length = 0; Array.prototype.push.apply(Icons.list, anim.concat(stat, rest));
 
   const _draw = Icons.draw, _has = Icons.has, _label = Icons.label;
-  Icons.has = id => !!HD[id] || _has(id);
-  Icons.label = id => HD[id] ? HD[id].label : _label(id);
+  Icons.has = id => !!HD[id] || !!ALIAS[id] || _has(id);
+  Icons.label = id => HD[ALIAS[id] || id] ? HD[ALIAS[id] || id].label : _label(id);
+  const _from = Icons.fromText; Icons.fromText = (txt) => _from.call(Icons, txt, true);   // day icons only
   Icons.draw = function (ctx, id, cx, cy, size, t) {
-    const e = HD[id]; if (!e) return _draw.call(Icons, ctx, id, cx, cy, size, t);
+    id = ALIAS[id] || id; const e = HD[id]; if (!e) return _draw.call(Icons, ctx, id, cx, cy, size, t);
     const ph = e.still ? STATIC_T / LOOP : (((t || 0) % LOOP) + LOOP) % LOOP / LOOP;
     ctx.save(); try {
       ctx.translate(cx, cy); const s = size / 400; ctx.scale(s, s); ctx.scale(e.ic.k || 1, e.ic.k || 1); ctx.translate(-200, -e.ic.oy);

@@ -204,6 +204,7 @@ User reported satellite maps at regional zoom showed many unintended black irreg
 - v0.9.16: added animated/static **Moderate Snow** (`moderate-snow`, new addition).
 - v0.9.17: the v0.9.16 "Moderate Snow" entry was renamed to **Snow** (`snow`, replaces the original `snow`); added animated/static **Heavy Snow** (`heavy-snow`, replaces the original).
 - v0.9.18: added animated/static **Blizzard** (`blizzard`, replaces the original; `blizzard()` in `icons_hd.js`).
+- v0.9.20: library is **day-only**. The new `showers` icon stands in for the original `showers-day`/`showers-night` (aliases in `icons_hd.js`), all remaining `*-night` icons are hidden from the library list, and `Icons.fromText` always returns day icons. Saved scenes that reference night ids still draw.
 - Verified in headless Chromium: library renders both categories with no script errors; live look inside the user's browser still to confirm.
 
 ## Rules for alternating between ChatGPT and Claude
