@@ -173,13 +173,30 @@
     for (let k = 0; k < 6; k++) { c.save(); c.rotate(k * Math.PI / 3); c.lineWidth = Math.max(1.4, R * 0.17); c.beginPath(); c.moveTo(0, 0); c.lineTo(R, 0); c.stroke(); c.lineWidth = Math.max(1, R * 0.12); c.beginPath(); c.moveTo(R * 0.55, 0); c.lineTo(R * 0.78, -R * 0.26); c.moveTo(R * 0.55, 0); c.lineTo(R * 0.78, R * 0.26); c.stroke(); c.restore(); }
     c.restore();
   }
-  function snow(c, ph, p) {
-    const r = rng(p.seed); c.save();
-    for (let i = 0; i < p.n; i++) {
-      const x0 = 100 + 200 * r(), spd = 1 + (r() < 0.5 ? 1 : 0), off = r(), f = ((ph * spd + off) % 1), y = 264 + 215 * f, sw = p.s0 + p.s1 * r(), x = x0 + sw * Math.sin(TAU * (ph * spd + off)),
-        a = Math.min(1, f * 6) * Math.sin(Math.PI * Math.min(1, f * 1.05)) ** 0.6, R = p.r0 + p.r1 * r(), rot = (r() < 0.5 ? 1 : -1) * TAU * (ph * spd + off) + r() * 6;
-      flake(c, x, y, R, rot, a);
+  /* Snow: random flakes. Each layout starts random, then individual flakes are re-rolled at random until no two flakes crowd each other at any moment of the loop. */
+  const snowLay = {};
+  function snowLayout(p) {
+    const key = [p.seed, p.n, p.s0, p.s1, p.r0, p.r1].join('|'); if (snowLay[key]) return snowLay[key];
+    const r = rng(p.seed * 977 + 13), mk = () => ({ x0: 100 + 200 * r(), spd: 1 + (r() < 0.5 ? 1 : 0), off: r(), sw: p.s0 + p.s1 * r(), R: p.r0 + p.r1 * r(), dir: r() < 0.5 ? 1 : -1, rot0: r() * 6 });
+    const pos = (d, ph) => { const u = ph * d.spd + d.off, f = u % 1; return [d.x0 + d.sw * Math.sin(TAU * u), 264 + 215 * f, f]; };
+    const K = 24, L = []; for (let i = 0; i < p.n; i++) L.push(mk());
+    const cache = L.map(d => { const a = []; for (let k = 0; k < K; k++) a.push(pos(d, k / K)); return a; });
+    const vis = q => q[2] > 0.04 && q[2] < 0.92;
+    const pairE = (ci, ri, cj, rj) => { let e = 0, T = (ri + rj) * 1.7 + 8; for (let k = 0; k < K; k++) { const a = ci[k], b = cj[k]; if (!vis(a) || !vis(b)) continue; const dd = T - Math.hypot(a[0] - b[0], a[1] - b[1]); if (dd > 0) e += dd * dd; } return e; };
+    const eOf = (i, ci, ri) => { let e = 0; for (let j = 0; j < L.length; j++) if (j !== i) e += pairE(ci, ri, cache[j], L[j].R); return e; };
+    for (let it = 0; it < 3000; it++) {
+      const i = it % L.length, old = L[i], oc = cache[i], eo = eOf(i, oc, old.R); if (eo === 0) continue;
+      const nd = mk(), nc = []; for (let k = 0; k < K; k++) nc.push(pos(nd, k / K));
+      if (eOf(i, nc, nd.R) < eo) { L[i] = nd; cache[i] = nc; }
     }
+    return snowLay[key] = { L, pos };
+  }
+  function snow(c, ph, p) {
+    const lay = snowLayout(p); c.save();
+    lay.L.forEach(d => {
+      const u = ph * d.spd + d.off, f = u % 1, xy = lay.pos(d, ph), a = Math.min(1, f * 6) * Math.sin(Math.PI * Math.min(1, f * 1.05)) ** 0.6;
+      flake(c, xy[0], xy[1], d.R, d.dir * TAU * u + d.rot0, a);
+    });
     c.restore();
   }
 
