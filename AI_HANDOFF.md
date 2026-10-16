@@ -303,3 +303,8 @@ After publishing the v0.9.42 cloud Assets feature, identified a failed cloud lis
 - `engine.js` `drawFxObj`: any non-text object with `o.fx` is drawn via its silhouette (stroke, drop shadow, outer glow, color/gradient overlay). `o.fx` replaces the legacy shadow. Skipped under scaled/rotated transforms (falls back to plain draw).
 - `ui.js`: "Layer style…" button in the inspector for all non-text objects (+ Remove); Layer Style window gained a **Saved styles** dropdown with Save style as… / Delete (localStorage `wx_fxpresets`).
 - Not touched: ChatGPT cloud files (cloud_assets.js, cloud_presets.js, supabase, tests).
+
+## v0.9.46 – Export image (PNG/JPG) for X and Facebook (Claude)
+- New **Export image** button (index.html `#bImg`) → `imageDialog` in ui.js. Renders the finished look of the current scene or all scenes (zip, tiny store-only zip writer) as PNG/JPG at 1920x1080, 1200x675, 1080x1080 or 1080x1350 (center crop with position slider).
+- Uses `E.prepareFrame` + `E.renderScene` at scene end; if a map isn't ready (e.g. no Mapbox token) it still renders and notes it.
+- Touched only ui.js + index.html; ChatGPT cloud files untouched.
