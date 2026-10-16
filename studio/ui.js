@@ -516,33 +516,66 @@
         landWater.push(h('div',{className:'hint',text:'Water depth uses Mapbox Bathymetry v2. National parks and buildings use Mapbox Streets data.'}));
         p.append(mapAccordion('land','Land + Water',landWater,false));
 
-        p.append(mapAccordion('labels','City + Town Labels',[
-          B('broadcastShowCities','check',{label:'Show places'}),
-          B('broadcastUppercaseLabels','check',{label:'Uppercase'}),
-          B('broadcastPlaceDensity','select',{label:'Place types',options:[['cities','Cities only'],['towns','Cities + towns'],['villages','Cities + towns + villages'],['all','Maximum detail']]}),
+        // Aguacero-style independent expandable place-label categories.
+        // Each group owns its font, size, text fill, outline, density,
+        // prominence, zoom range, background/shadow and optional city dots.
+        // Existing global label properties remain stored for compatibility.
+        const placeFonts=[
+          ['DIN Pro Bold','DIN Pro Bold'],['DIN Pro Medium','DIN Pro Medium'],
+          ['Roboto Bold','Roboto Bold'],['Roboto Medium','Roboto Medium'],
+          ['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold']
+        ];
+        const placeTier=(tier,title)=>{
+          const prefix='broadcast'+tier;
+          const items=[B(prefix+'Enabled','check',{label:'Show '+title.toLowerCase(),rerender:true})];
+          if(b[prefix+'Enabled']!==false){
+            items.push(
+              B(prefix+'Font','select',{label:'Font',options:placeFonts}),
+              B(prefix+'Size','range',{label:'Size (px)',min:7,max:40,step:1}),
+              B(prefix+'Color','color',{label:'Text color'}),
+              B(prefix+'HaloColor','color',{label:'Outline color'}),
+              B(prefix+'HaloWidth','range',{label:'Outline width (px)',min:0,max:6,step:.25}),
+              B(prefix+'DensityPct','range',{label:'Density (%)',min:0,max:100,step:1}),
+              B(prefix+'Population','select',{label:'Population / prominence',options:[
+                ['all','All available places'],['major','Major places only'],['top','Most prominent only']
+              ]}),
+              B(prefix+'Uppercase','check',{label:'Uppercase'}),
+              B(prefix+'Opacity','range',{label:'Text opacity (%)',min:0,max:1,step:.05}),
+              B(prefix+'Spacing','range',{label:'Label spacing',min:0,max:3,step:.05}),
+              B(prefix+'TextBackground','check',{label:'Text background',rerender:true})
+            );
+            if(b[prefix+'TextBackground'])
+              items.push(B(prefix+'BackgroundColor','color',{label:'Text background color'}));
+            items.push(
+              B(prefix+'DropShadow','check',{label:'Drop shadow'}),
+              zoomRangeRow(b,'Zoom range',prefix+'MinZoom',prefix+'MaxZoom',{min:0,max:24,step:.5}),
+              B(prefix+'Dots','check',{label:'Place dots',rerender:true})
+            );
+            if(b[prefix+'Dots']){
+              items.push(
+                B(prefix+'DotColor','color',{label:'Dot color'}),
+                B(prefix+'DotOutlineColor','color',{label:'Dot outline color'}),
+                B(prefix+'DotOutlineWidth','range',{label:'Dot outline width (px)',min:0,max:5,step:.25}),
+                B(prefix+'DotSize','range',{label:'Dot size (px)',min:1,max:12,step:.5}),
+                B(prefix+'DotNameOffset','range',{label:'Name offset (px)',min:0,max:20,step:.5}),
+                B(prefix+'DotShadow','check',{label:'Dot shadow'})
+              );
+            }
+            items.push(h('div',{className:'hint',text:'Density and Population use available Mapbox settlement prominence data; actual named locations still depend on zoom, source tiles and collision avoidance.'}));
+          }
+          return mapAccordion('places-'+tier.toLowerCase(),title,items,tier==='City');
+        };
+        p.append(mapAccordion('labels','Place Labels',[
+          B('broadcastShowCities','check',{label:'Show places',rerender:true}),
           B('broadcastKeepMajorCities','check',{label:'Keep major cities'}),
-          B('broadcastOverviewCityDensity','select',{label:'Overview city coverage (zoom below 7.5)',options:[
-            ['standard','Standard'],['more','More cities (recommended)'],['many','Many cities']]}),
-          B('broadcastOverviewLabelGap','range',{label:'Overview label gap (px)',min:0,max:20,step:0.5}),
+          B('broadcastOverviewCityDensity','select',{label:'Overview city coverage (below zoom 7.5)',options:[
+            ['standard','Standard'],['more','More cities'],['many','Many cities']]}),
+          B('broadcastOverviewLabelGap','range',{label:'Overview label gap (px)',min:0,max:20,step:.5}),
           B('broadcastMajorCityRank','range',{label:'Major-city rank — higher shows more',min:1,max:19,step:1}),
           B('broadcastMajorCityMinZoom','range',{label:'Major-city minimum zoom',min:0,max:12,step:.5}),
-          B('broadcastLabelFont','select',{label:'Label font',options:[['DIN Pro Bold','DIN Pro Bold'],['DIN Pro Medium','DIN Pro Medium'],['Roboto Bold','Roboto Bold'],['Roboto Medium','Roboto Medium'],['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold']]}),
-          B('broadcastLabelDensity','select',{label:'Label density',options:[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['maximum','Maximum']]}),
-          B('broadcastLabelOpacity','range',{label:'Label opacity',min:0,max:1,step:.05}),
-          B('broadcastLabelSpacing','range',{label:'Label spacing',min:.5,max:3,step:.05}),
-          B('broadcastLabelColor','color',{label:'Label color'}),
-          B('broadcastLabelHaloColor','color',{label:'Label halo'}),
-          B('broadcastLabelHaloWidth','range',{label:'Halo width',min:0,max:5,step:.25}),
-          B('broadcastCitySize','range',{label:'City size',min:8,max:36,step:1}),
-          B('broadcastCityMinZoom','range',{label:'City min zoom',min:0,max:22,step:.5}),
-          B('broadcastCityMaxZoom','range',{label:'City max zoom',min:0.5,max:24,step:.5}),
-          B('broadcastTownSize','range',{label:'Town size',min:8,max:30,step:1}),
-          B('broadcastTownMinZoom','range',{label:'Town min zoom',min:0,max:22,step:.5}),
-          B('broadcastTownMaxZoom','range',{label:'Town max zoom',min:0.5,max:24,step:.5}),
-          B('broadcastVillageSize','range',{label:'Village size',min:7,max:26,step:1}),
-          B('broadcastVillageMinZoom','range',{label:'Village min zoom',min:0,max:22,step:.5}),
-          B('broadcastVillageMaxZoom','range',{label:'Village max zoom',min:0.5,max:24,step:.5}),
-          h('div',{className:'hint',text:'For regional maps around zoom 5, choose More cities or Many cities. Raise Major-city rank to include smaller cities. Reduce Overview label gap to fit more names without changing font or size; names still avoid overlapping. To show towns below zoom 5, lower Town min zoom.'})
+          placeTier('City','Cities'),
+          placeTier('Town','Towns'),
+          placeTier('Village','Villages')
         ],false));
 
         // All four boundary width sliders share ONE physical pixel scale.
