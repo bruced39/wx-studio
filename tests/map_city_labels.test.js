@@ -12,9 +12,14 @@ const between=(a,b)=>{
  assert.ok(start!==-1&&end>start, 'Expected source snippet '+a);
  return source.slice(start,end);
 };
+const fontStack=name=>name==='Roboto Bold'
+ ?['Roboto Bold','Arial Unicode MS Bold']:['DIN Pro Bold','Arial Unicode MS Bold'];
+const padding=(density,spacing)=>Math.max(0,
+ (density==='sparse'?16:density==='dense'?5:density==='maximum'?2:9)*
+ Math.max(.5,Math.min(3,+spacing||1)));
 const maker=new Function('wdFontStack','labelPadding',
  between('  function settlementLayer(','  // Natural Earth land polygons')+
- ';return settlementLayer;')(()=>['DIN Pro Bold','Arial Unicode MS Bold'],()=>9);
+ ';return settlementLayer;')(fontStack,padding);
 const buildCode=between("    ['wd-major-city-labels'",'\n  }\n\n  MB.token');
 const build=new Function('cfg','map','source','settlementLayer',
   'const nativeOverviewEnabled=false,nativeOverviewEnd=7.5;'+buildCode+';return map.layers;');
@@ -88,8 +93,8 @@ test('UI exposes editable min and max zoom ranges for every place type',()=>{
 test('Mapbox native settlement names remain visible at zoom 6.0; custom labels take over at 7.5',()=>{
  const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
  const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
-  'installTransportation','installOverlays','settlementLayer',
-  nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker);
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
+  nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding);
  const orig=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
   minzoom:2,maxzoom:15,layout:{visibility:'visible'},paint:{}});
  const map={layers:[orig('settlement-major-label'),orig('settlement-minor-label'),orig('state-label')],
@@ -109,6 +114,34 @@ test('Mapbox native settlement names remain visible at zoom 6.0; custom labels t
  assert.ok(get('settlement-minor-label').minzoom<=6&&get('settlement-minor-label').maxzoom>6);
  assert.equal(get('wd-city-labels').minzoom,get('settlement-major-label').maxzoom);
  assert.equal(get('state-label').layout.visibility,'none');
+ // At zoom 7.0 native Mapbox labels MUST use exactly the same Wx Studio
+ // typography as custom labels at zoom 7.5; only placement differs.
+ const custom={...styles,broadcastCitySize:29,broadcastTownSize:21,
+  broadcastLabelFont:'Roboto Bold',broadcastLabelDensity:'dense',broadcastLabelSpacing:1.7,
+  broadcastLabelOpacity:.65,broadcastLabelColor:'#eef6fd',
+  broadcastLabelHaloColor:'#020508',broadcastLabelHaloWidth:2.25,
+  broadcastUppercaseLabels:false};
+ fn(map,custom);
+ const city=get('wd-city-labels'),town=get('wd-town-labels'),
+  nativeCity=get('settlement-major-label'),nativeTown=get('settlement-minor-label');
+ assert.equal(nativeCity.layout['text-size'],29);
+ assert.equal(nativeTown.layout['text-size'],21);
+ assert.deepEqual(nativeCity.layout['text-font'],city.layout['text-font']);
+ assert.deepEqual(nativeTown.layout['text-font'],town.layout['text-font']);
+ assert.equal(nativeCity.layout['text-transform'],'none');
+ assert.equal(nativeCity.layout['text-padding'],city.layout['text-padding']);
+ assert.equal(nativeTown.layout['text-padding'],town.layout['text-padding']);
+ for(const property of ['text-color','text-halo-color','text-halo-width','text-halo-blur','text-opacity']){
+  assert.equal(nativeCity.paint[property],city.paint[property],property+' city');
+  assert.equal(nativeTown.paint[property],town.paint[property],property+' town');
+ }
+ // Changing settings must update native and custom labels together,
+ // without waiting until the user zooms through the 7.5 threshold.
+ fn(map,{...custom,broadcastCitySize:33,broadcastTownSize:18,broadcastLabelFont:'DIN Pro Bold'});
+ assert.equal(get('settlement-major-label').layout['text-size'],33);
+ assert.equal(get('settlement-minor-label').layout['text-size'],18);
+ assert.equal(get('wd-city-labels').layout['text-size'],33);
+ assert.deepEqual(get('settlement-major-label').layout['text-font'],get('wd-city-labels').layout['text-font']);
  // User saved settings can select city minimum 6; overview should not disappear.
  fn(map,{...styles,broadcastCityMinZoom:6});
  assert.ok(get('settlement-major-label').minzoom<=6&&get('settlement-major-label').maxzoom>6);
