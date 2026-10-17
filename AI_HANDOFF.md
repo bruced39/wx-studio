@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.60` (`VERSION`).
+- **Last reviewed application version:** `0.9.63` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -444,3 +444,19 @@ User specifically requested the previously recorded AguaceroWX **place labels** 
 
 ## v0.9.62 – 7-Day icons: one size, aligned by visible top (Claude)
 - engine.js `E.build7DayBW`: all 7 icons now share one size (72% of column width, was 86% main / 80% Thu-Fri) and are aligned by the icon art's visible top (`iconVisTop` measures solid-pixel top of each icon at build time, falls back to box-centered if measuring fails). Main 5 columns share one top line; Thu/Fri sit at the top-center of their panels so rain stays clear of the % and temperature. Applies to newly built 7-day scenes only (rebuild via 7-Day… to refresh existing ones). engine.js only; ChatGPT code untouched.
+
+## v0.9.63 — all label categories recreated from user's original AguaceroWX recording (ChatGPT, 2026-10-17)
+
+**Source of truth:** User's Oct 17 vertical video `Recording 2026-10-17 000711.mp4` (36.6 sec, 398×920), visually inspected end-to-end. Crucial correction: all populated-place categories are **Roboto Bold 16px**. The original video displays OTHER label categories with different sizes; do not apply 16px to roads, airports or continent/state labels.
+
+**Places (enabled):** Cities Roboto Bold 16px, white text, black 2.5px outline, density 97%, All population, zoom 2–22, dots off (white/black 1px border, size 3.5px, offset 4px); Towns same except outline 2px, density 96%, zoom 2–22, dot size 3px; Villages same except outline 1.5px, density 96%, zoom 6–22, dot size 2.5px; Hamlets same except outline 1px, density 96%, zoom 8–22, dot size 2px. All four no text backgrounds or shadows, uppercase, dots off. These 4 categories existed from v0.9.60 and remain unchanged.
+
+**Global:** Hide All Labels OFF; All Caps ON; Fade Labels ON. **Road Signs ON**, 1.2x size, 100% density, all five sign types ON (Interstates, US Highways, State Routes, Other, Exits), zoom 6–24. **Road Names ON**, Open Sans Regular, 1x text, white/black outline 1px, density 30%, background and shadow OFF, zoom 15–24.
+
+**Other reference label groups**, all background/shadow OFF: Continent OFF Roboto Bold 16px black/white halo1.5 zoom .75–3; Country OFF Roboto Bold 14px black/white halo1 zoom1–10; State OFF Roboto Bold 12px black/white halo1 zoom3–9; County OFF Open Sans Regular 10px gray (#656565 sampled)/white halo1 zoom7–16; Airport ON Roboto Bold 11px black/white halo1 zoom8–24; POI OFF Roboto Bold 10px black/white halo1 zoom6–24; Subdivision OFF Roboto Bold 11px black/white halo1 zoom10–15; Water OFF Roboto Bold 10px blue (#0a7eb9 sampled)/white halo1 zoom13–24; Natural Feature OFF Roboto Bold 10px green (#339758 sampled)/white halo1 zoom4–24. RGB sampled from MP4 swatches; original unsupplied exact hex codes may differ due video compression.
+
+- `studio/mapbox.js`: adds these remaining recorded values to SAME central `MB.AGUACERO_PLACE_LABELS` object as the four City/Town/Village/Hamlet presets, assigned to `WD_DEFAULTS` for brand-new map scenes and used by the **unchanged one-click restore API**. `MB.ensureConfig` preserves existing scene and cloud-saved label choices unless user invokes restore. Adds Open Sans Regular font mapping. Applies auxiliary label categories to existing Mapbox native symbol layers when enabled (including Airport and Road Names), honoring recorded zoom, font, text size, colors, outline. Road shields inherit 1.2x size/100%-density mapping. Adds Hide All, global caps, fade duration controls, while keeping existing Mapbox collision handling and all major-city type-based filtering.
+- `studio/ui.js`: adds nested controls under the SAME Map Style → Place Labels accordion for Hide All/All Caps/Fade, Road Signs, Road Names, Continent/Country/State/County, Airport/POI/Subdivision/Water/Natural groups. The Restore button still calls only `g.MB.applyAguaceroPlaceLabels(b)` and never duplicates preset numbers in UI. No transportation line geometry, coastlines, boundaries, cameras, scenes, cloud clients or video/GIF assets changed.
+- `tests/map_city_labels.test.js`: **22 passing V8/mock tests**: compare each reference label field with BOTH new-scene defaults and button reset, simulated native Mapbox Airport/Road Name typography and zoom, the original four 16px classes, low-zoom ranks/collision continuity, Hamlet migration and older cloud preset loading. JavaScript syntax verified. No production WebGL/browser screenshots tested; user live check needed, especially geographic label density and Mapbox native source coverage.
+- **Claude overlap:** Starting from Claude's latest v0.9.62 commit `4e26c890` after conflict was detected and rebased. Claude's 7-day icon alignments, video/GIF import/export, `studio/engine.js`, `studio/export.js`, `studio/index.html` and all other source files preserved untouched. Only `studio/mapbox.js`, `studio/ui.js` (Place Labels), `tests/map_city_labels.test.js`, `VERSION`, `AI_HANDOFF.md` changed. Non-force fast-forward required.
+
