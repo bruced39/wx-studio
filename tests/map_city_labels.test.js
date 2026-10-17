@@ -19,7 +19,7 @@ const padding=(density,spacing)=>Math.max(0,
  Math.max(.5,Math.min(3,+spacing||1)));
 const labels=new Function('wdFontStack','labelPadding',
  between('  function tierAppearance(','  // Natural Earth land polygons')+
- ';return {settlementLayer,tierAppearance,addLabelDots,applyLabelBackground,tierFilter};')(fontStack,padding);
+ ';return {settlementLayer,tierAppearance,tierTextStyle,addLabelDots,applyLabelBackground,tierFilter};')(fontStack,padding);
 const maker=labels.settlementLayer;
 const buildCode=between("    ['wd-major-city-labels'",'\n  }\n\n  MB.token');
 const build=new Function('cfg','map','source','settlementLayer','tierAppearance','addLabelDots','applyLabelBackground',
@@ -94,9 +94,9 @@ test('UI exposes editable min and max zoom ranges for every place type',()=>{
 test('Mapbox native settlement names remain visible at zoom 6.0; custom labels take over at 7.5',()=>{
  const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
  const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
-  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground',
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle',
   nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding,
-    labels.tierAppearance,labels.addLabelDots,()=>{});
+    labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle);
  const orig=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
   minzoom:2,maxzoom:15,layout:{visibility:'visible'},paint:{}});
  const map={layers:[orig('settlement-major-label'),orig('settlement-minor-label'),orig('state-label')],
@@ -161,9 +161,9 @@ test('Mapbox native settlement names remain visible at zoom 6.0; custom labels t
 test('overview city coverage increases eligible cities without ignoring collisions',()=>{
  const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
  const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
-  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground',
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle',
   nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding,
-    labels.tierAppearance,labels.addLabelDots,()=>{});
+    labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle);
  // Simulate a Mapbox Streets v12 stock filter: these real built-in
  // constraints MUST survive every WX Studio rank/density setting.
  const stockMajor=['all',
@@ -311,9 +311,9 @@ test('native low zoom uses independent City and Town fonts without duplicate cit
  const code=between('  function addBroadcastCartography(','  MB.token =');
  const install=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
   'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
-  'tierAppearance','addLabelDots','applyLabelBackground',
+  'tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle',
   code+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},
-   labels.settlementLayer,fontStack,padding,labels.tierAppearance,labels.addLabelDots,()=>{});
+   labels.settlementLayer,fontStack,padding,labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle);
  const native=id=>({id,type:'symbol','source-layer':'place_label',
   filter:['==',['get','class'],'settlement'],layout:{visibility:'visible'},paint:{}});
  const map={layers:[native('settlement-major-label'),native('settlement-minor-label')],
