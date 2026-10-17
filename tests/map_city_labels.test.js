@@ -802,3 +802,98 @@ test('Aguacero Map Style label layout CSS is scoped; renderer and restore button
  assert.ok(ui.includes("addGroup('Place Labels');"),'floating Map Style must still include labels');
  assert.ok(ui.includes('g.MB.applyAguaceroPlaceLabels(b);'),'verified restore action preserved');
 });
+
+test('automatic regional label spacing retains exact 16px typography on all tiers',()=>{
+ const cfg16={...cfg,broadcastAutoDeclutter:true,broadcastDeclutterStrength:1.25,
+  broadcastCitySize:16,broadcastTownSize:16,broadcastVillageSize:16,
+  broadcastHamletSize:16,broadcastCityFont:'Roboto Bold',broadcastTownFont:'Roboto Bold',
+  broadcastVillageFont:'Roboto Bold',broadcastHamletFont:'Roboto Bold',
+  broadcastCityHaloWidth:2.5,broadcastTownHaloWidth:2,
+  broadcastVillageHaloWidth:1.5,broadcastHamletHaloWidth:1,
+  broadcastOverviewLabelGap:2};
+ const pixelPadding=(expr,zoom)=>{
+  if(typeof expr==='number')return expr;
+  assert.equal(expr[0],'interpolate');
+  assert.deepEqual(expr[1],['linear']);
+  assert.deepEqual(expr[2],['zoom']);
+  const pairs=[];
+  for(let i=3;i<expr.length;i+=2)pairs.push([expr[i],expr[i+1]]);
+  if(zoom<=pairs[0][0])return pairs[0][1];
+  for(let i=1;i<pairs.length;i++){
+   if(zoom<=pairs[i][0]){
+    const [za,pa]=pairs[i-1],[zb,pb]=pairs[i];
+    return pa+(pb-pa)*(zoom-za)/(zb-za);
+   }
+  }
+  return pairs.at(-1)[1];
+ };
+ for(const tier of ['City','Town','Village','Hamlet']){
+  const low=labels.tierTextStyle(cfg16,tier,true);
+  const high=labels.tierTextStyle(cfg16,tier,false);
+  for(const layer of [low,high]){
+   assert.equal(layer.layout['text-size'],16,tier+' must retain exact 16 px');
+   assert.deepEqual(layer.layout['text-font'],fontStack('Roboto Bold'));
+  }
+  assert.equal(low.paint['text-halo-width'],cfg16['broadcast'+tier+'HaloWidth'],
+   'keep Aguacero outline widths distinct, without changing text size');
+  assert.ok(pixelPadding(low.layout['text-padding'],7)>pixelPadding(low.layout['text-padding'],9),
+   tier+' must reserve extra collision space at zoom 7');
+  assert.ok(pixelPadding(high.layout['text-padding'],7)>pixelPadding(high.layout['text-padding'],9),
+   tier+' custom high-zoom labels use same declutter mechanism');
+ }
+ const low=labels.tierTextStyle(cfg16,'City',true);
+ assert.equal(pixelPadding(low.layout['text-padding'],7),18.75);
+ assert.equal(pixelPadding(low.layout['text-padding'],9),2);
+ const off=labels.tierTextStyle({...cfg16,broadcastAutoDeclutter:false},'City',true);
+ assert.equal(off.layout['text-padding'],2,'turning off restores exact manual gap');
+ const zero=labels.tierTextStyle({...cfg16,broadcastDeclutterStrength:0},'City',true);
+ assert.equal(zero.layout['text-padding'],2,'strength zero restores manual gap');
+ assert.ok(ui.includes("B('broadcastAutoDeclutter','check'"));
+ assert.ok(ui.includes("aguaSlider('broadcastDeclutterStrength'"));
+});
+
+test('low-zoom city/town density sliders thin originals without removing top cities',()=>{
+ const code=between('  function addBroadcastCartography(','  MB.token =');
+ const install=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
+  'tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle','applyRecordedAuxLabel',
+  code+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},
+   maker,fontStack,padding,labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle,auxLabel);
+ const native=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
+  filter:['all',['==',['get','class'],'settlement'],['<=',['get','filterrank'],5]],
+  minzoom:0,maxzoom:15,layout:{visibility:'visible','symbol-sort-key':['get','symbolrank']},paint:{}});
+ const map={layers:[native('settlement-major-label'),native('settlement-minor-label')],
+  getStyle(){return {layers:this.layers}},getLayer(id){return this.layers.find(l=>l.id===id)},
+  setLayoutProperty(id,k,v){this.getLayer(id).layout[k]=v},
+  setPaintProperty(id,k,v){this.getLayer(id).paint[k]=v},
+  setFilter(id,v){this.getLayer(id).filter=v},
+  setLayerZoomRange(id,a,b){Object.assign(this.getLayer(id),{minzoom:a,maxzoom:b})},
+  removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},
+  addLayer(l){this.layers.push(l)}};
+ const conf={...cfg,mbStyle:'broadcast',broadcastBase:'satellite',
+  broadcastCityEnabled:true,broadcastTownEnabled:true,
+  broadcastCitySize:16,broadcastTownSize:16,
+  broadcastCityDensityPct:97,broadcastTownDensityPct:96,
+  broadcastAutoDeclutter:true,broadcastDeclutterStrength:1.25,
+  broadcastCityMinZoom:2,broadcastTownMinZoom:2,
+  broadcastMajorCityMinZoom:2,broadcastMajorCityRank:9};
+ const town=rank=>({class:'settlement',type:'town',filterrank:rank,symbolrank:12});
+ const city=(rank,symbol)=>({class:'settlement',type:'city',filterrank:rank,symbolrank:symbol});
+ install(map,conf);
+ assert.equal(evalFilter(map.getLayer('settlement-minor-label').filter,town(5)),true,
+  '96% default admits original town candidates');
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,city(5,3)),true,
+  'top city remains visible');
+ install(map,{...conf,broadcastTownDensityPct:40,broadcastCityDensityPct:40});
+ assert.equal(evalFilter(map.getLayer('settlement-minor-label').filter,town(5)),false,
+  'lower Town slider must remove stock candidates at z7');
+ assert.equal(evalFilter(map.getLayer('settlement-minor-label').filter,town(2)),true);
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,city(5,3)),true,
+  'city with very high prominence must survive density drop');
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,city(5,12)),false,
+  'lower City slider must trim unimportant original city candidates');
+ assert.equal(map.getLayer('settlement-major-label').layout['text-size'],16);
+ assert.equal(map.getLayer('settlement-minor-label').layout['text-size'],16);
+ assert.equal(map.getLayer('settlement-major-label').minzoom,2);
+ assert.equal(map.getLayer('settlement-major-label').maxzoom,7.5);
+});
