@@ -441,7 +441,8 @@
   };
   function drawObjectAnimated(c, o0, scene, xf, t, show, editing) {
     let o = toScreen(o0, xf); const a = o0.anim || ANIM_DEFAULT();
-    if (!editing && o0.move && o0.move.on) { const mo = E.moveOffset(o0, t); if (mo[0] || mo[1]) { o = Object.assign({}, o); if (o.pts) o.pts = o.pts.map(q => [q[0] + mo[0], q[1] + mo[1]]); if (o.x != null) { o.x += mo[0]; o.y += mo[1]; } } }
+    const mvSrc = (o0.move && o0.move.on) ? o0 : (o0.moveWith ? (scene.objects.find(q => q.id === o0.moveWith && q.move && q.move.on) || null) : null);
+    if (!editing && mvSrc) { const mo = E.moveOffset(mvSrc, t); if (mo[0] || mo[1]) { o = Object.assign({}, o); if (o.pts) o.pts = o.pts.map(q => [q[0] + mo[0], q[1] + mo[1]]); if (o.x != null) { o.x += mo[0]; o.y += mo[1]; } } }
     let p = 1, vis = true;
     if (!editing) { if (t < (a.delay || 0)) return; p = clamp((t - (a.delay || 0)) / Math.max(0.01, a.dur || 0.01), 0, 1); }
     const mode = a.in || 'none'; c.save();

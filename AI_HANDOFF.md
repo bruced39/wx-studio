@@ -497,3 +497,6 @@ User specifically requested the previously recorded AguaceroWX **place labels** 
 
 ## v0.9.69 – "+ Map scene" works with no map scene
 - studio/ui.js `#bAddMap`: if the current scene has no map, copies another map scene's map, else uses the saved/built-in default map. No change to other files; ChatGPT's files untouched.
+
+## v0.9.70 – Linked motion (fronts/lows move together)
+- Motion path panel gains "Move together with": tick other objects (fronts, lows, labels) and they follow the leader's exact path/timing, keeping their drawn spacing. Data: `follower.moveWith = leaderId`; engine `drawObjectAnimated` uses the leader's `moveOffset`. Files: studio/engine.js, studio/ui.js. ChatGPT's files untouched.
