@@ -194,23 +194,53 @@
     else filter.push(['<=',['coalesce',['get','filterrank'],5],dens]);
     return filter;
   }
+  // ONE typography source for both built-in Mapbox overview settlements
+  // (<7.5) and the custom WX Studio place layers (>=7.5). The old native
+  // symbols inherited stock Mapbox letter spacing, line wrapping, anchors
+  // and text-field values even after their font/size were overridden.
+  // This made the SAME place-label tier look different across zoom.
+  function tierTextStyle(cfg,tier,overview=false){
+    const t=tierAppearance(cfg,tier),
+      requestedSize=Number.isFinite(t.size)&&t.size>0?t.size:(tier==='City'?20:tier==='Town'?16:13),
+      overviewGap=Number.isFinite(+cfg.broadcastOverviewLabelGap)
+        ?Math.max(0,Math.min(20,+cfg.broadcastOverviewLabelGap)):2,
+      padding=overview?overviewGap:labelPadding(cfg.broadcastLabelDensity||'normal',t.spacing);
+    return {
+      layout:{
+        'text-field':['coalesce',['get','name_en'],['get','name']],
+        'text-font':wdFontStack(t.font),
+        'text-size':requestedSize,
+        'text-transform':t.uppercase?'uppercase':'none',
+        'text-letter-spacing':0,
+        'text-line-height':1.2,
+        'text-max-width':10,
+        'text-anchor':'center',
+        'text-justify':'center',
+        'text-offset':t.dots?[0,-Math.max(0,t.nameOffset)/Math.max(8,requestedSize)]:[0,0],
+        'text-padding':padding
+      },
+      paint:{
+        'text-color':t.color,
+        'text-opacity':t.opacity,
+        'text-halo-color':t.halo,
+        'text-halo-width':t.haloWidth,
+        'text-halo-blur':t.shadow?1.3:.15
+      }
+    };
+  }
   function settlementLayer(id,cfg,source,types,size,minzoom,rankMode,maxzoom){
     const tier=types.includes('city')?'City':types.includes('town')?'Town':'Village',
-      t=tierAppearance(cfg,tier),overview=rankMode==='major',
+      style=tierTextStyle(cfg,tier,false),
       layer={id,type:'symbol',source,'source-layer':'place_label',minzoom:+minzoom||0,
         filter:tierFilter(cfg,tier,types,rankMode),
-        layout:{'text-field':['coalesce',['get','name_en'],['get','name']],
-          'text-font':wdFontStack(t.font),
-          'text-transform':t.uppercase?'uppercase':'none',
-          'text-size':overview?Math.max(10,t.size+2):t.size,
+        layout:{
+          ...style.layout,
           'symbol-sort-key':['coalesce',['get','symbolrank'],99],
-          'text-anchor':'center','text-justify':'center',
-          'text-allow-overlap':false,'text-ignore-placement':false,
-          'text-padding':labelPadding(cfg.broadcastLabelDensity||'normal',t.spacing)},
-        paint:{'text-color':t.color,'text-opacity':t.opacity,
-          'text-halo-color':t.halo,'text-halo-width':t.haloWidth,
-          'text-halo-blur':t.shadow?1.3:.15}};
-    if(t.dots)layer.layout['text-offset']=[0,-Math.max(0,t.nameOffset)/Math.max(8,t.size)];
+          'text-allow-overlap':false,'text-ignore-placement':false
+        },
+        paint:{...style.paint}};
+    // A major-city fallback MUST NOT increase the user's saved city-size
+    // value by 2px (the old behavior caused another zoom-size jump).
     if(maxzoom!=null&&isFinite(+maxzoom))layer.maxzoom=+maxzoom;
     return layer;
   }
@@ -357,15 +387,16 @@
   function installSeparatedWaterOutlines(map,cfg,add){
     // Restore coastlines without tracing inland Mapbox water polygons.
     if(cfg.broadcastShowCoastline!==false){
-      const color=cfg.broadcastBase==='satellite'
-        ?cfg.broadcastCoastlineColor
-        :(cfg.broadcastCoastlineColor==='#050505'?'#e0e4eb':cfg.broadcastCoastlineColor);
+      // Use the SAME explicit coastline color on Satellite, Dark, and Custom
+      // Color maps. The previous flat-map special case silently replaced
+      // the user's near-black '#050505' default with white '#e0e4eb'.
+      const color=cfg.broadcastCoastlineColor||'#050505';
       const width=Math.max(.25,Math.min(8,+cfg.broadcastCoastlineWidth||1.5));
       for(const [kind,id] of [['coast','wd-ocean-coastline'],['islands','wd-minor-island-coastline']]){
         const ocean=ensureNaturalEarthLines(map,kind);
         if(ocean)add({id,type:'line',source:ocean,
           layout:{'line-cap':'round','line-join':'round'},
-          paint:{'line-color':color||'#e0e4eb',
+          paint:{'line-color':color,
             'line-width':width,'line-opacity':1,'line-blur':0}});
       }
     }
@@ -794,34 +825,17 @@
                 console.warn('WX Studio extra overview labels unavailable; using stock filter',l.id,e);
                 try{map.setFilter(l.id,original);}catch(ignore){}
               }
-              // Preserve Mapbox's ORIGINAL symbol-sort-key and placement
-              // expressions. Altering those alongside the filters can
-              // destabilize which names survive collision at globe zooms.
-              const tier=overview.major?'City':'Town',appearance=tierAppearance(cfg,tier);
-              const size=appearance.size;
-              const overviewGap=Number.isFinite(+cfg.broadcastOverviewLabelGap)
-                ?Math.max(0,Math.min(20,+cfg.broadcastOverviewLabelGap)):2;
-              const typography=[
-                ['text-font',wdFontStack(appearance.font)],
-                ['text-size',size],
-                ['text-transform',appearance.uppercase?'uppercase':'none'],
-                ['text-padding',overviewGap],
-                ['text-offset',appearance.dots?[0,-Math.max(0,appearance.nameOffset)/Math.max(8,size)]:[0,0]]
-              ];
-              for(const [property,value] of typography){
+              // Preserve original symbol-sort-key and placement/collision
+              // priority so Mapbox's major-city coverage remains reliable.
+              // Apply IDENTICAL tier text formatting at all zooms.
+              const tier=overview.major?'City':'Town',
+                textStyle=tierTextStyle(cfg,tier,true);
+              for(const [property,value] of Object.entries(textStyle.layout)){
                 try{map.setLayoutProperty(l.id,property,value);}catch(e){
                   console.warn('WX Studio overview label typography',property,e);
                 }
               }
-              // Original Mapbox placement remains; the text appearance matches
-              // the WX Studio custom city/town layers above the handoff.
-              for(const [property,value] of [
-                ['text-color',appearance.color],
-                ['text-halo-color',appearance.halo],
-                ['text-halo-width',appearance.haloWidth],
-                ['text-halo-blur',appearance.shadow?1.3:.15],
-                ['text-opacity',appearance.opacity]
-              ]){
+              for(const [property,value] of Object.entries(textStyle.paint)){
                 try{map.setPaintProperty(l.id,property,value);}catch(e){
                   console.warn('WX Studio overview label paint',property,e);
                 }
