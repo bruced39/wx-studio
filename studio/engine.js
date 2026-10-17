@@ -416,8 +416,32 @@
     c.shadowColor = 'rgba(0,0,0,' + clamp(sh.alpha == null ? 0.6 : sh.alpha, 0, 1) + ')'; c.shadowBlur = blur; c.shadowOffsetX = dist * 0.55; c.shadowOffsetY = dist;
     c.drawImage(shadowCv, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0); c.restore();
   }
+  /* ---------- motion path: A -> B -> C -> D ... (stops are screen-pixel offsets from the object's own spot = A) ---------- */
+  E.moveDefault = () => ({ on: true, pts: [[220, -90]], start: 0.6, dur: 3, ease: 'inout', smooth: true, loop: false });
+  E.moveSamples = function (m) {
+    const P = [[0, 0]].concat((m.pts || []).filter(q => q && isFinite(q[0] + q[1]))); if (P.length < 2) return [[0, 0]];
+    const out = [];
+    for (let i = 0; i < P.length - 1; i++) {
+      const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)], n = m.smooth === false ? 1 : 24;
+      for (let k = 0; k < n; k++) { const u = k / n; if (m.smooth === false) { out.push([p1[0], p1[1]]); continue; }
+        const u2 = u * u, u3 = u2 * u, f = (a, b, c, d) => 0.5 * ((2 * b) + (-a + c) * u + (2 * a - 5 * b + 4 * c - d) * u2 + (-a + 3 * b - 3 * c + d) * u3); out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]); }
+    }
+    out.push(P[P.length - 1]); return out;
+  };
+  E.moveOffset = function (o, t) {
+    const m = o.move; if (!m || !m.on || !m.pts || !m.pts.length) return [0, 0];
+    const S = E.moveSamples(m); if (S.length < 2) return [0, 0];
+    const dur = Math.max(0.1, m.dur || 3); let u = (t - (m.start || 0)) / dur;
+    if (m.loop && u > 1) { const cyc = 1 + 0.5 / dur; u = (u % cyc); u = Math.min(1, u); }
+    u = clamp(u, 0, 1); u = m.ease === 'linear' ? u : m.ease === 'out' ? ease.out(u) : ease.inout(u);
+    let L = 0; const cum = [0]; for (let i = 1; i < S.length; i++) { L += Math.hypot(S[i][0] - S[i - 1][0], S[i][1] - S[i - 1][1]); cum.push(L); }
+    if (L <= 0) return [0, 0]; const d = u * L; let i = 1; while (i < S.length - 1 && cum[i] < d) i++;
+    const seg = cum[i] - cum[i - 1] || 1, f = clamp((d - cum[i - 1]) / seg, 0, 1);
+    return [S[i - 1][0] + (S[i][0] - S[i - 1][0]) * f, S[i - 1][1] + (S[i][1] - S[i - 1][1]) * f];
+  };
   function drawObjectAnimated(c, o0, scene, xf, t, show, editing) {
-    const o = toScreen(o0, xf), a = o0.anim || ANIM_DEFAULT();
+    let o = toScreen(o0, xf); const a = o0.anim || ANIM_DEFAULT();
+    if (!editing && o0.move && o0.move.on) { const mo = E.moveOffset(o0, t); if (mo[0] || mo[1]) { o = Object.assign({}, o); if (o.pts) o.pts = o.pts.map(q => [q[0] + mo[0], q[1] + mo[1]]); if (o.x != null) { o.x += mo[0]; o.y += mo[1]; } } }
     let p = 1, vis = true;
     if (!editing) { if (t < (a.delay || 0)) return; p = clamp((t - (a.delay || 0)) / Math.max(0.01, a.dur || 0.01), 0, 1); }
     const mode = a.in || 'none'; c.save();

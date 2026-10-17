@@ -193,6 +193,7 @@
     if (S.tool === 'select') {
       const so = selObj() ? E.toScreen(selObj(), xf) : null;
       if (so) { const hd = handles(so);
+        if (selObj().move && selObj().move.on) { const mb = E.bounds(so), ax = mb.x + mb.w / 2, ay = mb.y + mb.h / 2, i = selObj().move.pts.findIndex(q => Math.hypot(ax + q[0] - p[0], ay + q[1] - p[1]) < 26); if (i >= 0) { S.drag = { k: 'mstop', i }; return; } }
         if (hd.verts) { const i = hd.verts.findIndex(v => Math.hypot(v[0] - p[0], v[1] - p[1]) < 16); if (i >= 0) { S.drag = { k: 'vert', i }; return; } }
         if (hd.resize && Math.hypot(hd.resize[0] - p[0], hd.resize[1] - p[1]) < 18) { S.drag = { k: 'resize', last: p, c: [hd.box.x + hd.box.w / 2, hd.box.y + hd.box.h / 2] }; return; } }
       const hit = E.hit(sc, editT(), p[0], p[1]);
@@ -237,6 +238,7 @@
         const cb = E.bounds(E.toScreen(o, xf)), want = { x: d.b0.x + d.raw[0], y: d.b0.y + d.raw[1], w: d.b0.w, h: d.b0.h }, sn = snapBounds(want, o, xf);
         E.move(o, want.x + sn.dx - cb.x, want.y + sn.dy - cb.y, xf); S.snapLines = sn.lines; }
       d.last = p; d.moved = true; }
+    else if (d.k === 'mstop' && o && o.move) { const mb = E.bounds(E.toScreen(o, xf)); o.move.pts[d.i] = [p[0] - (mb.x + mb.w / 2), p[1] - (mb.y + mb.h / 2)]; }
     else if (d.k === 'vert' && o) { const k = (o.geo && xf.map) ? xf.k : 1, q = o.geo && xf.map ? xf.inv(p[0], p[1]) : p; o.pts[d.i] = [q[0], q[1]]; }
     else if (d.k === 'resize' && o) {
       const so = E.toScreen(o, xf), k = (o.geo && xf.map) ? (xf.kOf ? xf.kOf(o) : xf.k) : 1;
@@ -339,6 +341,8 @@
     if (o && !d) { const so = E.toScreen(o, xf), hd = handles(so), b = hd.box; octx.strokeStyle = '#2f9bff'; octx.setLineDash([10, 7]); octx.strokeRect(b.x, b.y, b.w, b.h); octx.setLineDash([]); octx.fillStyle = '#fff'; octx.strokeStyle = '#2f9bff';
       if (hd.verts) hd.verts.forEach(v => { octx.beginPath(); octx.arc(v[0], v[1], 9, 0, 6.3); octx.fill(); octx.stroke(); });
       if (hd.resize) { octx.fillRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); octx.strokeRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); } }
+    if (o && !d && o.move && o.move.on) { const mb = E.bounds(E.toScreen(o, xf)), ax = mb.x + mb.w / 2, ay = mb.y + mb.h / 2, sm = E.moveSamples(o.move); octx.save(); octx.strokeStyle = '#ffe14d'; octx.lineWidth = 4; octx.setLineDash([14, 9]); octx.beginPath(); sm.forEach((q, i) => i ? octx.lineTo(ax + q[0], ay + q[1]) : octx.moveTo(ax + q[0], ay + q[1])); octx.stroke(); octx.setLineDash([]);
+      [[0, 0]].concat(o.move.pts).forEach((q, i) => { const x = ax + q[0], y = ay + q[1]; octx.fillStyle = i ? '#ffe14d' : '#2f9bff'; octx.strokeStyle = '#08142a'; octx.lineWidth = 3; octx.beginPath(); octx.arc(x, y, 20, 0, 6.3); octx.fill(); octx.stroke(); octx.fillStyle = '#08142a'; octx.font = '800 24px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText(MLET(i), x, y + 1); }); octx.restore(); }
     if ((SNAP.guides || (S.drag && S.drag.k === 'move' && S.drag.moved)) && S.mode === 'edit') { const m = SAFE(); octx.save(); octx.setLineDash([14, 10]); octx.lineWidth = 2; octx.strokeStyle = 'rgba(255,255,255,0.35)'; octx.strokeRect(m, m, W - 2 * m, H - 2 * m); octx.strokeStyle = 'rgba(255,255,255,0.18)'; octx.beginPath(); octx.moveTo(W / 2, 0); octx.lineTo(W / 2, H); octx.moveTo(0, H / 2); octx.lineTo(W, H / 2); octx.stroke(); octx.restore(); }
     if (S.snapLines && S.snapLines.length) { octx.save(); octx.strokeStyle = '#ff2fd0'; octx.lineWidth = 2; octx.setLineDash([]); S.snapLines.forEach(l => { octx.beginPath(); if (l.x != null) { octx.moveTo(l.x, 0); octx.lineTo(l.x, H); } else { octx.moveTo(0, l.y); octx.lineTo(W, l.y); } octx.stroke(); }); octx.restore(); }
     if (isMap(sc.bg) && sc.bg.view2) { octx.fillStyle = 'rgba(8,20,38,.8)'; octx.fillRect(W - 330, H - 52, 310, 36); octx.fillStyle = '#9fd0ff'; octx.font = '600 22px sans-serif'; octx.fillText('Editing camera ' + (S.editEnd ? 'END' : 'START') + ' view', W - 318, H - 27); }
@@ -410,8 +414,21 @@
       p.append(h('div', { className: 'h', text: 'Shadow' }), bind(sh, 'on', 'check', { label: 'Drop shadow' }), bind(sh, 'blur', 'range', { min: 0, max: 40, label: 'Softness' }), bind(sh, 'dist', 'range', { min: 0, max: 40, label: 'Distance' }), bind(sh, 'alpha', 'range', { min: 0, max: 1, step: 0.05, label: 'Opacity' })); }
     p.append(h('div', { className: 'h', text: 'Animation' }));
     B2(p, o.anim, 'in', 'select', { label: 'Entrance', options: E.ANIMS }); B2(p, o.anim, 'delay', 'range', { min: 0, max: 20, step: 0.1, label: 'Delay (s)' }); B2(p, o.anim, 'dur', 'range', { min: 0.1, max: 5, step: 0.1, label: 'Duration (s)' });
+    movePanel(p, o);
     if (isMap(cur().bg)) p.append(bind(o, 'geo', 'check', { label: 'Pin to map', after: v => { o.geo = !v; E.setGeo(o, cur(), editT(), v); } }), h('div', { className: 'hint', text: 'Pinned objects move and zoom with the map (position only – sizes stay fixed).' }));
     p.append(h('div', { className: 'h', text: 'Arrange' }), h('div', { className: 'btnrow' }, h('button', { text: 'Bring front', on: { click: () => layer('front') } }), h('button', { text: 'Send back', on: { click: () => layer('back') } }), h('button', { text: 'Duplicate', on: { click: dupObj } }), h('button', { text: 'Delete', className: 'dng', on: { click: delObj } })));
+  }
+  const MLET = i => String.fromCharCode(65 + i);
+  function movePanel(p, o) {
+    const m = o.move; p.append(h('div', { className: 'h', text: 'Motion path (A → B → C …)' }));
+    p.append(bind({ on: !!(m && m.on) }, 'on', 'check', { label: 'Move along a path', rerender: true, after: v => { if (v) { if (!o.move) o.move = E.moveDefault(); o.move.on = true; } else if (o.move) o.move.on = false; } }));
+    if (!m || !m.on) { p.append(h('div', { className: 'hint', text: 'Turn on, then drag the B handle on the map where it should end up. Press Add stop for C, D and more.' })); return; }
+    p.append(h('div', { className: 'hint', text: 'A is where the object sits now. Drag the lettered handles on the map to place each stop; the yellow line is the route it will glide along.' }));
+    m.pts.forEach((q, i) => p.append(h('div', { className: 'btnrow' }, h('span', { text: 'Stop ' + MLET(i + 1) + '  ', style: 'color:#ffe14d;font-weight:700;align-self:center' }), h('button', { text: 'Remove', on: { click: () => { m.pts.splice(i, 1); if (!m.pts.length) m.on = false; commit(); renderPanels(); } } }))));
+    p.append(h('div', { className: 'btnrow' }, h('button', { text: '+ Add stop (' + MLET(m.pts.length + 1) + ')', on: { click: () => { const l = m.pts[m.pts.length - 1] || [0, 0], pv = m.pts[m.pts.length - 2] || [0, 0], dx = l[0] - pv[0], dy = l[1] - pv[1], d = Math.hypot(dx, dy) || 1; m.pts.push([l[0] + (dx / d) * 200, l[1] + (dy / d) * 200]); commit(); renderPanels(); } } })));
+    B2(p, m, 'start', 'range', { min: 0, max: 30, step: 0.1, label: 'Starts at (s)' }); B2(p, m, 'dur', 'range', { min: 0.3, max: 20, step: 0.1, label: 'Travel time (s)' });
+    B2(p, m, 'ease', 'select', { label: 'Speed', options: [['inout', 'Ease in & out'], ['out', 'Slow down at end'], ['linear', 'Constant']] });
+    B2(p, m, 'smooth', 'check', { label: 'Smooth curve (off = straight legs)' }); B2(p, m, 'loop', 'check', { label: 'Repeat (A → … → last, again)' });
   }
   function B2(p, obj, k, kind, o) { p.append(bind(obj, k, kind, o)); }
 
