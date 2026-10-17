@@ -300,7 +300,7 @@ test('saved legacy typography migrates to all three separate tiers without overw
  assert.equal(legacy.broadcastCityFont,'Open Sans Bold');
  assert.equal(legacy.broadcastTownFont,'Roboto Medium');
  assert.equal(legacy.broadcastVillageFont,'Roboto Bold');
- assert.equal(model.DEFAULTS.broadcastCityFont,'DIN Pro Bold');
+ assert.equal(model.DEFAULTS.broadcastCityFont,'Roboto Bold');
 });
 
 test('city, town and village paint, font and size settings are independent',()=>{
@@ -399,7 +399,7 @@ test('floating Map Style popup imports the renamed Place Labels accordion',()=>{
   'popup must find the source accordion by its real title');
  assert.ok(!popup.includes("addGroup('City + Town Labels'"),
   'outdated title lookup must not silently hide settings');
- for(const tier of ['City','Town','Village'])
+ for(const tier of ['City','Town','Village','Hamlet'])
   assert.ok(scenePanel.includes("placeTier('"+tier+"'"),tier+' settings should remain nested and collapsible');
 });
 
@@ -462,4 +462,113 @@ test('flat-color and dark coasts use saved black color instead of being whitened
   assert.equal(custom.find(l=>l.id==='wd-ocean-coastline').paint['line-color'],'#aabbcc',
    'explicit saved coastline color must be respected');
  }
+});
+
+test('the verified AguaceroWX values are exactly the new-map defaults for all 4 place types',()=>{
+ const start=source.indexOf('  const WD_DEFAULTS = {');
+ const end=source.indexOf('  const wdConfigKey = bg =>',start);
+ const model=new Function('MB',source.slice(start,end)+';return MB;')({});
+ const expected={
+   City:{DensityPct:97,HaloWidth:2.5,MinZoom:2,MaxZoom:22,DotSize:3.5},
+   Town:{DensityPct:96,HaloWidth:2,MinZoom:2,MaxZoom:22,DotSize:3},
+   Village:{DensityPct:96,HaloWidth:1.5,MinZoom:6,MaxZoom:22,DotSize:2.5},
+   Hamlet:{DensityPct:96,HaloWidth:1,MinZoom:8,MaxZoom:22,DotSize:2}
+ };
+ for(const [tier,values] of Object.entries(expected)){
+  for(const [suffix,value] of Object.entries(values)){
+   const key='broadcast'+tier+suffix;
+   assert.equal(model.DEFAULTS[key],value,key+' incorrect default');
+   assert.equal(model.AGUACERO_PLACE_LABELS[key],value,key+' incorrect restore value');
+  }
+  for(const [suffix,value] of Object.entries({Enabled:true,Font:'Roboto Bold',Size:16,
+    Color:'#ffffff',HaloColor:'#000000',Population:'all',TextBackground:false,
+    DropShadow:false,Uppercase:true,Dots:false})){
+   const key='broadcast'+tier+suffix;
+   assert.equal(model.DEFAULTS[key],value,key+' common default');
+   assert.equal(model.AGUACERO_PLACE_LABELS[key],value,key+' restore mismatch');
+  }
+ }
+ // New scenes receive the canonical four-tier defaults, not legacy DIN.
+ const fresh={broadcastBase:'satellite'};
+ model.ensureConfig(fresh);
+ for(const key of Object.keys(model.AGUACERO_PLACE_LABELS))
+  assert.equal(fresh[key],model.AGUACERO_PLACE_LABELS[key],key+' new-scene value');
+});
+
+test('one-click restore button calls EXACT SAME preset and preserves unrelated settings',()=>{
+ const start=source.indexOf('  const WD_DEFAULTS = {');
+ const end=source.indexOf('  const wdConfigKey = bg =>',start);
+ const model=new Function('MB',source.slice(start,end)+';return MB;')({});
+ const at=ui.indexOf('        const applyAguaLabels=()=>{'),stop=ui.indexOf("        p.append(mapAccordion('labels'",at);
+ assert.ok(at>=0&&stop>at,'restore handler must exist');
+ let calls=0;
+ const scene={broadcastCityFont:'DIN Pro Medium',broadcastTownSize:30,
+   broadcastVillageHaloWidth:5,broadcastHamletMinZoom:10,
+   broadcastShowCountryBorders:false,broadcastLandColor:'#123456',
+   broadcastBase:'dark'};
+ const restore=new Function('g','b','commit','renderPanels','toast',
+  ui.slice(at,stop)+';return applyAguaLabels;')({MB:model},scene,()=>calls++,()=>calls++,()=>{});
+ restore();
+ assert.equal(calls,2,'update and re-render exactly once');
+ for(const [key,value] of Object.entries(model.AGUACERO_PLACE_LABELS))
+  assert.equal(scene[key],value,'button mismatch: '+key);
+ assert.equal(scene.broadcastShowCountryBorders,false,'must preserve boundaries');
+ assert.equal(scene.broadcastLandColor,'#123456','must preserve chosen land');
+ assert.equal(scene.broadcastBase,'dark','must preserve map mode');
+ scene.broadcastTownFont='Open Sans Bold';
+ restore();
+ assert.equal(scene.broadcastTownFont,model.DEFAULTS.broadcastTownFont,'button must work repeatedly');
+ assert.equal(model.AGUACERO_PLACE_LABELS.broadcastHamletMinZoom,8);
+});
+
+test('legacy Village settings carry into Hamlet on old saved scenes, then become independent',()=>{
+ const start=source.indexOf('  const WD_DEFAULTS = {');
+ const end=source.indexOf('  const wdConfigKey = bg =>',start);
+ const model=new Function('MB',source.slice(start,end)+';return MB;')({});
+ const legacy={
+  broadcastCityFont:'Open Sans Bold',broadcastCitySize:21,
+  broadcastTownFont:'Roboto Medium',broadcastTownSize:17,
+  broadcastVillageFont:'DIN Pro Bold',broadcastVillageSize:15,
+  broadcastVillageHaloWidth:3.25,broadcastVillageColor:'#aabbcc',
+  broadcastVillageDensityPct:47,broadcastVillageMinZoom:9,broadcastVillageMaxZoom:19,
+  broadcastVillageEnabled:true,broadcastVillageDots:true,broadcastVillageDotSize:5
+ };
+ model.ensureConfig(legacy);
+ assert.equal(legacy.broadcastCityFont,'Open Sans Bold');
+ assert.equal(legacy.broadcastTownSize,17);
+ for(const [suffix,value] of Object.entries({Font:'DIN Pro Bold',Size:15,
+    HaloWidth:3.25,Color:'#aabbcc',DensityPct:47,MinZoom:9,MaxZoom:19,
+    Enabled:true,Dots:true,DotSize:5}))
+  assert.equal(legacy['broadcastHamlet'+suffix],value,'legacy Hamlet migration '+suffix);
+ legacy.broadcastHamletFont='Roboto Bold';
+ legacy.broadcastVillageFont='Open Sans Semibold';
+ model.ensureConfig(legacy);
+ assert.equal(legacy.broadcastHamletFont,'Roboto Bold');
+ assert.equal(legacy.broadcastVillageFont,'Open Sans Semibold');
+});
+
+test('Hamlets are separate from Villages in feature filters, zoom and styling',()=>{
+ const base={...cfg,broadcastCityEnabled:true,broadcastTownEnabled:true,
+   broadcastVillageEnabled:true,broadcastHamletEnabled:true,
+   broadcastVillageFont:'DIN Pro Bold',broadcastVillageSize:14,
+   broadcastHamletFont:'Roboto Bold',broadcastHamletSize:16,
+   broadcastVillageMinZoom:6,broadcastVillageMaxZoom:22,
+   broadcastHamletMinZoom:8,broadcastHamletMaxZoom:22};
+ const built=render(base);
+ const village=built.find(l=>l.id==='wd-small-place-labels'),
+    hamlet=built.find(l=>l.id==='wd-hamlet-labels');
+ assert.ok(village,'village labels exist');
+ assert.ok(hamlet,'hamlet labels exist');
+ assert.equal(village.minzoom,6);
+ assert.equal(hamlet.minzoom,8);
+ assert.equal(village.layout['text-size'],14);
+ assert.equal(hamlet.layout['text-size'],16);
+ assert.deepEqual(hamlet.layout['text-font'],fontStack('Roboto Bold'));
+ const props=t=>({class:'settlement',type:t,filterrank:1,symbolrank:2});
+ assert.equal(evalFilter(village.filter,props('village')),true);
+ assert.equal(evalFilter(village.filter,props('hamlet')),false);
+ assert.equal(evalFilter(hamlet.filter,props('village')),false);
+ assert.equal(evalFilter(hamlet.filter,props('hamlet')),true);
+ assert.equal(render({...base,broadcastHamletEnabled:false}).some(l=>l.id==='wd-hamlet-labels'),false);
+ assert.ok(render({...base,broadcastHamletEnabled:false}).some(l=>l.id==='wd-small-place-labels'));
 });
