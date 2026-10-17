@@ -15,8 +15,12 @@ decode native weather data or claim that the web app can display it yet.
    lat/lon image. Preserve original source resolution until final tile
    rendering; do not upscale a 1 km/2 km preview and call it 0.5 km.
 2. **MRMS mosaic**: quality-controlled composite reflectivity GRIB2.gz,
-   nominal 1 km and ~2-min cadence when available. Maintain your OWN
-   timestamped history for live loops; NOAA's MapServer is not time-enabled.
+   nominal 1 km and ~2-min cadence when available. Maintain your own
+   timestamped history for custom-color native loops. NOAA's live **MapServer**
+   is not time enabled; there is ALSO a separate time-enabled NOAA ImageServer
+   (`radar_base_reflectivity_time`) advertising a rolling four-hour image
+   history, with timestamps retrieved dynamically. Its colors are baked in
+   and the service's actual time extent may be shorter than four hours.
 3. **NEXRAD site native Level II**: retrieve Unidata real-time chunks or
    volumes. Process super-resolution bin/gate geometry, radar calibration,
    azimuth, elevation and valid data, output geo tiles for selected KBOX /
