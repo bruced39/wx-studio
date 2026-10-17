@@ -577,7 +577,9 @@
     c.save(); c.clearRect(0, 0, W, H);
     const guard = (fn) => { try { fn(); } catch (err) { c.restore(); c.save(); E.lastErr = err; if (E.onDrawError) E.onDrawError(err); } };
     guard(() => drawBackground(c, show, scene, t, ct, opts));
+    if (scene.dataLoop && scene.dataLoop.on && g.WXData) guard(() => g.WXData.draw(c, scene, t, opts, xf));
     scene.objects.forEach(o => { if (!o.hidden) guard(() => drawObjectAnimated(c, o, scene, xf, t, show, editing)); });
+    if (scene.dataLoop && scene.dataLoop.on && g.WXData) guard(() => g.WXData.drawBar(c, scene, t, opts));
     guard(() => drawTitle(c, show, scene, t, editing)); guard(() => drawTitle2(c, show, scene, t, editing)); guard(() => drawBug(c, show));
     c.restore();
   };
@@ -611,13 +613,13 @@
   }
   /* export helper: make sure every Mapbox frame needed at show time T is rendered before the synchronous draw */
   E.prepareFrame = async function (show, T) {
-    const hasMb = g.MB && show.scenes.some(s => s.bg.type === 'mapbox'), hasVid = show.scenes.some(s => s.bg.type === 'video');
-    if (!hasMb && !hasVid) return;
+    const hasMb = g.MB && show.scenes.some(s => s.bg.type === 'mapbox'), hasVid = show.scenes.some(s => s.bg.type === 'video'), hasData = !!g.WXData && show.scenes.some(s => s.dataLoop && s.dataLoop.on);
+    if (!hasMb && !hasVid && !hasData) return;
     const st = E.starts(show), tot = E.total(show); T = clamp(T, 0, Math.max(0, tot - 0.0001));
     let i = 0; while (i + 1 < st.length && T >= st[i + 1]) i++;
     const sc = show.scenes[i], t = T - st[i], tr = sc.transition || { type: 'cut', dur: 0 }, need = [];
     if (i > 0 && tr.type !== 'cut' && t < tr.dur) { need.push([show.scenes[i - 1], show.scenes[i - 1].duration + t]); need.push([sc, t]); } else need.push([sc, t]);
-    for (const [s, tt] of need) { if (hasMb && s.bg.type === 'mapbox') await g.MB.snap(s.bg, E.viewAt(s, tt)); if (s.bg.type === 'video') await E.seekVideo(s.bg, tt); }
+    for (const [s, tt] of need) { if (hasMb && s.bg.type === 'mapbox') await g.MB.snap(s.bg, E.viewAt(s, tt)); if (s.bg.type === 'video') await E.seekVideo(s.bg, tt); if (hasData && s.dataLoop && s.dataLoop.on) await g.WXData.ensure(s); }
   };
   E.renderShow = function (c, show, T, opts) {
     const st = E.starts(show), tot = E.total(show); T = clamp(T, 0, Math.max(0, tot - 0.0001));

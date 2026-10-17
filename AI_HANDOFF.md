@@ -500,3 +500,22 @@ User specifically requested the previously recorded AguaceroWX **place labels** 
 
 ## v0.9.70 – Linked motion (fronts/lows move together)
 - Motion path panel gains "Move together with": tick other objects (fronts, lows, labels) and they follow the leader's exact path/timing, keeping their drawn spacing. Data: `follower.moveWith = leaderId`; engine `drawObjectAnimated` uses the leader's `moveOffset`. Files: studio/engine.js, studio/ui.js. ChatGPT's files untouched.
+
+## v0.9.71 – Weather data loop layer + playback bar (foundation)
+New self-contained file **studio/dataloop.js** (global `WXData`), so it does not collide with Map Style / menu work. Hooks elsewhere are tiny: `index.html` (one script tag after ui.js), `engine.js` (`renderScene` calls `WXData.draw` right after the background and `WXData.drawBar` after objects; `prepareFrame` awaits `WXData.ensure(scene)` so exports are deterministic).
+
+**What it does:** Per scene "Weather data loop" bar above the tool row: ‹ ▶ › frame step/play, − 10x + speed (frames/sec, 1–30), loop progress bar (blue = frames loaded, knob = current frame; click/drag to scrub), timestamp (EDT/EST default) top-right, LIVE menu (archive disabled for now), length menu (1/2/4/12 Hr per source), data menu (+ radar site menu), opacity, and "Show this bar in the video" (the same bar is drawn onto the 1920×1080 canvas). Frames are warped onto the Mapbox map through `E.xf(...).fwd(lon,lat)` (an 18×18 textured mesh, so it follows pan/zoom/projection). Needs a **Mapbox** map scene.
+
+**Data contract for providers (ChatGPT):**
+```js
+WXData.registerSource({
+  id:'goes', label:'GOES Satellite', lengths:[1,2,4,12],            // hours offered in the length menu
+  sites:[{id:'KBOS',label:'KBOS Boston'}], defaultSite:'KBOS',       // optional (radar)
+  list: async ({site, hours}) => [ {t:epochMs, bbox:[west,south,east,north], crs:'4326'|'3857',
+                                     url:'https://…' /* CORS-clean */ | load: async()=>canvasOrImage }, … ]  // oldest → newest
+});
+```
+`goes`, `nexrad`, `rtma`, `forecast` are listed as "not connected yet" until a provider with that id is registered. A `demo` provider (synthetic blobs) is built in so the bar can be tried. Saved as `scene.dataLoop = {on, source, site, hours, speed, opacity, showBar, idx}`.
+
+**Known limits / next:** the layer is drawn over the rendered Mapbox frame, so city labels baked into the map are covered by it — the proper fix is to add the frame as a raster layer *below* the label layers inside the Mapbox GL map (mapbox.js). Palettes folder, RTMA value-at-city labels, archive mode and tests with real feeds are still to do.
+Files: studio/dataloop.js (new), studio/engine.js, studio/index.html. ChatGPT's files: not touched except one script-tag line in index.html.
