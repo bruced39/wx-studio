@@ -436,3 +436,8 @@ User specifically requested the previously recorded AguaceroWX **place labels** 
 - **Touched:** `studio/mapbox.js`, `studio/ui.js` (targeted label panel + saved style import, preserving all Claude video additions), `tests/map_city_labels.test.js`, `VERSION`, `AI_HANDOFF.md`. **Untouched:** `studio/engine.js`, `studio/export.js`, `studio/index.html`, cloud client code, scripts/config/secrets.
 - **Scope:** Only Map Style → Place Labels / City-Town-Village-Hamlet settings. Airport, road, country, water and other label-category configurations not part of this release. Do not claim that these non-place categories now match Aguacero one-to-one.
 
+
+## v0.9.61 – Animated GIF import (Claude)
+- Assets → Videos now also accepts animated GIFs. engine.js: own GIF decoder (`gifDecode`/`gifLzw`, disposal methods, transparency, interlace), `E.registerGif`, frames kept in memory (auto-downscaled to a ~260 MB pixel budget, max 1920 wide) and drawn through the existing video background branch (`bg.type==='video'`, `v.gif`). GIFs default to `vidLoop:true` so they keep looping for the whole scene; export/image export are frame-exact (no seeking). Stored in IndexedDB `wxstudio-vids` with `kind:'gif'`, restored on load.
+- Verified headless: frame at t=2.0 equals ffmpeg frame 20 (ms-integer timing), loop at t=5.0 equals t=2.0, reload persistence.
+- Rebased onto ChatGPT v0.9.60 (Aguacero label restore/Hamlets) with no conflicts; its code untouched.

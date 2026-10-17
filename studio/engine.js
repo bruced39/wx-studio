@@ -134,10 +134,10 @@
   E.registerGif = function (id, blob, name) {
     let v = E.videos[id]; if (v && v.blob === blob) return v;
     v = E.videos[id] = { id, name: name || id, blob, gif: true, ok: false, dur: 0, w: 0, h: 0, frames: [], starts: [] };
-    blob.arrayBuffer().then(buf => { const g2 = gifDecode(buf); let t = 0; v.starts = g2.delays.map(dl => { const s = t; t += dl / 1000; return s; }); v.frames = g2.frames; v.dur = t; v.w = g2.w; v.h = g2.h; v.ok = true; if (E.onAsset) E.onAsset(); }).catch(err => { v.err = String(err && err.message || err); if (E.onAsset) E.onAsset(); });
+    blob.arrayBuffer().then(buf => { const g2 = gifDecode(buf); let t = 0; v.starts = g2.delays.map(dl => { const s = t; t += dl; return s; }); v.frames = g2.frames; v.dur = t / 1000; v.w = g2.w; v.h = g2.h; v.ok = true; if (E.onAsset) E.onAsset(); }).catch(err => { v.err = String(err && err.message || err); if (E.onAsset) E.onAsset(); });
     return v;
   };
-  const gifFrame = (v, tt) => { let lo = 0, hi = v.starts.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (v.starts[m] <= tt) lo = m; else hi = m - 1; } return v.frames[lo]; };
+  const gifFrame = (v, tt) => { tt = tt * 1000 + 0.5; let lo = 0, hi = v.starts.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (v.starts[m] <= tt) lo = m; else hi = m - 1; } return v.frames[lo]; };
   E.vid = id => (id && E.videos[id] && E.videos[id].ok && E.videos[id].w) ? E.videos[id] : null;
   const vidTime = (b, v, t) => { const d = Math.max(0.1, v.dur), s = clamp(+b.vidStart || 0, 0, d), x = s + Math.max(0, t); return b.vidLoop ? x % d : Math.min(x, d - 0.04); };
   E.seekVideo = function (b, t) {
