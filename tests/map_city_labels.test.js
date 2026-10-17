@@ -615,3 +615,104 @@ test('loading older cloud style does not leak another scene Hamlet/City settings
  assert.equal(active.broadcastHamletMinZoom,9);
  assert.equal(active.broadcastHamletSize,14);
 });
+
+test('video-recorded auxiliary Aguacero label groups match every visible setting',()=>{
+ const start=source.indexOf('  const WD_DEFAULTS = {');
+ const end=source.indexOf('  const wdConfigKey = bg =>',start);
+ const model=new Function('MB',source.slice(start,end)+';return MB;')({});
+ const d=model.DEFAULTS,button=model.AGUACERO_PLACE_LABELS;
+ const categories={
+  Continent:[false,'Roboto Bold',16,'#000000','#ffffff',1.5,.75,3],
+  Country:[false,'Roboto Bold',14,'#000000','#ffffff',1,1,10],
+  State:[false,'Roboto Bold',12,'#000000','#ffffff',1,3,9],
+  County:[false,'Open Sans Regular',10,'#656565','#ffffff',1,7,16],
+  Airport:[true,'Roboto Bold',11,'#000000','#ffffff',1,8,24],
+  POI:[false,'Roboto Bold',10,'#000000','#ffffff',1,6,24],
+  Subdivision:[false,'Roboto Bold',11,'#000000','#ffffff',1,10,15],
+  Water:[false,'Roboto Bold',10,'#0a7eb9','#ffffff',1,13,24],
+  Natural:[false,'Roboto Bold',10,'#339758','#ffffff',1,4,24]
+ };
+ for(const [tier,vals] of Object.entries(categories)){
+  const names=['Enabled','Font','Size','Color','HaloColor','HaloWidth','MinZoom','MaxZoom'];
+  for(let i=0;i<names.length;i++){
+   const key='broadcast'+tier+'Label'+names[i];
+   assert.equal(d[key],vals[i],key+' must match the recorded video');
+   assert.equal(button[key],vals[i],key+' restore must equal defaults');
+  }
+  for(const suffix of ['TextBackground','DropShadow']){
+   const key='broadcast'+tier+'Label'+suffix;
+   assert.equal(d[key],false,key+' must be off');
+  }
+  assert.ok(ui.includes("auxLabelTier('"+tier+"'"),tier+' must have a Map Style settings group');
+ }
+ const road={
+  broadcastHideAllLabels:false,broadcastUppercaseLabels:true,broadcastLabelFade:true,
+  broadcastShowRoadShields:true,broadcastRoadShieldSize:1.2,
+  broadcastRoadSignDensityPct:100,broadcastRoadShieldMinZoom:6,broadcastRoadShieldMaxZoom:24,
+  broadcastRoadSignInterstates:true,broadcastRoadSignUS:true,broadcastRoadSignState:true,
+  broadcastRoadSignOther:true,broadcastRoadSignExits:true,
+  broadcastShowRoadLabels:true,broadcastRoadNameFont:'Open Sans Regular',
+  broadcastRoadNameScale:1,broadcastRoadNameColor:'#ffffff',
+  broadcastRoadNameHaloColor:'#000000',broadcastRoadNameHaloWidth:1,
+  broadcastRoadNameDensityPct:30,broadcastRoadLabelMinZoom:15,broadcastRoadLabelMaxZoom:24,
+  broadcastRoadNameTextBackground:false,broadcastRoadNameDropShadow:false
+ };
+ for(const [key,val] of Object.entries(road)){
+  assert.equal(d[key],val,'recorded road/global label default '+key);
+  assert.equal(button[key],val,'recorded road/global label restore '+key);
+ }
+ const dirty={broadcastRoadNameFont:'DIN Pro Bold',broadcastAirportLabelEnabled:false,
+  broadcastContinentLabelEnabled:true,broadcastRoadShieldSize:.6,
+  broadcastCountryWidth:4,broadcastLandColor:'#223355'};
+ model.applyAguaceroPlaceLabels(dirty);
+ for(const key of Object.keys(road))assert.equal(dirty[key],road[key],'restore '+key);
+ for(const category of Object.keys(categories)){
+  const key='broadcast'+category+'LabelEnabled';
+  assert.equal(dirty[key],d[key],'restore '+key);
+ }
+ assert.equal(dirty.broadcastCountryWidth,4,'non-label country-border width untouched');
+ assert.equal(dirty.broadcastLandColor,'#223355','non-label land color untouched');
+});
+test('recorded Airport and Road Name typography reaches native Mapbox symbol paint',()=>{
+ const style={...cfg,mbStyle:'broadcast',broadcastBase:'satellite',
+  broadcastAirportLabelEnabled:true,broadcastAirportLabelFont:'Roboto Bold',
+  broadcastAirportLabelSize:11,broadcastAirportLabelColor:'#000000',
+  broadcastAirportLabelHaloColor:'#ffffff',broadcastAirportLabelHaloWidth:1,
+  broadcastAirportLabelMinZoom:8,broadcastAirportLabelMaxZoom:24,
+  broadcastShowRoadLabels:true,broadcastRoadNameFont:'Open Sans Regular',
+  broadcastRoadNameScale:1,broadcastRoadNameColor:'#ffffff',
+  broadcastRoadNameHaloColor:'#000000',broadcastRoadNameHaloWidth:1,
+  broadcastRoadNameDensityPct:30,broadcastRoadLabelMinZoom:15,broadcastRoadLabelMaxZoom:24};
+ const buildCode=between('  function addBroadcastCartography(','  MB.token =');
+ const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
+  'tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle','applyRecordedAuxLabel',
+  buildCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},
+   maker,fontStack,padding,labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle,auxLabel);
+ const orig=(id,sl)=>({id,type:'symbol','source-layer':sl,source:'composite',
+   layout:{visibility:'visible','text-size':12},paint:{},minzoom:0,maxzoom:24});
+ const map={layers:[orig('airport-label','airport_label'),orig('road-label','road')],
+  getStyle(){return {layers:this.layers}},getLayer(id){return this.layers.find(l=>l.id===id)},
+  setLayoutProperty(id,k,val){this.getLayer(id).layout[k]=val},
+  setPaintProperty(id,k,val){this.getLayer(id).paint[k]=val},
+  setFilter(id,val){this.getLayer(id).filter=val},
+  setLayerZoomRange(id,min,max){Object.assign(this.getLayer(id),{minzoom:min,maxzoom:max})},
+  removeLayer(id){this.layers=this.layers.filter(l=>l.id!==id)},addLayer(l){this.layers.push(l)}};
+ fn(map,style);
+ const airport=map.getLayer('airport-label'),road=map.getLayer('road-label');
+ assert.equal(airport.layout.visibility,'visible','airport labels on');
+ assert.equal(airport.layout['text-size'],11,'airport size');
+ assert.equal(airport.paint['text-color'],'#000000');
+ assert.equal(airport.paint['text-halo-color'],'#ffffff');
+ assert.equal(airport.paint['text-halo-width'],1);
+ assert.equal(airport.minzoom,8);
+ assert.equal(road.layout.visibility,'visible','road names on');
+ assert.equal(road.paint['text-color'],'#ffffff');
+ assert.equal(road.paint['text-halo-color'],'#000000');
+ assert.equal(road.paint['text-halo-width'],1);
+ assert.equal(road.minzoom,15);
+ assert.equal(road.maxzoom,24);
+ fn(map,{...style,broadcastAirportLabelEnabled:false,broadcastShowRoadLabels:false});
+ assert.equal(map.getLayer('airport-label').layout.visibility,'none');
+ assert.equal(map.getLayer('road-label').layout.visibility,'none');
+});
