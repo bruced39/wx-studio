@@ -52,10 +52,13 @@
   }
 
   X.run = async function (show, o) {
+    g.Engine.exporting = true; try { return await X.run0(show, o); } finally { g.Engine.exporting = false; }
+  };
+  X.run0 = async function (show, o) {
     o = o || {}; const fps = o.fps || 30, W = o.width || 1920, H = o.height || 1080, bitrate = o.bitrate || 10e6;
     await prepare(show, o);
     const codec = await X.pickCodec(W, H, fps, bitrate, o.codecs);
-    if (!codec) return X.runRealtime(show, o);
+    if (!codec) { g.Engine.exporting = false; return X.runRealtime(show, o); }
     const mux = new g.Mp4Writer(W, H); let haveDesc = false;
     await X.encodeFrames(show, Object.assign({}, o, { codec, fps, width: W, height: H, bitrate }), (bytes, ts, dur, key, desc) => { if (desc && !haveDesc) { mux.setDescription(desc); haveDesc = true; } mux.addSample(bytes, ts, dur, key); });
     const blob = new Blob([mux.finalize()], { type: 'video/mp4' });

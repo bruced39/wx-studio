@@ -66,6 +66,40 @@
     return e.ok ? e.el : null;
   };
   const blurCache = new WeakMap();
+  /* ---------- video backgrounds (uploaded MP4/WebM, kept in this browser) ---------- */
+  E.videos = {}; E.exporting = false;
+  E.registerVideo = function (id, blob, name) {
+    let v = E.videos[id]; if (v && v.blob === blob) return v;
+    const el = document.createElement('video'); el.muted = true; el.defaultMuted = true; el.playsInline = true; el.preload = 'auto';
+    v = E.videos[id] = { id, name: name || id, blob, el, ok: false, dur: 0, w: 0, h: 0 };
+    el.onloadedmetadata = () => { v.ok = true; v.dur = el.duration || 0; v.w = el.videoWidth; v.h = el.videoHeight; if (E.onAsset) E.onAsset(); };
+    el.src = URL.createObjectURL(blob); return v;
+  };
+  E.vid = id => (id && E.videos[id] && E.videos[id].ok && E.videos[id].w) ? E.videos[id] : null;
+  const vidTime = (b, v, t) => { const d = Math.max(0.1, v.dur), s = clamp(+b.vidStart || 0, 0, d), x = s + Math.max(0, t); return b.vidLoop ? x % d : Math.min(x, d - 0.04); };
+  E.seekVideo = function (b, t) {
+    const v = E.vid(b.vid); if (!v) return Promise.resolve(); const tt = vidTime(b, v, t), el = v.el;
+    return new Promise(res => { let fin = false; const done = () => { if (fin) return; fin = true; el.removeEventListener('seeked', done); res(); }; el.addEventListener('seeked', done); if (!el.paused) el.pause(); el.currentTime = tt; setTimeout(done, 1500); });
+  };
+  function syncVideo(b, v, t, opts) {
+    if ((opts && opts.thumb) || E.exporting) return;
+    const el = v.el, tt = vidTime(b, v, t), atEnd = !b.vidLoop && tt >= v.dur - 0.05;
+    if (opts && opts.editing) { if (!el.paused) el.pause(); if (!el.seeking && Math.abs(el.currentTime - tt) > 0.04) el.currentTime = tt; }
+    else if (atEnd) { if (!el.paused) el.pause(); if (!el.seeking && Math.abs(el.currentTime - tt) > 0.1) el.currentTime = tt; }
+    else if (el.paused) { el.currentTime = tt; el.play().catch(() => { /* needs a user gesture */ }); }
+    else if (Math.abs(el.currentTime - tt) > 0.35) el.currentTime = tt;
+  }
+  let vsm = null;
+  function drawVideoFit(c, el, iw, ih, b) {
+    const fit = b.fit || 'blur';
+    if (fit === 'stretch') c.drawImage(el, 0, 0, W, H);
+    else if (fit === 'solid') { c.fillStyle = b.fitColor || '#0a1a3a'; c.fillRect(0, 0, W, H); const s = Math.min(W / iw, H / ih); c.drawImage(el, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s); }
+    else if (fit === 'blur') {
+      if (!vsm) vsm = document.createElement('canvas'); vsm.width = 64; vsm.height = Math.max(8, Math.round(64 * ih / iw)); const sx = vsm.getContext('2d'); sx.imageSmoothingQuality = 'high'; sx.drawImage(el, 0, 0, vsm.width, vsm.height);
+      const cs = Math.max(W / vsm.width, H / vsm.height) * 1.08; c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high'; c.drawImage(vsm, (W - vsm.width * cs) / 2, (H - vsm.height * cs) / 2, vsm.width * cs, vsm.height * cs);
+      c.fillStyle = 'rgba(0,0,0,0.28)'; c.fillRect(0, 0, W, H); const s = Math.min(W / iw, H / ih); c.drawImage(el, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s);
+    } else { const s = Math.max(W / iw, H / ih); c.drawImage(el, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s); }
+  }
   E.preload = function (show) {
     const ids = Object.keys(show.assets || {});
     return Promise.all(ids.map(id => new Promise(res => { E.img(show, id); const e = imgCache[id]; if (!e) return res(); if (e.ok) return res(); e.el.onload = () => { e.ok = true; res(); }; e.el.onerror = () => res(); })));
@@ -364,6 +398,10 @@
           c.fillStyle = 'rgba(0,0,0,0.28)'; c.fillRect(0, 0, W, H);
           const s = Math.min(W / im.width, H / im.height) * kb, w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h);
         } else { const s = Math.max(W / im.width, H / im.height) * kb; const w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h); } }
+    } else if (b.type === 'video') {
+      c.fillStyle = '#000'; c.fillRect(0, 0, W, H); const v = E.vid(b.vid);
+      if (v) { syncVideo(b, v, t, opts); try { drawVideoFit(c, v.el, v.w, v.h, b); } catch (err2) { /* frame not ready yet */ } }
+      else { c.save(); c.fillStyle = 'rgba(255,255,255,0.7)'; c.font = `600 28px ${SANS}`; c.textAlign = 'center'; c.fillText(E.videos[b.vid] ? 'Loading video…' : 'Video not found in this browser – add it again in Assets → Videos', W / 2, H / 2); c.restore(); }
     } else if (b.type === 'solid') { c.fillStyle = b.color || '#101820'; c.fillRect(0, 0, W, H); }
     else {
       const gc = E.GRADS[b.grad] || E.GRADS.sky, gr = c.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, gc[0]); gr.addColorStop(1, gc[1]); c.fillStyle = gr; c.fillRect(0, 0, W, H);
@@ -484,12 +522,13 @@
   }
   /* export helper: make sure every Mapbox frame needed at show time T is rendered before the synchronous draw */
   E.prepareFrame = async function (show, T) {
-    if (!g.MB || !show.scenes.some(s => s.bg.type === 'mapbox')) return;
+    const hasMb = g.MB && show.scenes.some(s => s.bg.type === 'mapbox'), hasVid = show.scenes.some(s => s.bg.type === 'video');
+    if (!hasMb && !hasVid) return;
     const st = E.starts(show), tot = E.total(show); T = clamp(T, 0, Math.max(0, tot - 0.0001));
     let i = 0; while (i + 1 < st.length && T >= st[i + 1]) i++;
     const sc = show.scenes[i], t = T - st[i], tr = sc.transition || { type: 'cut', dur: 0 }, need = [];
     if (i > 0 && tr.type !== 'cut' && t < tr.dur) { need.push([show.scenes[i - 1], show.scenes[i - 1].duration + t]); need.push([sc, t]); } else need.push([sc, t]);
-    for (const [s, tt] of need) if (s.bg.type === 'mapbox') await g.MB.snap(s.bg, E.viewAt(s, tt));
+    for (const [s, tt] of need) { if (hasMb && s.bg.type === 'mapbox') await g.MB.snap(s.bg, E.viewAt(s, tt)); if (s.bg.type === 'video') await E.seekVideo(s.bg, tt); }
   };
   E.renderShow = function (c, show, T, opts) {
     const st = E.starts(show), tot = E.total(show); T = clamp(T, 0, Math.max(0, tot - 0.0001));

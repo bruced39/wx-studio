@@ -91,7 +91,7 @@
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
-  function drawThumb(i) { const sc = S.show.scenes[i], cv = document.querySelector(`.sc[data-i="${i}"] canvas`); if (!cv) return; try { E.renderScene(tbc, S.show, sc, Math.min(2.5, sc.duration), { editing: true, camT: 0 }); const c = cv.getContext('2d'); c.drawImage(tb, 0, 0, cv.width, cv.height); } catch (e) { /* ignore */ } }
+  function drawThumb(i) { const sc = S.show.scenes[i], cv = document.querySelector(`.sc[data-i="${i}"] canvas`); if (!cv) return; try { E.renderScene(tbc, S.show, sc, Math.min(2.5, sc.duration), { editing: true, camT: 0, thumb: true }); const c = cv.getContext('2d'); c.drawImage(tb, 0, 0, cv.width, cv.height); } catch (e) { /* ignore */ } }
   function thumbSoon(all) { clearTimeout(tk); tk = setTimeout(() => { if (all) S.show.scenes.forEach((_, i) => drawThumb(i)); else drawThumb(S.si); }, 450); }
   E.onAsset = () => thumbSoon(true);
 
@@ -971,6 +971,48 @@
     if(AC.status)p.append(h('div',{className:'hint',style:'margin-top:8px;overflow-wrap:anywhere',text:AC.status}));
   }
 
+  /* ---------- video library (MP4/WebM backgrounds; stored in this browser's IndexedDB) ---------- */
+  let vidList = [];
+  const vidDB = () => new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-vids', 1); r.onupgradeneeded = () => r.result.createObjectStore('v', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } });
+  const vidTx = async (mode, fn) => { const d = await vidDB(); return new Promise((res, rej) => { const t = d.transaction('v', mode), s = t.objectStore('v'), q = fn(s); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
+  async function restoreVideos() { try { vidList = (await vidTx('readonly', s => s.getAll())) || []; vidList.sort((a, b) => b.t - a.t); vidList.forEach(r => E.registerVideo(r.id, r.blob, r.name)); if (S.tab === 'bgs') renderPanels(); } catch (e) { /* IndexedDB unavailable */ } }
+  async function addVideoFiles(files) {
+    for (const f of files) {
+      if (!/^video\//.test(f.type) && !/\.(mp4|m4v|mov|webm)$/i.test(f.name)) { toast('Not a video file: ' + f.name); continue; }
+      const rec = { id: 'vid_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: f.name.replace(/\.[^.]+$/, ''), blob: f, t: Date.now() };
+      E.registerVideo(rec.id, f, rec.name); vidList.unshift(rec);
+      try { await vidTx('readwrite', s => s.put(rec)); } catch (e) { toast('Could not save the video in this browser (it will work until you reload)'); }
+    }
+    renderPanels();
+  }
+  function useVideo(rec) {
+    const sc = cur(), v = E.videos[rec.id]; const go = () => { const asp = v.w / v.h; sc.bg = Object.assign({}, sc.bg, { type: 'video', vid: rec.id, vidStart: 0, vidLoop: false, fit: Math.abs(asp - 16 / 9) < 0.04 ? 'fill' : 'blur', kenburns: false }); if (v.dur > 0) sc.duration = Math.max(1, Math.round(v.dur * 10) / 10); commit(); refreshAll(); toast('Video set as this scene’s background (scene length matched to the video)'); };
+    if (v.ok) go(); else { toast('Loading video…'); v.el.addEventListener('loadedmetadata', () => setTimeout(go, 50), { once: true }); }
+  }
+  function videosPanel(p) {
+    p.append(h('div', { className: 'hint', text: 'Upload an MP4 (for example a satellite/radar loop saved from AguaceroWX) and use it as a scene background. Videos are stored in this browser only – they are NOT inside the show file, so on another computer add them again. Sound is not included.' }));
+    const fi = h('input', { type: 'file', accept: 'video/*,.mp4,.m4v,.mov,.webm', multiple: true, style: 'display:none', onchange: e => { addVideoFiles([...e.target.files]); e.target.value = ''; } });
+    const dz = h('div', { id: 'drop', text: 'Upload videos: click to browse or drop MP4 files here' }); dz.onclick = () => fi.click();
+    ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('hov'); })); dz.addEventListener('dragleave', () => dz.classList.remove('hov'));
+    dz.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('hov'); addVideoFiles([...e.dataTransfer.files]); });
+    p.append(fi, dz);
+    const sc = cur(), b = sc.bg;
+    if (b.type === 'video') {
+      const v = E.videos[b.vid]; p.append(h('div', { className: 'h', text: 'This scene’s video' }), h('div', { className: 'hint', text: (v ? v.name + (v.dur ? ' – ' + v.dur.toFixed(1) + ' s, ' + v.w + '×' + v.h : '') : 'Video not found in this browser') }),
+        bind(b, 'fit', 'select', { label: 'Video fit', rerender: true, options: [['fill', 'Fill (crop edges)'], ['blur', 'Fit whole video + blurred fill'], ['solid', 'Fit whole video + solid color'], ['stretch', 'Stretch to frame']] }),
+        ...((b.fit === 'solid') ? [bind(b, 'fitColor', 'color', { label: 'Bar color' })] : []),
+        bind(b, 'vidStart', 'num', { label: 'Start at (seconds)', min: 0, max: 600, step: 0.1 }), bind(b, 'vidLoop', 'check', { label: 'Loop if the scene is longer' }),
+        h('div', { className: 'btnrow' }, h('button', { text: 'Match scene length to video', on: { click: () => { if (v && v.dur) { sc.duration = Math.max(1, Math.round((v.dur - (+b.vidStart || 0)) * 10) / 10); commit(); refreshAll(); } } } })));
+    }
+    if (!vidList.length) { p.append(h('div', { className: 'hint', text: 'No videos yet.' })); return; }
+    const list = h('div', { style: 'display:grid;gap:8px;margin-top:10px' });
+    vidList.forEach(rec => { const v = E.videos[rec.id];
+      list.append(h('div', { style: 'padding:8px;border:1px solid #42516a;border-radius:6px' }, h('div', { text: rec.name, style: 'font-weight:600;overflow-wrap:anywhere' }), h('div', { className: 'hint', text: v && v.ok ? v.dur.toFixed(1) + ' s · ' + v.w + '×' + v.h + ' · ' + (rec.blob.size / 1048576).toFixed(1) + ' MB' : (rec.blob.size / 1048576).toFixed(1) + ' MB' }),
+        h('div', { className: 'btnrow' }, h('button', { className: 'sm pri', text: 'Use as this scene’s background', on: { click: () => useVideo(rec) } }), h('button', { className: 'sm dng', text: 'Delete', on: { click: async () => { if (!confirm('Delete this video from this browser?')) return; vidList = vidList.filter(x => x.id !== rec.id); try { await vidTx('readwrite', s => s.delete(rec.id)); } catch (e) { /* ignore */ } renderPanels(); } } }))));
+    });
+    p.append(list);
+  }
+  restoreVideos();
   function bgApply(b) { const sc = cur(); S.show.assets[b.asset] = b.data; sc.bg = Object.assign({}, sc.bg, { type: 'image', asset: b.asset, kenburns: false, fit: b.asset === 'bgdefault' ? 'fill' : sc.bg.fit }); E.preload(S.show).then(() => thumbSoon(true)); commit(); refreshAll(); }
   function bgDefaultSpec() { const b = bgAll().filter(x => kindOf(x) === 'bg').find(x => x.id === bgDefault) || builtinBgs()[0]; return b; }
 
@@ -995,8 +1037,9 @@
   }
   let assetTab = 'bg';
   function backgroundsPanel(p) {
-    const tabs = h('div', { className: 'btnrow', style: 'margin-bottom:8px' }, [['bg', 'Backgrounds'], ['banner', 'Banners'], ['graphic', 'Graphics']].map(([k, l]) => h('button', { text: l, className: assetTab === k ? 'pri' : '', on: { click: () => { assetTab = k; renderPanels(); } } })));
+    const tabs = h('div', { className: 'btnrow', style: 'margin-bottom:8px' }, [['bg', 'Backgrounds'], ['banner', 'Banners'], ['graphic', 'Graphics'], ['video', 'Videos']].map(([k, l]) => h('button', { text: l, className: assetTab === k ? 'pri' : '', on: { click: () => { assetTab = k; renderPanels(); } } })));
     p.append(tabs);
+    if (assetTab === 'video') { videosPanel(p); return; }
     const kind = assetTab, isBg = kind === 'bg';
     p.append(h('div', { className: 'hint', text: isBg ? 'Click a background to apply it to the current scene. The star marks the background used by + Scene. Uploads are saved in this browser (resized to 1920 px wide).' : 'Upload PNGs with transparent backgrounds (kept as-is). Click an item to add it to the current scene using the placement below, or drag it onto the stage. Afterwards move and resize it like any object.' }));
     if (!isBg) {
@@ -1572,7 +1615,7 @@
     const pos = h('input', { type: 'range', min: 0, max: 100, value: 50 }), msg = h('div', { className: 'hint', text: 'Saves the finished look of the scene (everything animated in).' }), res = h('div'), go = h('button', { className: 'pri', text: 'Create image' });
     const hint = h('div', { className: 'hint', text: 'Square and portrait crop the 16:9 scene. The slider picks which part is kept (50 = center).' });
     go.onclick = async () => {
-      go.disabled = true; res.innerHTML = ''; stopPlay();
+      go.disabled = true; res.innerHTML = ''; stopPlay(); E.exporting = true;
       try {
         const [w, hh] = size.value.split('x').map(Number), type = fmt.value === 'png' ? 'image/png' : 'image/jpeg', ext = fmt.value === 'png' ? 'png' : 'jpg', starts = E.starts(S.show), warn = [], idx = what.value === 'all' ? S.show.scenes.map((_, i) => i) : [S.si], files = [];
         const cv = document.createElement('canvas'); cv.width = E.W; cv.height = E.H; const c = cv.getContext('2d'), out = document.createElement('canvas'); out.width = w; out.height = hh; const oc = out.getContext('2d'); oc.imageSmoothingQuality = 'high';
@@ -1587,7 +1630,7 @@
         let last = null; for (const f of files) { last = saveFile(f.blob, base + '_' + f.name); await new Promise(r => setTimeout(r, 400)); }
         msg.textContent = `Saved ${files.length} image${files.length > 1 ? 's' : ''} to your Downloads folder.` + (warn.length ? ' Note – map not ready for scene ' + warn.join('; ') : '');
         if (files.length === 1) res.append(h('img', { src: last, style: 'width:100%;max-width:560px;border-radius:8px;margin-top:8px' }));
-      } catch (e) { msg.textContent = 'Image export failed: ' + (e && e.message || e); } go.disabled = false;
+      } catch (e) { msg.textContent = 'Image export failed: ' + (e && e.message || e); } E.exporting = false; go.disabled = false;
     };
     modal('Export image', h('div', {}, fld('Scenes', what), fld('Size', size), fld('Format', fmt), fld('Crop position', pos), hint, msg, res), [h('button', { text: 'Close', on: { click: closeModal } }), go]);
   }
