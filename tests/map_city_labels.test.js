@@ -488,6 +488,8 @@ test('the verified AguaceroWX values are exactly the new-map defaults for all 4 
    assert.equal(model.AGUACERO_PLACE_LABELS[key],value,key+' restore mismatch');
   }
  }
+ assert.equal(model.DEFAULTS.broadcastMajorCityMinZoom,2,'major cities must respect Aguacero City min zoom 2');
+ assert.equal(model.AGUACERO_PLACE_LABELS.broadcastMajorCityMinZoom,2,'restore button must reset major city min zoom to 2');
  // New scenes receive the canonical four-tier defaults, not legacy DIN.
  const fresh={broadcastBase:'satellite'};
  model.ensureConfig(fresh);
