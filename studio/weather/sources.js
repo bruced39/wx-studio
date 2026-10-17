@@ -14,7 +14,7 @@ const C=g.WXWeatherSources={
  products:[], byId(id){return this.products.find(p=>p.id===id)||null;},
  list(category){return this.products.filter(p=>!category||p.category===category);}
 };
-const push=p=>C.products.push(Object.freeze({...p,status:'decoder-needed'}));
+const push=p=>C.products.push(Object.freeze({status:'decoder-needed',...p}));
 const goes=[
  {id:'g19',satellite:'GOES-19',region:'East',bucket:'noaa-goes19'},
  {id:'g18',satellite:'GOES-18',region:'West',bucket:'noaa-goes18'}
@@ -52,6 +52,17 @@ push({id:'mrms_mosaic_reflectivity',category:'radar',label:'MRMS 1 km quality-co
  format:'GRIB2 gzip',resolutionKm:1,cadenceMinutes:2,palette:'radar/reflectivity',
  scope:'CONUS mosaic',historyHours:null,
  caveat:'NOAA RIDGE2 MapServer is a LIVE 1 km image, NOT an historical four-hour frames API. Capture/archive raw MRMS frames explicitly.'});
+// Separate official NWS time-enabled MRMS ImageServer, with its own rolling
+// four-hour history. Source-native 1 km mosaic remains the primary product;
+// this is a time-addressable *rendered image*, not raw dBZ for custom LUTs.
+push({id:'mrms_nws_4hour_image',category:'radar',
+ label:'NWS MRMS four-hour historical radar images',
+ source:'NOAA NWS ArcGIS ImageServer',
+ endpoint:'https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer',
+ format:'ArcGIS time-enabled raster image',status:'needs-browser-CORS-and-timestamp-validation',
+ cadenceMinutes:5,resolutionKm:1,historyHours:4,
+ palette:null,display:'Pre-rendered NWS reflectivity (cannot recolor source values with LUT)',
+ caveat:'Use ImageServer exportImage time=UTC epoch milliseconds; 4h rolling advertised but query current service time extent. Preserve source/native scale; do not misrepresent server resampling as higher detail.'});
 push({id:'nexrad_level2_base_reflectivity',category:'radar',
  label:'WSR-88D Level II — native polar high-resolution base reflectivity',
  source:'NOAA/Unidata NODD',bucket:'unidata-nexrad-level2',
@@ -74,6 +85,7 @@ C.NOAA={
  nexrad:'https://registry.opendata.aws/noaa-nexrad/',
  mrms:'https://mrms.ncep.noaa.gov/data/',
  radarLive:'https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity/MapServer',
+ radarHistory:'https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer',
  stations:'https://gis.ncdc.noaa.gov/arcgis/rest/services/cdo/nexrad/MapServer/0'
 };
 })(typeof window!=='undefined'?window:globalThis);
