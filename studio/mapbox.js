@@ -102,6 +102,10 @@
   AGUACERO_PLACE_LABELS.broadcastOverviewCityDensity='more';
   AGUACERO_PLACE_LABELS.broadcastOverviewLabelGap=2;
   AGUACERO_PLACE_LABELS.broadcastMajorCityRank=9;
+  // WX Studio-specific readability control: changes COLLISION PADDING
+  // while retaining every Aguacero font, 16px size, density %, and halo.
+  AGUACERO_PLACE_LABELS.broadcastAutoDeclutter=true;
+  AGUACERO_PLACE_LABELS.broadcastDeclutterStrength=1.25;
   // Respect the reference City minimum even for the native overview
   // fallback. A user can explicitly lower this separately afterwards.
   AGUACERO_PLACE_LABELS.broadcastMajorCityMinZoom=2;
@@ -302,12 +306,31 @@
   // symbols inherited stock Mapbox letter spacing, line wrapping, anchors
   // and text-field values even after their font/size were overridden.
   // This made the SAME place-label tier look different across zoom.
+  function placeCollisionPadding(cfg,base){
+    if(cfg.broadcastAutoDeclutter===false)return base;
+    const strength=Math.max(0,Math.min(2,
+      Number.isFinite(+cfg.broadcastDeclutterStrength)?+cfg.broadcastDeclutterStrength:1.25));
+    if(strength===0)return base;
+    // text-padding is COLLISION SPACE in pixels, not text-size or font.
+    // Mapbox supports zoom camera expressions for this layout property.
+    // Bigger buffer at regional zooms gives weather graphics breathing room;
+    // fades into the user's existing spacing at close-up zooms. Apply this
+    // same rule to native and custom layers across the 7.5 handoff.
+    return ['interpolate',['linear'],['zoom'],
+      3,Math.max(base,36*strength),
+      5,Math.max(base,27*strength),
+      6,Math.max(base,21*strength),
+      7,Math.max(base,15*strength),
+      7.5,Math.max(base,11*strength),
+      9,base];
+  }
   function tierTextStyle(cfg,tier,overview=false){
     const t=tierAppearance(cfg,tier),
       requestedSize=Number.isFinite(t.size)&&t.size>0?t.size:(tier==='City'?20:tier==='Town'?16:13),
       overviewGap=Number.isFinite(+cfg.broadcastOverviewLabelGap)
         ?Math.max(0,Math.min(20,+cfg.broadcastOverviewLabelGap)):2,
-      padding=overview?overviewGap:labelPadding(cfg.broadcastLabelDensity||'normal',t.spacing);
+      padding=placeCollisionPadding(cfg,
+        overview?overviewGap:labelPadding(cfg.broadcastLabelDensity||'normal',t.spacing));
     return {
       layout:{
         'text-field':['coalesce',['get','name_en'],['get','name']],
@@ -903,10 +926,22 @@
                  overviewDensity==='more'?Math.max(4,townRank):5)*
                  (appearance.pct/40))))]];
       const combined=original?['any',original,extras]:extras;
+      // v0.9.52–.66 OR'd the untouched stock layer into our extra-density
+      // filter. This accidentally made a *lowered* user density slider
+      // unable to remove the stock labels at overview zoom.
+      // Gate the final union by actual tile filterrank, while retaining
+      // high-priority cities (symbolrank <= 4) regardless of slider.
+      const cap=Math.max(0,Math.min(5,Math.ceil(5*appearance.pct/100)));
+      const densityFilter=['<=',['coalesce',['get','filterrank'],5],cap];
+      const selectable=cfg['broadcast'+(major?'City':'Town')+'DensityPct']==null
+        ?combined
+        :major?['all',combined,['any',densityFilter,
+            ['<=',['coalesce',['get','symbolrank'],99],4]]]
+          :['all',combined,densityFilter];
       if(appearance.population!=='all')
-        return ['all',combined,['<=',['coalesce',['get','symbolrank'],99],
+        return ['all',selectable,['<=',['coalesce',['get','symbolrank'],99],
           appearance.population==='top'?4:9]];
-      return combined;
+      return selectable;
     };
     const nativeOverviewRange=(l)=>{
       const major=overviewIsMajor(l),minor=overviewIsMinor(l);
