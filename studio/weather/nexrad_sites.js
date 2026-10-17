@@ -47,7 +47,12 @@ N.load=async()=>{
   try{response=await fetch(N.url,{signal:c.signal});}finally{clearTimeout(timer);}
   if(!response.ok)throw Error('NOAA directory HTTP '+response.status);
   const sites=N.parse(await response.json());
-  if(sites.length>=20){N.stations=sites;return sites;}
+  if(sites.length>=20){
+    N.stations=sites;
+    const planned=g.WXData?.planned?.find(p=>p.id==='nexrad');
+    if(planned){planned.sites=sites.map(x=>({id:x.id,label:x.id+' '+x.name}));planned.defaultSite='KBOX';}
+    return sites;
+  }
  }catch(e){N.lastError=String(e.message||e);}
  return N.stations;
 };
@@ -98,7 +103,7 @@ function boot(){
   const sc=cur();if(!site||!sc)return false;
   const before=sc.dataLoop||{};
   sc.dataLoop={...((g.WXData?.defaults?.()||{on:false,source:'nexrad',hours:1,speed:10})),
-    ...before,source:'nexrad',site:id,on:before.on===true};
+    ...before,source:'nexrad',site:id,on:before.source==='nexrad'&&before.on===true};
   // Selecting a site does NOT mark unavailable NOAA Level-II as connected.
   N.selected=id;
   WX.commit();
