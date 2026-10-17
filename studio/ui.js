@@ -629,6 +629,8 @@
           B('broadcastOverviewLabelGap','range',{label:'Overview label gap (px)',min:0,max:20,step:.5}),
           B('broadcastMajorCityRank','range',{label:'Major-city rank — higher shows more',min:1,max:19,step:1}),
           B('broadcastMajorCityMinZoom','range',{label:'Major-city minimum zoom',min:0,max:12,step:.5}),
+          B('broadcastHideAllLabels','check',{label:'Hide all labels'}),
+          B('broadcastUppercaseLabels','check',{label:'All caps (map labels)'}),
           B('broadcastLabelFade','check',{label:'Fade labels in/out'}),
           roadSignControls(),
           roadNameControls(),
