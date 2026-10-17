@@ -96,6 +96,12 @@
   AGUACERO_PLACE_LABELS.broadcastShowCities=true;
   AGUACERO_PLACE_LABELS.broadcastUppercaseLabels=true;
   AGUACERO_PLACE_LABELS.broadcastKeepMajorCities=true;
+  // WX Studio's low-zoom label coverage controls are not part of the
+  // original Aguacero screenshot. Keep the established WX Studio baseline
+  // so the restore button is predictable if these sliders were altered.
+  AGUACERO_PLACE_LABELS.broadcastOverviewCityDensity='more';
+  AGUACERO_PLACE_LABELS.broadcastOverviewLabelGap=2;
+  AGUACERO_PLACE_LABELS.broadcastMajorCityRank=9;
   // Respect the reference City minimum even for the native overview
   // fallback. A user can explicitly lower this separately afterwards.
   AGUACERO_PLACE_LABELS.broadcastMajorCityMinZoom=2;
