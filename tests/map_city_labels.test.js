@@ -166,14 +166,19 @@ test('overview city coverage increases eligible cities without ignoring collisio
     labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle);
  // Simulate a Mapbox Streets v12 stock filter: these real built-in
  // constraints MUST survive every WX Studio rank/density setting.
+ // Streets v12 major and minor divide by symbolrank, NOT city vs town.
  const stockMajor=['all',
    ['match',['get','class'],['settlement','disputed_settlement'],true,false],
    ['<=',['get','filterrank'],3],
    ['<=',['get','symbolrank'],6]];
+ const stockMinor=['all',
+   ['match',['get','class'],['settlement','disputed_settlement'],true,false],
+   ['<=',['get','filterrank'],3],
+   ['match',['get','symbolrank'],[7,8,9,10,11,12,13,14,15,16,17,18,19],true,false]];
  const nativeSort=['step',['get','symbolrank'],18,6,16,7,14];
  const orig=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
   minzoom:2,maxzoom:15,
-  filter:id==='settlement-major-label'?JSON.parse(JSON.stringify(stockMajor)):null,
+  filter:JSON.parse(JSON.stringify(id==='settlement-major-label'?stockMajor:stockMinor)),
   layout:{visibility:'visible','text-allow-overlap':false,'text-ignore-placement':false,
     'symbol-sort-key':JSON.parse(JSON.stringify(nativeSort))},paint:{}});
  const map={layers:[orig('settlement-major-label'),orig('settlement-minor-label')],
@@ -212,10 +217,19 @@ test('overview city coverage increases eligible cities without ignoring collisio
  assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,preserved),true,
   'original major city remains eligible even with strict extra rank');
  const baselineOnly={class:'disputed_settlement',type:'town',symbolrank:4,filterrank:2};
- assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,baselineOnly),true,
-  'original Mapbox disputed/city type is preserved by baseline OR');
- const restoredFilter=map.getLayer('settlement-major-label').filter;
- assert.deepEqual(restoredFilter[1],stockMajor,'stock filter was cached unmodified');
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,baselineOnly),false,
+  'a prominent TOWN must not render with City typography in the major layer');
+ assert.equal(evalFilter(map.getLayer('settlement-minor-label').filter,baselineOnly),true,
+  'a prominent town from the original major layer moves to the Town layer');
+ const minorCity={class:'settlement',type:'city',symbolrank:10,filterrank:2};
+ assert.equal(evalFilter(map.getLayer('settlement-major-label').filter,minorCity),true,
+  'a less prominent CITY from the original minor layer moves to the City layer');
+ assert.equal(evalFilter(map.getLayer('settlement-minor-label').filter,minorCity),false,
+  'the original minor layer must not render city text with Town typography');
+ assert.deepEqual(map.__wdOriginalOverviewFilters['settlement-major-label'],stockMajor,
+  'original major filter cached unchanged');
+ assert.deepEqual(map.__wdOriginalOverviewFilters['settlement-minor-label'],stockMinor,
+  'original minor filter cached unchanged');
  // Check repeated slider restyles don't overwrite stock cache with the
  // already-modified filter, allowing standard to become cumulative.
  fn(map,{...conf,broadcastMajorCityRank:9,broadcastOverviewCityDensity:'many'});
