@@ -69,9 +69,12 @@ mosaic, although useful for national coverage, is NOT a substitute for Level
 II at single-site zoom. `KBOX` is the correct Boston local WSR-88D.
 
 For MRMS raw 1 km quality-controlled mosaic, ingest timestamped GRIB2.gz
-from NOAA, retain each ~2 minute scan for a genuine 1/2/4 h history.
-The NWS MapServer live map image is not time-enabled, so **cannot** supply
-a historical four-hour loop by itself.
+from NOAA, and retain timestamped frames if rendering an independent LUT.
+The NWS **live MapServer** is not time-enabled. However NOAA also offers the
+separate **time-enabled radar_base_reflectivity_time ImageServer**, advertised
+with a moving 4-hour history and ~5-min updates (actual current time extent
+may be shorter; query it). Its source-colored images are useful for a fallback
+loop but are NOT raw dBZ that our custom color palettes can recolor.
 
 For RTMA/model fields, keep the catalog pending until the user selects
 fields and model products. The prepared cloud palettes can be filled
