@@ -523,7 +523,8 @@
         const placeFonts=[
           ['DIN Pro Bold','DIN Pro Bold'],['DIN Pro Medium','DIN Pro Medium'],
           ['Roboto Bold','Roboto Bold'],['Roboto Medium','Roboto Medium'],
-          ['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold']
+          ['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold'],
+          ['Open Sans Regular','Open Sans Regular']
         ];
         const placeTier=(tier,title)=>{
           const prefix='broadcast'+tier;
@@ -565,6 +566,47 @@
           }
           return mapAccordion('places-'+tier.toLowerCase(),title,items,tier==='City');
         };
+        const auxLabelTier=(tier,title)=>{
+          const pfx='broadcast'+tier+'Label';
+          const controls=[
+            B(pfx+'Enabled','check',{label:'Show '+title.toLowerCase(),rerender:true})
+          ];
+          // Display stored fields even when disabled, just as the actual
+          // AguaceroWX dialog does, so the user can compare reference values.
+          controls.push(
+            B(pfx+'Font','select',{label:'Font',options:placeFonts}),
+            B(pfx+'Size','range',{label:'Size (px)',min:7,max:40,step:1}),
+            B(pfx+'Color','color',{label:'Text color'}),
+            B(pfx+'HaloColor','color',{label:'Outline color'}),
+            B(pfx+'HaloWidth','range',{label:'Outline width (px)',min:0,max:6,step:.25}),
+            B(pfx+'DropShadow','check',{label:'Drop shadow'}),
+            zoomRangeRow(b,'Zoom range',pfx+'MinZoom',pfx+'MaxZoom',{min:0,max:24,step:.25})
+          );
+          return mapAccordion('aux-'+tier.toLowerCase(),title,controls,false);
+        };
+        const roadSignControls=()=>mapAccordion('aux-road-signs','Road Signs',[
+          B('broadcastShowRoadShields','check',{label:'Road signs'}),
+          B('broadcastRoadShieldSize','range',{label:'Size (×)',min:.5,max:2,step:.05}),
+          B('broadcastRoadSignDensityPct','range',{label:'Density (%)',min:0,max:100,step:1}),
+          B('broadcastRoadSignInterstates','check',{label:'Interstates'}),
+          B('broadcastRoadSignUS','check',{label:'U.S. highways'}),
+          B('broadcastRoadSignState','check',{label:'State routes'}),
+          B('broadcastRoadSignOther','check',{label:'Other signs'}),
+          B('broadcastRoadSignExits','check',{label:'Exits'}),
+          zoomRangeRow(b,'Zoom range','broadcastRoadShieldMinZoom','broadcastRoadShieldMaxZoom',{min:0,max:24,step:.5})
+        ],false);
+        const roadNameControls=()=>mapAccordion('aux-road-names','Road Names',[
+          B('broadcastShowRoadLabels','check',{label:'Road names'}),
+          B('broadcastRoadNameFont','select',{label:'Font',options:placeFonts}),
+          B('broadcastRoadNameScale','range',{label:'Size (×)',min:.5,max:2,step:.05}),
+          B('broadcastRoadNameColor','color',{label:'Text color'}),
+          B('broadcastRoadNameHaloColor','color',{label:'Outline color'}),
+          B('broadcastRoadNameHaloWidth','range',{label:'Outline width (px)',min:0,max:6,step:.25}),
+          B('broadcastRoadNameDensityPct','range',{label:'Density (%)',min:0,max:100,step:1}),
+          B('broadcastRoadNameTextBackground','check',{label:'Text background'}),
+          B('broadcastRoadNameDropShadow','check',{label:'Drop shadow'}),
+          zoomRangeRow(b,'Zoom range','broadcastRoadLabelMinZoom','broadcastRoadLabelMaxZoom',{min:0,max:24,step:.5})
+        ],false);
         const applyAguaLabels=()=>{
           // Mapbox DEFAULTS, this restore button, and new-map settings all
           // share one verified Aguacero place-label reference. Avoid
@@ -575,11 +617,11 @@
           }
           g.MB.applyAguaceroPlaceLabels(b);
           commit();renderPanels();
-          toast('AguaceroWX City, Town, Village and Hamlet labels restored');
+          toast('AguaceroWX recorded label settings restored (all categories)');
         };
         p.append(mapAccordion('labels','Place Labels',[
           h('div',{className:'btnrow'},h('button',{text:'Apply my AguaceroWX label settings',on:{click:applyAguaLabels}})),
-          h('div',{className:'hint',text:'Restores the verified AguaceroWX defaults for Cities, Towns, Villages and Hamlets: 16 px Roboto Bold, white text, black outlines, independent density and zoom ranges. Only place-label settings are changed.'}),
+          h('div',{className:'hint',text:'Restores the AguaceroWX settings from your October 17 recording: all four 16 px place categories, plus road names, road signs, airports and disabled auxiliary label groups. No changes to map backgrounds, road geometry, boundaries or scene objects.'}),
           B('broadcastShowCities','check',{label:'Show places',rerender:true}),
           B('broadcastKeepMajorCities','check',{label:'Keep major cities'}),
           B('broadcastOverviewCityDensity','select',{label:'Overview city coverage (below zoom 7.5)',options:[
@@ -587,10 +629,24 @@
           B('broadcastOverviewLabelGap','range',{label:'Overview label gap (px)',min:0,max:20,step:.5}),
           B('broadcastMajorCityRank','range',{label:'Major-city rank — higher shows more',min:1,max:19,step:1}),
           B('broadcastMajorCityMinZoom','range',{label:'Major-city minimum zoom',min:0,max:12,step:.5}),
+          B('broadcastHideAllLabels','check',{label:'Hide all labels'}),
+          B('broadcastUppercaseLabels','check',{label:'All caps (map labels)'}),
+          B('broadcastLabelFade','check',{label:'Fade labels in/out'}),
+          roadSignControls(),
+          roadNameControls(),
+          auxLabelTier('Continent','Continent Labels'),
+          auxLabelTier('Country','Country Labels'),
+          auxLabelTier('State','State Labels'),
+          auxLabelTier('County','County Labels'),
           placeTier('City','Cities'),
           placeTier('Town','Towns'),
           placeTier('Village','Villages'),
-          placeTier('Hamlet','Hamlets')
+          placeTier('Hamlet','Hamlets'),
+          auxLabelTier('Airport','Airport Labels'),
+          auxLabelTier('POI','Points of Interest'),
+          auxLabelTier('Subdivision','Subdivision Labels'),
+          auxLabelTier('Water','Water Labels'),
+          auxLabelTier('Natural','Natural Feature Labels')
         ],false));
 
         // All four boundary width sliders share ONE physical pixel scale.
