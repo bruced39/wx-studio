@@ -96,8 +96,9 @@
   AGUACERO_PLACE_LABELS.broadcastShowCities=true;
   AGUACERO_PLACE_LABELS.broadcastUppercaseLabels=true;
   AGUACERO_PLACE_LABELS.broadcastKeepMajorCities=true;
-  // The major-city fallback must not start at an unrelated zoom setting.
-  AGUACERO_PLACE_LABELS.broadcastMajorCityMinZoom=0;
+  // Respect the reference City minimum even for the native overview
+  // fallback. A user can explicitly lower this separately afterwards.
+  AGUACERO_PLACE_LABELS.broadcastMajorCityMinZoom=2;
   Object.assign(WD_DEFAULTS,AGUACERO_PLACE_LABELS);
   MB.AGUACERO_PLACE_LABELS=Object.freeze(AGUACERO_PLACE_LABELS);
   MB.applyAguaceroPlaceLabels=cfg=>{
