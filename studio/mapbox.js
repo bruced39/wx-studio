@@ -313,7 +313,7 @@
         'text-field':['coalesce',['get','name_en'],['get','name']],
         'text-font':wdFontStack(t.font),
         'text-size':requestedSize,
-        'text-transform':t.uppercase?'uppercase':'none',
+        'text-transform':t.uppercase&&cfg.broadcastUppercaseLabels!==false?'uppercase':'none',
         'text-letter-spacing':0,
         'text-line-height':1.2,
         'text-max-width':10,
@@ -327,7 +327,8 @@
         'text-opacity':t.opacity,
         'text-halo-color':t.halo,
         'text-halo-width':t.haloWidth,
-        'text-halo-blur':t.shadow?1.3:.15
+        'text-halo-blur':t.shadow?1.3:.15,
+        'text-opacity-transition':{duration:cfg.broadcastLabelFade===false?0:250}
       }
     };
   }
@@ -845,7 +846,8 @@
       ['text-color',cfg[p+'Color']||'#000000'],
       ['text-halo-color',cfg[p+'HaloColor']||'#ffffff'],
       ['text-halo-width',Math.max(0,+cfg[p+'HaloWidth']||0)],
-      ['text-halo-blur',cfg[p+'DropShadow']?1.3:.15]
+      ['text-halo-blur',cfg[p+'DropShadow']?1.3:.15],
+      ['text-opacity-transition',{duration:cfg.broadcastLabelFade===false?0:250}]
     ])try{map.setPaintProperty(layer.id,prop,value);}catch(e){}
   }
   function addBroadcastCartography(map,cfg){
@@ -940,6 +942,10 @@
     for(const l of layers){
       const id=String(l.id||'').toLowerCase(),sl=String(l['source-layer']||'').toLowerCase(); if(id.startsWith('wd-'))continue;
       try{
+        if(l.type==='symbol'&&cfg.broadcastHideAllLabels===true){
+          map.setLayoutProperty(l.id,'visibility','none');
+          continue;
+        }
         if(l.type==='symbol'){
           const adminTier=id.includes('continent')?'Continent':
             id.includes('country')?'Country':
@@ -954,6 +960,8 @@
             natural=sl==='natural_label'||id.includes('natural')||id.includes('water-label');
           if(adminPlace){
             applyRecordedAuxLabel(map,l,cfg,adminTier);
+          }else if(airport){
+            applyRecordedAuxLabel(map,l,cfg,'Airport');
           }else if(place){
             const overview=nativeOverviewRange(l);
             if(overview){
@@ -1036,8 +1044,6 @@
               try{map.setPaintProperty(l.id,'text-halo-width',Math.max(0,+cfg.broadcastRoadNameHaloWidth||0));}catch(e){}
               try{map.setLayoutProperty(l.id,'symbol-spacing',Math.round(220+(100-(+cfg.broadcastRoadNameDensityPct||30))*7));}catch(e){}
             }
-          }else if(airport){
-            applyRecordedAuxLabel(map,l,cfg,'Airport');
           }else if(poi){
             applyRecordedAuxLabel(map,l,cfg,'POI');
           }else if(natural){
@@ -1117,7 +1123,7 @@
       'wd-hamlet-labels'].forEach(id=>{
       try{if(map.getLayer(id))map.removeLayer(id);}catch{}
     });
-    if(source&&cfg.broadcastShowCities!==false){
+    if(source&&cfg.broadcastShowCities!==false&&cfg.broadcastHideAllLabels!==true){
       const minZoom=(value,fallback)=>Math.max(0,Math.min(23.99,Number.isFinite(+value)?+value:fallback));
       const maxZoom=(value,min)=>Math.max(min+.01,Math.min(24,Number.isFinite(+value)?+value:24));
       const cityMin=minZoom(cfg.broadcastCityMinZoom,3),cityMax=maxZoom(cfg.broadcastCityMaxZoom,cityMin);
