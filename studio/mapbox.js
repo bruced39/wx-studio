@@ -307,7 +307,7 @@
   // and text-field values even after their font/size were overridden.
   // This made the SAME place-label tier look different across zoom.
   function placeCollisionPadding(cfg,base){
-    if(cfg.broadcastAutoDeclutter===false)return base;
+    if(cfg.broadcastAutoDeclutter!==true)return base;
     const strength=Math.max(0,Math.min(2,
       Number.isFinite(+cfg.broadcastDeclutterStrength)?+cfg.broadcastDeclutterStrength:1.25));
     if(strength===0)return base;
