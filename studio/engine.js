@@ -670,6 +670,19 @@
   };
 
   /* ---------- Billerica Weather 7-day layout (fits the supplied template background) ---------- */
+  /* Distance from an icon's box top to its visible top (px, at this size) so icons can be aligned by what you SEE. */
+  const iconTopCache = {};
+  function iconVisTop(name, size) {
+    const key = name + '|' + size; if (key in iconTopCache) return iconTopCache[key];
+    let off = size * 0.12;
+    try {
+      const pad = Math.ceil(size * 0.5), N = Math.ceil(size + pad * 2), cv = document.createElement('canvas'); cv.width = N; cv.height = N; const cx = cv.getContext('2d', { willReadFrequently: true });
+      g.Icons.draw(cx, name, N / 2, N / 2, size, 0.5); const d = cx.getImageData(0, 0, N, N).data; let minY = -1;
+      for (let y = 0; y < N && minY < 0; y++) for (let x = 0; x < N; x++) if (d[(y * N + x) * 4 + 3] > 130) { minY = y; break; }
+      if (minY >= 0) off = minY - (N / 2 - size / 2);
+    } catch (err) { /* keep fallback */ }
+    return (iconTopCache[key] = off);
+  }
   E.build7DayBW = function (days) {
     const f = 1920 / 1672, S = v => v * f, objs = [];
     const COLS = [[25, 281], [298, 553], [573, 828], [846, 1102], [1119, 1375]], RC = [1394, 1650], LOWS = [[206, 370], [480, 643], [754, 917], [1029, 1192]];
@@ -686,7 +699,7 @@
     };
     days.slice(0, 5).forEach((d, i) => {
       const [x0, x1] = COLS[i], c = mk(d, i, x0, x1, 168, 240, i * 0.14, 948), add = c.add, cx = c.cx;
-      add('icon', { x: cx, y: S(370), size: c.w * 0.86, icon: d.icon }, 0.1);
+      { const sz = Math.round(c.w * 0.72), top = S(240) + 13 + 44; add('icon', { x: cx, y: top - iconVisTop(d.icon, sz) + sz / 2, size: sz, icon: d.icon }, 0.1); }
       if (d.tag2) add('text', { x: cx, y: S(468) - 26, text: String(d.tag2).toUpperCase(), size: 48, align: 'center', color: '#bfe6ff', weight: 800 }, 0.25);
       add('text', { x: cx, y: S(500), text: wrapText(String(d.phrase || '').toUpperCase(), 30, c.w - 30), size: 30, align: 'center', color: '#ffffff', weight: 700, font: 'display' }, 0.15);
       if (d.tag) add('text', { x: cx, y: S(677) - 44, text: String(d.tag).toUpperCase(), size: 52, align: 'center', color: '#ffd23f', weight: 800 }, 0.3);
@@ -696,7 +709,7 @@
     });
     [[5, 168, 243], [6, 556, 630]].forEach(([i, hy, by], n) => {
       const d = days[i]; if (!d) return; const c = mk(d, i, RC[0], RC[1], hy, hy + 72, 0.7 + n * 0.14, n ? 1070 : 628), add = c.add, cx = c.cx;
-      add('icon', { x: cx, y: S(by + 120), size: c.w * 0.8, icon: d.icon }, 0.1);
+      { const sz = Math.round(c.w * 0.72), top = S(hy + 72) + 13 + 14; add('icon', { x: cx, y: top - iconVisTop(d.icon, sz) + sz / 2, size: sz, icon: d.icon }, 0.1); }
       add('text', { x: cx, y: S(by + 226) - 34, text: (Number(d.pop) || 0) + '%', size: 36, align: 'center', color: GREEN, weight: 800 }, 0.25);
       add('text', { x: cx, y: S(by + 276) - 44, text: String(d.hi) + '°', size: 84, align: 'center', color: '#eef3fb', weight: 800 }, 0.2);
     });
