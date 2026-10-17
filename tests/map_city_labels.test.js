@@ -378,3 +378,64 @@ test('floating Map Style popup imports the renamed Place Labels accordion',()=>{
  for(const tier of ['City','Town','Village'])
   assert.ok(scenePanel.includes("placeTier('"+tier+"'"),tier+' settings should remain nested and collapsible');
 });
+
+test('all place text formatting uses the same settings below and above overview handoff',()=>{
+ const settings={...cfg,
+  broadcastCityEnabled:true,broadcastCityFont:'Roboto Bold',
+  broadcastCitySize:27,broadcastCityColor:'#fef3d5',
+  broadcastCityHaloColor:'#040505',broadcastCityHaloWidth:2.75,
+  broadcastCityUppercase:false,broadcastCityOpacity:.7,broadcastCitySpacing:1.9,
+  broadcastTownEnabled:true,broadcastTownFont:'Open Sans Bold',
+  broadcastTownSize:17,broadcastTownColor:'#ddeeff',
+  broadcastTownHaloColor:'#000000',broadcastTownHaloWidth:1.25,
+  broadcastTownUppercase:true,broadcastTownOpacity:.8,
+  broadcastOverviewLabelGap:2
+ };
+ for(const tier of ['City','Town']){
+  const low=labels.tierTextStyle(settings,tier,true);
+  const custom=labels.tierTextStyle(settings,tier,false);
+  for(const key of ['text-field','text-font','text-size','text-transform','text-letter-spacing',
+    'text-line-height','text-max-width','text-anchor','text-justify','text-offset']){
+   assert.deepEqual(low.layout[key],custom.layout[key],tier+' layout '+key);
+  }
+  for(const key of ['text-color','text-opacity','text-halo-color','text-halo-width','text-halo-blur'])
+   assert.deepEqual(low.paint[key],custom.paint[key],tier+' paint '+key);
+  const layer=labels.settlementLayer('test-'+tier,settings,'composite',
+    tier==='City'?['city']:['town'],0,7.5,null,24);
+  for(const key of ['text-field','text-font','text-size','text-transform','text-letter-spacing',
+    'text-line-height','text-max-width','text-anchor','text-justify','text-offset'])
+   assert.deepEqual(layer.layout[key],low.layout[key],tier+' rendered custom '+key);
+  for(const key of ['text-color','text-opacity','text-halo-color','text-halo-width','text-halo-blur'])
+   assert.deepEqual(layer.paint[key],low.paint[key],tier+' rendered custom '+key);
+  // Only intentional difference: the existing separately adjustable
+  // overview collision buffer versus close-up tier label spacing.
+  assert.equal(low.layout['text-padding'],2);
+  assert.ok(custom.layout['text-padding']>2);
+ }
+ const large=labels.settlementLayer('test-major',settings,'composite',['city'],0,3,'major',7.5);
+ assert.equal(large.layout['text-size'],27,'major-city fallback must respect exact saved city px size');
+});
+test('flat-color and dark coasts use saved black color instead of being whitened',()=>{
+ const body=between('  function installSeparatedWaterOutlines(','  function installHillshade(');
+ const build=new Function('ensureNaturalEarthLines',body+';return installSeparatedWaterOutlines;')(
+  (_map,kind)=>'natural-earth-'+kind);
+ const baseline={broadcastShowCoastline:true,broadcastCoastlineColor:'#050505',
+  broadcastCoastlineWidth:2,broadcastInlandWaterOutlines:false};
+ for(const mode of ['custom','dark','satellite']){
+  const layers=[];
+  build({}, {...baseline,broadcastBase:mode},layer=>layers.push(layer));
+  const coasts=layers.filter(l=>l.id==='wd-ocean-coastline'||l.id==='wd-minor-island-coastline');
+  assert.equal(coasts.length,2,mode+' includes ocean and minor islands');
+  for(const coast of coasts){
+   assert.equal(coast.paint['line-color'],'#050505',mode+' black coastline');
+   assert.equal(coast.paint['line-width'],2);
+  }
+  assert.equal(layers.some(l=>l.id==='wd-inland-lakes-outline'),false,
+   'inland outlines remain independently disabled');
+  const custom=[];
+  build({}, {...baseline,broadcastBase:mode,broadcastCoastlineColor:'#aabbcc'},
+    layer=>custom.push(layer));
+  assert.equal(custom.find(l=>l.id==='wd-ocean-coastline').paint['line-color'],'#aabbcc',
+   'explicit saved coastline color must be respected');
+ }
+});
