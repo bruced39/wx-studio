@@ -67,21 +67,51 @@
   // Independent label tiers. Legacy map styles with a single Label Font /
   // Label Color are migrated in ensureConfig BEFORE defaults are applied.
   // This preserves saved user typography rather than silently resetting it.
-  const LABEL_TIERS=['City','Town','Village'];
-  const LABEL_TIER_SUFFIXES={
-    Enabled:true,Font:'DIN Pro Bold',Color:'#ffffff',HaloColor:'#101820',
-    HaloWidth:2,Size:16,DensityPct:50,Population:'all',TextBackground:false,
-    BackgroundColor:'#101820',DropShadow:false,Uppercase:true,Opacity:1,
-    Spacing:1.25,Dots:false,DotColor:'#ffffff',DotOutlineColor:'#000000',
-    DotOutlineWidth:1,DotSize:3.5,DotNameOffset:4,DotShadow:false
+  // Single verified AguaceroWX *place-label* preset for both NEW map
+  // defaults and the user-operated Restore button. Do not duplicate these
+  // numbers in ui.js: differences between defaults and button caused user
+  // confusion in v0.9.58. These values were recorded from the reference
+  // City/Town/Village/Hamlet panels; roads, boundaries, other assets are
+  // intentionally outside this preset.
+  const LABEL_TIERS=['City','Town','Village','Hamlet'];
+  const AGUACERO_PLACE_LABELS={};
+  const reference={
+    City:{HaloWidth:2.5,DensityPct:97,MinZoom:2,MaxZoom:22,DotSize:3.5},
+    Town:{HaloWidth:2,DensityPct:96,MinZoom:2,MaxZoom:22,DotSize:3},
+    Village:{HaloWidth:1.5,DensityPct:96,MinZoom:6,MaxZoom:22,DotSize:2.5},
+    Hamlet:{HaloWidth:1,DensityPct:96,MinZoom:8,MaxZoom:22,DotSize:2}
+  };
+  const common={
+    Enabled:true,Font:'Roboto Bold',Size:16,Color:'#ffffff',
+    HaloColor:'#000000',Population:'all',TextBackground:false,
+    DropShadow:false,Uppercase:true,Dots:false,
+    DotColor:'#ffffff',DotOutlineColor:'#000000',DotOutlineWidth:1,
+    DotNameOffset:4,DotShadow:false,Opacity:1,Spacing:1.25,
+    BackgroundColor:'#101820'
   };
   for(const tier of LABEL_TIERS){
-    for(const [suffix,value] of Object.entries(LABEL_TIER_SUFFIXES))
-      WD_DEFAULTS['broadcast'+tier+suffix]=suffix==='Size'
-        ?(tier==='City'?20:tier==='Town'?16:13)
-        :suffix==='DensityPct'?(tier==='City'?60:tier==='Town'?40:20)
-        :suffix==='Enabled'?tier!=='Village':value;
+    for(const [suffix,value] of Object.entries({...common,...reference[tier]}))
+      AGUACERO_PLACE_LABELS['broadcast'+tier+suffix]=value;
   }
+  AGUACERO_PLACE_LABELS.broadcastShowCities=true;
+  AGUACERO_PLACE_LABELS.broadcastUppercaseLabels=true;
+  AGUACERO_PLACE_LABELS.broadcastKeepMajorCities=true;
+  // WX Studio's low-zoom label coverage controls are not part of the
+  // original Aguacero screenshot. Keep the established WX Studio baseline
+  // so the restore button is predictable if these sliders were altered.
+  AGUACERO_PLACE_LABELS.broadcastOverviewCityDensity='more';
+  AGUACERO_PLACE_LABELS.broadcastOverviewLabelGap=2;
+  AGUACERO_PLACE_LABELS.broadcastMajorCityRank=9;
+  // Respect the reference City minimum even for the native overview
+  // fallback. A user can explicitly lower this separately afterwards.
+  AGUACERO_PLACE_LABELS.broadcastMajorCityMinZoom=2;
+  Object.assign(WD_DEFAULTS,AGUACERO_PLACE_LABELS);
+  MB.AGUACERO_PLACE_LABELS=Object.freeze(AGUACERO_PLACE_LABELS);
+  MB.applyAguaceroPlaceLabels=cfg=>{
+    if(!cfg||typeof cfg!=='object')return cfg;
+    Object.assign(cfg,AGUACERO_PLACE_LABELS);
+    return cfg;
+  };
   MB.DEFAULTS = WD_DEFAULTS;
   MB.ensureConfig = bg => {
     bg = bg || {};
@@ -99,21 +129,49 @@
     // changing Cities never changes Towns or Villages afterwards.
     const legacyPct={sparse:20,normal:60,dense:80,maximum:100};
     const placeType=bg.broadcastPlaceDensity||WD_DEFAULTS.broadcastPlaceDensity;
-    for(const tier of LABEL_TIERS){
+    // A completely NEW map has no persisted place-label keys: do not
+    // manufacture old DIN font settings from compatibility fallbacks before
+    // the canonical Aguacero defaults are inserted below. Old saved maps
+    // DO contain label properties, and still require lossless migration.
+    const legacyHasLabels=[
+      'broadcastLabelFont','broadcastLabelColor','broadcastLabelHaloColor',
+      'broadcastLabelHaloWidth','broadcastLabelOpacity','broadcastLabelSpacing',
+      'broadcastLabelDensity','broadcastPlaceDensity','broadcastUppercaseLabels',
+      'broadcastCitySize','broadcastTownSize','broadcastVillageSize'
+    ].some(k=>Object.prototype.hasOwnProperty.call(bg,k))||
+      LABEL_TIERS.some(t=>['Enabled','Font','Size','Color','MinZoom'].some(
+        suffix=>Object.prototype.hasOwnProperty.call(bg,'broadcast'+t+suffix)));
+    if(legacyHasLabels)for(const tier of LABEL_TIERS){
       const p='broadcast'+tier;
+      const oldVillage=tier==='Hamlet'?'broadcastVillage':null;
+      // Old scene/preset labels must remain unchanged. Prior to the Hamlet
+      // category, hamlets were rendered with Village settings and zoom;
+      // copy those exact saved values rather than imposing new defaults.
+      const migrate=(suffix,fallback)=>oldVillage&&bg[oldVillage+suffix]!=null
+        ?bg[oldVillage+suffix]:fallback;
       const inherited={
-        Enabled:tier==='City'||(tier==='Town'&&placeType!=='cities')||
-          (tier==='Village'&&(placeType==='villages'||placeType==='all')),
-        Font:bg.broadcastLabelFont??WD_DEFAULTS.broadcastLabelFont,
-        Color:bg.broadcastLabelColor??WD_DEFAULTS.broadcastLabelColor,
-        HaloColor:bg.broadcastLabelHaloColor??WD_DEFAULTS.broadcastLabelHaloColor,
-        HaloWidth:bg.broadcastLabelHaloWidth??WD_DEFAULTS.broadcastLabelHaloWidth,
-        Uppercase:bg.broadcastUppercaseLabels??WD_DEFAULTS.broadcastUppercaseLabels,
-        Opacity:bg.broadcastLabelOpacity??WD_DEFAULTS.broadcastLabelOpacity,
-        Spacing:bg.broadcastLabelSpacing??WD_DEFAULTS.broadcastLabelSpacing,
-        DensityPct:legacyPct[bg.broadcastLabelDensity]??60,
-        Size:bg[p+'Size']??WD_DEFAULTS[p+'Size']
+        Enabled:migrate('Enabled',tier==='City'||(tier==='Town'&&placeType!=='cities')||
+          ((tier==='Village'||tier==='Hamlet')&&(placeType==='villages'||placeType==='all'))),
+        Font:migrate('Font',bg.broadcastLabelFont??WD_DEFAULTS.broadcastLabelFont),
+        Color:migrate('Color',bg.broadcastLabelColor??WD_DEFAULTS.broadcastLabelColor),
+        HaloColor:migrate('HaloColor',bg.broadcastLabelHaloColor??WD_DEFAULTS.broadcastLabelHaloColor),
+        HaloWidth:migrate('HaloWidth',bg.broadcastLabelHaloWidth??WD_DEFAULTS.broadcastLabelHaloWidth),
+        Uppercase:migrate('Uppercase',bg.broadcastUppercaseLabels??WD_DEFAULTS.broadcastUppercaseLabels),
+        Opacity:migrate('Opacity',bg.broadcastLabelOpacity??WD_DEFAULTS.broadcastLabelOpacity),
+        Spacing:migrate('Spacing',bg.broadcastLabelSpacing??WD_DEFAULTS.broadcastLabelSpacing),
+        DensityPct:migrate('DensityPct',legacyPct[bg.broadcastLabelDensity]??60),
+        Size:migrate('Size',bg[p+'Size']??WD_DEFAULTS[p+'Size'])
       };
+      if(oldVillage){
+        // Preserve all extra Village appearance and the inherited zoom range
+        // on old saved shows that never had an independent Hamlet panel.
+        for(const suffix of ['MinZoom','MaxZoom','Population','TextBackground',
+          'BackgroundColor','DropShadow','Dots','DotColor','DotOutlineColor',
+          'DotOutlineWidth','DotSize','DotNameOffset','DotShadow']){
+          if(bg[p+suffix]==null&&bg[oldVillage+suffix]!=null)
+            bg[p+suffix]=bg[oldVillage+suffix];
+        }
+      }
       for(const [suffix,value] of Object.entries(inherited))
         if(bg[p+suffix]==null)bg[p+suffix]=value;
     }
@@ -155,7 +213,7 @@
     const place=cfg.broadcastPlaceDensity||'towns';
     return {tier,
       enabled:!!val('Enabled',tier==='City'||(tier==='Town'&&place!=='cities')||
-        (tier==='Village'&&(place==='villages'||place==='all'))),
+        ((tier==='Village'||tier==='Hamlet')&&(place==='villages'||place==='all'))),
       font:val('Font',cfg.broadcastLabelFont||'DIN Pro Bold'),
       size:+val('Size',tier==='City'?20:tier==='Town'?16:13),
       color:val('Color',cfg.broadcastLabelColor||'#ffffff'),
@@ -229,7 +287,8 @@
     };
   }
   function settlementLayer(id,cfg,source,types,size,minzoom,rankMode,maxzoom){
-    const tier=types.includes('city')?'City':types.includes('town')?'Town':'Village',
+    const tier=types.includes('city')?'City':types.includes('town')?'Town':
+      types.includes('hamlet')?'Hamlet':'Village',
       style=tierTextStyle(cfg,tier,false),
       layer={id,type:'symbol',source,'source-layer':'place_label',minzoom:+minzoom||0,
         filter:tierFilter(cfg,tier,types,rankMode),
@@ -953,7 +1012,8 @@
     }
     installHillshade(map,cfg);installLandWaterFeatures(map,cfg,source);installTransportation(map,cfg,source);installOverlays(map,cfg);
     ['wd-major-city-labels','wd-city-labels','wd-town-labels','wd-small-place-labels',
-      'wd-city-dots','wd-town-dots','wd-village-dots'].forEach(id=>{
+      'wd-city-dots','wd-town-dots','wd-village-dots','wd-hamlet-dots',
+      'wd-hamlet-labels'].forEach(id=>{
       try{if(map.getLayer(id))map.removeLayer(id);}catch{}
     });
     if(source&&cfg.broadcastShowCities!==false){
@@ -961,7 +1021,8 @@
       const maxZoom=(value,min)=>Math.max(min+.01,Math.min(24,Number.isFinite(+value)?+value:24));
       const cityMin=minZoom(cfg.broadcastCityMinZoom,3),cityMax=maxZoom(cfg.broadcastCityMaxZoom,cityMin);
       const townMin=minZoom(cfg.broadcastTownMinZoom,5),townMax=maxZoom(cfg.broadcastTownMaxZoom,townMin);
-      const villageMin=minZoom(cfg.broadcastVillageMinZoom,7),villageMax=maxZoom(cfg.broadcastVillageMaxZoom,villageMin);
+      const villageMin=minZoom(cfg.broadcastVillageMinZoom,6),villageMax=maxZoom(cfg.broadcastVillageMaxZoom,villageMin);
+      const hamletMin=minZoom(cfg.broadcastHamletMinZoom,8),hamletMax=maxZoom(cfg.broadcastHamletMaxZoom,hamletMin);
       const majorMin=minZoom(cfg.broadcastMajorCityMinZoom,0);
       const customCityMin=nativeOverviewEnabled?Math.max(cityMin,nativeOverviewEnd):cityMin;
       const customTownMin=nativeOverviewEnabled?Math.max(townMin,nativeOverviewEnd):townMin;
@@ -974,10 +1035,14 @@
       // Dots share each tier's filter, coordinates and configured zoom range.
       addLabelDots(map,cfg,source,'City',['city'],majorMin,cityMax);
       addLabelDots(map,cfg,source,'Town',['town'],townMin,townMax);
-      addLabelDots(map,cfg,source,'Village',['village','hamlet'],villageMin,villageMax);
+      addLabelDots(map,cfg,source,'Village',['village'],villageMin,villageMax);
+      addLabelDots(map,cfg,source,'Hamlet',['hamlet'],hamletMin,hamletMax);
       if(tierAppearance(cfg,'Village').enabled)
-        add(settlementLayer('wd-small-place-labels',cfg,source,['village','hamlet'],
+        add(settlementLayer('wd-small-place-labels',cfg,source,['village'],
           cfg.broadcastVillageSize,villageMin,null,villageMax),'Village');
+      if(tierAppearance(cfg,'Hamlet').enabled)
+        add(settlementLayer('wd-hamlet-labels',cfg,source,['hamlet'],
+          cfg.broadcastHamletSize,hamletMin,null,hamletMax),'Hamlet');
       if(tierAppearance(cfg,'Town').enabled&&townMax>customTownMin)
         add(settlementLayer('wd-town-labels',cfg,source,['town'],
           cfg.broadcastTownSize,customTownMin,null,townMax),'Town');
