@@ -31,6 +31,9 @@ test('radar catalog distinguishes native Level II from 1-km MRMS, never register
  assert.equal(c.byId('nexrad_level2_velocity').palette,'radar/velocity');
  assert.equal(c.providerStatus,'catalog-only');
  assert.equal(c.byId('mrms_mosaic_reflectivity').historyHours,null);
+ assert.equal(c.byId('mrms_nws_4hour_image').historyHours,4);
+ assert.equal(c.byId('mrms_nws_4hour_image').palette,null);
+ assert.equal(c.byId('mrms_nws_4hour_image').status,'needs-browser-CORS-and-timestamp-validation');
  assert.ok(!('WXData' in env),'no feed should be auto-registered while decoder unavailable');
 });
 test('built-in palettes have valid ascending stops and product category assignments',()=>{
