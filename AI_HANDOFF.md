@@ -473,3 +473,7 @@ User specifically requested the previously recorded AguaceroWX **place labels** 
 - `tests/map_city_labels.test.js`: 24 mock/regression tests passed (the previous 22 plus two UI-specific tests). UI mock checks all four independent headings, input value change affecting only the selected style key, disabled tier controls still present, zoom/dot controls, and unchanged restore action; source JS syntax passed. **The actual live browser/popout visual has not yet been verified by user**; avoid claiming pixel-identical recreation from only the written video checklist.
 - **Files changed:** `studio/ui.js`, `studio/index.html`, `tests/map_city_labels.test.js`, `VERSION`, `AI_HANDOFF.md`. **No changes to `studio/mapbox.js`, `studio/engine.js`, `studio/export.js`, any cloud storage/auth or scene data, and no label settings values changed.** Keep later Claude commits by using fresh `main` compare and non-force fast-forward only.
 
+
+## v0.9.66 – rain/snow centered under clouds
+- studio/icons_hd.js only: rain/snow drops are stratified across the cloud width, shifted to offset slant drift, and scored for being centered; mostly-sunny cloud x0 120→112; snow flakes keep their horizontal stratum.
+- Not touched: ChatGPT's recent files (mapbox.js, label UI, tests).

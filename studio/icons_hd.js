@@ -143,19 +143,25 @@
   function rainLayout(p) {
     const key = [p.seed, p.n, p.x0, p.xw, p.top, p.len, p.spd, p.spdP, p.L, p.mask ? p.mask.k : ''].join('|'); if (rainLay[key]) return rainLay[key];
     const n = Math.max(4, Math.round(p.n * 0.5)), sz = Math.min(1.1, Math.max(0.9, p.L / 24)), tn = d => Math.tan(DROPS[d.si][2] * Math.PI / 180);
-    let cols = null, base = null;
+    let cols = null, base = null, mid = p.x0 + p.xw / 2;
     if (p.mask) {   /* drops are born under the cloud body and appear right at its underside */
       base = cloudBase(p.mask.k); if (!base) return null;
       const v = []; base.forEach((b, i) => { if (b >= 0) v.push(i); }); const lo = v[0] + 14, hi = v[v.length - 1] - 14; cols = v.filter(i => i >= lo && i <= hi);
+      mid = (v[0] + v[v.length - 1]) / 2;
+      /* every drop slants to the left as it falls, so start the drops toward the right: the falling shower is then centred under the cloud and stays inside its width */
+      const tnm = Math.abs(DROPS.reduce((q, d) => q + Math.tan(d[2] * Math.PI / 180), 0) / DROPS.length), avgB = cols.reduce((q, i) => q + base[i], 0) / cols.length;
+      const shift = Math.min(tnm * Math.max(90, p.top + p.len - (avgB - 8)), (cols[cols.length - 1] - cols[0]) * 0.45), keep = cols.filter(i => i >= cols[0] + shift); if (keep.length > 20) cols = keep;
     }
     const yb = d => base ? base[d.cx] : p.top, endY = p.top + p.len;
     const pos = (d, ph) => { const f = (ph * d.spd + d.off) % 1, y0 = yb(d) - 8, trav = base ? Math.max(90, endY - y0) : p.len; return base ? [d.x + tn(d) * trav * f, y0 + trav * f] : [d.x + tn(d) * p.len * (f - 0.5), p.top + p.len * f]; };
-    let best = null, bs = -1;
+    let best = null, bs = -1e9;
     for (let t = 0; t < 300; t++) {
       const r = rng(p.seed * 131 + t + 1), L = [];
-      for (let i = 0; i < n; i++) { const cx = cols ? cols[Math.floor(r() * cols.length)] : 0; L.push({ cx, x: cols ? cx + 0.5 : p.x0 + p.xw * r(), off: r(), spd: p.spd + (r() < p.spdP ? 1 : 0), h: (26 + 34 * r()) * sz, si: Math.floor(r() * DROPS.length) }); }
-      let ms = 1e9; for (let k = 0; k < 12; k++) { const P = L.map(d => pos(d, k / 12)); for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const dd = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]); if (dd < ms) ms = dd; } }
-      if (ms > bs) { bs = ms; best = L; }
+      /* stratified: one drop per equal-width slice of the cloud, so the rain is spread evenly left to right */
+      for (let i = 0; i < n; i++) { const u = (i + r()) / n, cx = cols ? cols[Math.min(cols.length - 1, Math.floor(u * cols.length))] : 0; L.push({ cx, x: cols ? cx + 0.5 : p.x0 + p.xw * u, off: r(), spd: p.spd + (r() < p.spdP ? 1 : 0), h: (26 + 34 * r()) * sz, si: Math.floor(r() * DROPS.length) }); }
+      let ms = 1e9, sx = 0, cnt = 0; for (let k = 0; k < 12; k++) { const P = L.map(d => pos(d, k / 12)); P.forEach(q => { sx += q[0]; cnt++; }); for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const dd = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]); if (dd < ms) ms = dd; } }
+      const score = ms - 0.8 * Math.abs(sx / cnt - mid);   /* well spaced AND centred under the cloud */
+      if (score > bs) { bs = score; best = L; }
     }
     return rainLay[key] = { L: best, pos, base };
   }
@@ -190,16 +196,16 @@
   const snowLay = {};
   function snowLayout(p) {
     const key = [p.seed, p.n, p.s0, p.s1, p.r0, p.r1].join('|'); if (snowLay[key]) return snowLay[key];
-    const r = rng(p.seed * 977 + 13), mk = () => ({ x0: 100 + 200 * r(), spd: 1 + (r() < 0.5 ? 1 : 0), off: r(), sw: p.s0 + p.s1 * r(), R: p.r0 + p.r1 * r(), dir: r() < 0.5 ? 1 : -1, rot0: r() * 6 });
+    const r = rng(p.seed * 977 + 13), mk = i => ({ x0: 100 + 200 * ((i + r()) / p.n), spd: 1 + (r() < 0.5 ? 1 : 0), off: r(), sw: p.s0 + p.s1 * r(), R: p.r0 + p.r1 * r(), dir: r() < 0.5 ? 1 : -1, rot0: r() * 6 });
     const pos = (d, ph) => { const u = ph * d.spd + d.off, f = u % 1; return [d.x0 + d.sw * Math.sin(TAU * u), 264 + 215 * f, f]; };
-    const K = 24, L = []; for (let i = 0; i < p.n; i++) L.push(mk());
+    const K = 24, L = []; for (let i = 0; i < p.n; i++) L.push(mk(i));
     const cache = L.map(d => { const a = []; for (let k = 0; k < K; k++) a.push(pos(d, k / K)); return a; });
     const vis = q => q[2] > 0.04 && q[2] < 0.92;
     const pairE = (ci, ri, cj, rj) => { let e = 0, T = (ri + rj) * 1.7 + 8; for (let k = 0; k < K; k++) { const a = ci[k], b = cj[k]; if (!vis(a) || !vis(b)) continue; const dd = T - Math.hypot(a[0] - b[0], a[1] - b[1]); if (dd > 0) e += dd * dd; } return e; };
     const eOf = (i, ci, ri) => { let e = 0; for (let j = 0; j < L.length; j++) if (j !== i) e += pairE(ci, ri, cache[j], L[j].R); return e; };
     for (let it = 0; it < 3000; it++) {
       const i = it % L.length, old = L[i], oc = cache[i], eo = eOf(i, oc, old.R); if (eo === 0) continue;
-      const nd = mk(), nc = []; for (let k = 0; k < K; k++) nc.push(pos(nd, k / K));
+      const nd = mk(i), nc = []; for (let k = 0; k < K; k++) nc.push(pos(nd, k / K));
       if (eOf(i, nc, nd.R) < eo) { L[i] = nd; cache[i] = nc; }
     }
     return snowLay[key] = { L, pos };
@@ -237,7 +243,7 @@
   const P_RAIN = RP({}), P_SHOWERS = RP({ n: 11, spd: 3, L: 20, w0: 1.8, w1: 1.4 }), P_DRIZZLE = RP({ n: 6, spd: 2, spdP: 0.5, L: 27, w0: 3.4, w1: 1.6, aS: 0.92, aG: 0.65, blur: 5 }), P_HEAVY = RP({ n: 75, spd: 5, spdP: 0.5, L: 34, w0: 2.8, w1: 2.4 });
   P_RAIN.n = 34;
   /* rain on his Mostly Sunny artwork */
-  const PM = (o) => ({ seed: 5, x0: 120, xw: 190, spd: 4, spdP: 0.4, top: 308, len: 165, fk: 5, fs: 1.08, L: 24, w0: 2.2, w1: 2, aS: 0.95, aG: 0.7, blur: 4, n: 30, ...o });
+  const PM = (o) => ({ seed: 5, x0: 112, xw: 190, spd: 4, spdP: 0.4, top: 308, len: 165, fk: 5, fs: 1.08, L: 24, w0: 2.2, w1: 2, aS: 0.95, aG: 0.7, blur: 4, n: 30, ...o });
 
   /* each icon: fn(ctx, phase 0..1) in 400-px art coordinates, origin at art point (200, oy) */
   const ICONS = [
