@@ -105,6 +105,50 @@
   // Respect the reference City minimum even for the native overview
   // fallback. A user can explicitly lower this separately afterwards.
   AGUACERO_PLACE_LABELS.broadcastMajorCityMinZoom=2;
+  // Additional label settings transcribed from the user's ORIGINAL
+  // AguaceroWX screen recording (17 Oct 2026), beyond the four 16px place
+  // classes. Enabled/disabled states are significant even for groups that
+  // are hidden by default. Changes are restricted to labels, never roads'
+  // geometry, boundaries, map camera, assets, or scene settings.
+  const otherReference={
+    Continent:{Enabled:false,Font:'Roboto Bold',Size:16,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1.5,MinZoom:.75,MaxZoom:3},
+    Country:{Enabled:false,Font:'Roboto Bold',Size:14,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:1,MaxZoom:10},
+    State:{Enabled:false,Font:'Roboto Bold',Size:12,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:3,MaxZoom:9},
+    County:{Enabled:false,Font:'Open Sans Regular',Size:10,Color:'#656565',HaloColor:'#ffffff',HaloWidth:1,MinZoom:7,MaxZoom:16},
+    Airport:{Enabled:true,Font:'Roboto Bold',Size:11,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:8,MaxZoom:24},
+    POI:{Enabled:false,Font:'Roboto Bold',Size:10,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:6,MaxZoom:24},
+    Subdivision:{Enabled:false,Font:'Roboto Bold',Size:11,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:10,MaxZoom:15},
+    Water:{Enabled:false,Font:'Roboto Bold',Size:10,Color:'#0a7eb9',HaloColor:'#ffffff',HaloWidth:1,MinZoom:13,MaxZoom:24},
+    Natural:{Enabled:false,Font:'Roboto Bold',Size:10,Color:'#339758',HaloColor:'#ffffff',HaloWidth:1,MinZoom:4,MaxZoom:24}
+  };
+  for(const [kind,values] of Object.entries(otherReference)){
+    for(const [key,value] of Object.entries({
+      DropShadow:false,TextBackground:false,...values
+    })) AGUACERO_PLACE_LABELS['broadcast'+kind+'Label'+key]=value;
+  }
+  // The reference video explicitly shows map-label caps and fading On,
+  // Road Signs and Road Names On. Road/shield LINE rendering is unchanged.
+  Object.assign(AGUACERO_PLACE_LABELS,{
+    broadcastLabelFade:true,
+    broadcastHideAllLabels:false,
+    broadcastShowRoadShields:true,
+    broadcastRoadShieldSize:1.2,
+    broadcastRoadShieldDensity:5,
+    broadcastRoadSignDensityPct:100,
+    broadcastRoadShieldMinZoom:6,
+    broadcastRoadShieldMaxZoom:24,
+    broadcastRoadSignInterstates:true,broadcastRoadSignUS:true,
+    broadcastRoadSignState:true,broadcastRoadSignOther:true,
+    broadcastRoadSignExits:true,
+    broadcastShowRoadLabels:true,
+    broadcastRoadLabelMinZoom:15,broadcastRoadLabelMaxZoom:24,
+    broadcastRoadNameFont:'Open Sans Regular',broadcastRoadNameScale:1,
+    broadcastRoadNameColor:'#ffffff',broadcastRoadNameHaloColor:'#000000',
+    broadcastRoadNameHaloWidth:1,broadcastRoadNameDensityPct:30,
+    broadcastRoadNameTextBackground:false,broadcastRoadNameDropShadow:false,
+    broadcastShowPOI:false,
+    broadcastShowNaturalLabels:false
+  });
   Object.assign(WD_DEFAULTS,AGUACERO_PLACE_LABELS);
   MB.AGUACERO_PLACE_LABELS=Object.freeze(AGUACERO_PLACE_LABELS);
   MB.applyAguaceroPlaceLabels=cfg=>{
@@ -193,7 +237,8 @@
     const m={
       'DIN Pro Bold':['DIN Pro Bold','Arial Unicode MS Bold'],'DIN Pro Medium':['DIN Pro Medium','Arial Unicode MS Regular'],
       'Roboto Bold':['Roboto Bold','Arial Unicode MS Bold'],'Roboto Medium':['Roboto Medium','Arial Unicode MS Regular'],
-      'Open Sans Bold':['Open Sans Bold','Arial Unicode MS Bold'],'Open Sans Semibold':['Open Sans Semibold','Arial Unicode MS Regular']
+      'Open Sans Bold':['Open Sans Bold','Arial Unicode MS Bold'],'Open Sans Semibold':['Open Sans Semibold','Arial Unicode MS Regular'],
+      'Open Sans Regular':['Open Sans Regular','Arial Unicode MS Regular']
     };
     return m[name]||['DIN Pro Bold','Arial Unicode MS Bold'];
   }
