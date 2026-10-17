@@ -716,3 +716,89 @@ test('recorded Airport and Road Name typography reaches native Mapbox symbol pai
  assert.equal(map.getLayer('airport-label').layout.visibility,'none');
  assert.equal(map.getLayer('road-label').layout.visibility,'none');
 });
+
+test('Aguacero video layout keeps separate header toggles, text/zoom/dot blocks, and all settings',()=>{
+ const start=ui.indexOf('        const aguaSlider=(key,label,');
+ const end=ui.indexOf('        const applyAguaLabels=()=>{',start);
+ assert.ok(start>=0&&end>start,'reference label layout helpers must exist');
+ const changes=[], b={
+   broadcastCityEnabled:true,broadcastTownEnabled:false,broadcastVillageEnabled:true,
+   broadcastCitySize:16,broadcastCityHaloWidth:2.5,broadcastCityDensityPct:97,
+   broadcastTownSize:16,broadcastTownHaloWidth:2,broadcastTownDensityPct:96,
+   broadcastHamletEnabled:true,broadcastCityDots:false,
+   broadcastRoadNameScale:1,broadcastShowRoadLabels:true,
+   broadcastCityMinZoom:2,broadcastCityMaxZoom:22
+ };
+ const S={mapAcc:{}};
+ const h=(tag,attrs={},...children)=>({
+   tag,attrs,children,checked:!!attrs.checked,value:attrs.value,
+   handlers:{},addEventListener(name,fn){this.handlers[name]=fn},
+   emit(name,payload){this.handlers[name]?.(payload||{stopPropagation(){}})}
+ });
+ const B=(key,type,opt)=>({tag:'control',key,type,options:opt});
+ const zoomRangeRow=(_b,label,min,max)=>({tag:'zoom',label,min,max});
+ const mapAccordion=(key,title,items)=>({tag:'advanced',key,title,items});
+ const ctor=new Function('h','b','S','B','commit','renderPanels','zoomRangeRow','mapAccordion','placeFonts',
+   ui.slice(start,end)+';return {placeTier,auxLabelTier,roadNameControls,roadSignControls};');
+ const ref=ctor(h,b,S,B,()=>changes.push('commit'),()=>changes.push('rerender'),
+    zoomRangeRow,mapAccordion,[['Roboto Bold','Roboto Bold']]);
+ const dig=(node,found=[])=>{
+   if(node&&typeof node==='object'){
+     found.push(node);
+     for(const child of node.children||node.items||[])dig(child,found);
+   }
+   return found;
+ };
+ for(const [tier,title] of [['City','Cities'],['Town','Towns'],
+   ['Village','Villages'],['Hamlet','Hamlets']]){
+   const group=ref.placeTier(tier,title),elements=dig(group);
+   assert.equal(group.tag,'details',tier+' must expand independently');
+   assert.ok(String(group.attrs.className).includes('agua-label-group'));
+   assert.equal(group.children[0].tag,'summary');
+   const toggle=group.children[0].children[1];
+   assert.equal(toggle.attrs.type,'checkbox',tier+' checkbox must be in title');
+   assert.equal(toggle.attrs.checked,b['broadcast'+tier+'Enabled']);
+   const labels=elements.filter(x=>x.tag==='control').map(x=>x.key);
+   for(const suffix of ['Font','Color','HaloColor','Population',
+     'TextBackground','DropShadow','Dots','DotColor','DotOutlineColor','DotShadow'])
+     assert.ok(labels.includes('broadcast'+tier+suffix),tier+' missing '+suffix);
+   const sliders=elements.filter(x=>x.tag==='input'&&x.attrs.type==='range');
+   const zoom=elements.find(x=>x.tag==='zoom');
+   assert.equal(zoom.min,'broadcast'+tier+'MinZoom');
+   assert.equal(zoom.max,'broadcast'+tier+'MaxZoom');
+   assert.ok(sliders.length>=6,'size, outline, density and dot sliders available');
+   const advanced=elements.find(x=>x.tag==='advanced');
+   assert.ok(advanced,'extra saved settings must remain accessible under Advanced');
+   assert.equal(advanced.title,'Advanced text options');
+ }
+ // Toggling a disabled Town group never silently overwrites stored styles.
+ const town=ref.placeTier('Town','Towns'),enable=town.children[0].children[1];
+ assert.equal(enable.checked,false);
+ enable.checked=true;
+ enable.emit('change');
+ assert.equal(b.broadcastTownEnabled,true);
+ assert.deepEqual(changes,['commit','rerender']);
+ assert.equal(b.broadcastTownSize,16);
+ assert.equal(b.broadcastCityHaloWidth,2.5);
+ const city=ref.placeTier('City','Cities');
+ const inputs=dig(city).filter(x=>x.tag==='input'&&x.attrs.type==='range');
+ const citySize=inputs.find(x=>x.attrs.value===16);
+ assert.ok(citySize,'16px size range renders current user value');
+ citySize.value='19';
+ citySize.emit('input');
+ assert.equal(b.broadcastCitySize,19);
+ citySize.emit('change');
+ assert.equal(b.broadcastTownSize,16,'slider edits do not alter Town style');
+ for(const node of [ref.roadNameControls(),ref.roadSignControls(),
+   ref.auxLabelTier('Airport','Airport Labels')]){
+   assert.equal(node.children[0].tag,'summary');
+   assert.equal(node.children[0].children[1].attrs.type,'checkbox');
+ }
+});
+test('Aguacero Map Style label layout CSS is scoped; renderer and restore button are untouched',()=>{
+ assert.ok(ui.includes("const aguaHeaderGroup=(key,title,enableKey,items"));
+ assert.ok(ui.includes("const aguaDotHeader=(tier,title)"));
+ assert.ok(ui.includes("mapAccordion('agua-advanced-'+tier.toLowerCase()"));
+ assert.ok(ui.includes("addGroup('Place Labels');"),'floating Map Style must still include labels');
+ assert.ok(ui.includes('g.MB.applyAguaceroPlaceLabels(b);'),'verified restore action preserved');
+});
