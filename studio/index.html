@@ -103,6 +103,39 @@ input[type=color]{width:42px;height:26px;padding:0;border:1px solid var(--line);
 .mapstyle-slider input[type=range]{flex:1;min-width:0}
 .mapstyle-slider-value{flex:0 0 45px;text-align:right;color:#c7cbd6;font-size:11px;font-variant-numeric:tabular-nums}
 .mapstyle-actions button{flex:1}
+/* AguaceroWX reference layout for Map Style > Place Labels ONLY.
+   Styling is scoped to label groups; Mapbox settings and renderers are not touched. */
+#mapStyleScroll .agua-label-group{background:#202125;border-color:#3a3c44;margin:9px 0}
+#mapStyleScroll .agua-label-group>.agua-label-summary{display:flex;align-items:center;gap:8px;
+  padding:9px 11px;background:#24262a;font-size:13px;font-weight:650;letter-spacing:0;
+  text-transform:none;color:#f1f2f5;list-style:none}
+#mapStyleScroll .agua-label-group>.agua-label-summary::-webkit-details-marker{display:none}
+#mapStyleScroll .agua-label-group>.agua-label-summary::before{content:'▸';color:#9fa5b2;
+  font-size:12px;line-height:1;transition:transform .1s}
+#mapStyleScroll .agua-label-group[open]>.agua-label-summary::before{transform:rotate(90deg)}
+#mapStyleScroll .agua-label-summary>span{flex:1;min-width:0}
+#mapStyleScroll .agua-label-summary>.agua-section-toggle{margin:0;flex:0 0 auto;
+  cursor:pointer;width:15px;height:15px;accent-color:#2674ef}
+#mapStyleScroll .agua-label-body{padding:11px 12px 12px}
+#mapStyleScroll .agua-label-body>.row{grid-template-columns:114px minmax(0,1fr);
+  gap:8px;align-items:center;margin-bottom:9px}
+#mapStyleScroll .agua-label-body>.row>label{font-size:12.5px;color:#f1f1f3}
+#mapStyleScroll .agua-value-row .mapstyle-slider{display:flex;align-items:center;gap:8px;min-width:0}
+#mapStyleScroll .agua-value-row .mapstyle-slider input[type=range]{flex:1;min-width:0}
+#mapStyleScroll .agua-value-row .mapstyle-slider-value{flex:0 0 39px;font-size:12px;
+  font-variant-numeric:tabular-nums;text-align:right;color:#d7dbe4}
+#mapStyleScroll .agua-zoom-section{border-top:1px solid #353941;margin:12px 0 9px;padding-top:9px}
+#mapStyleScroll .agua-section-title{font-weight:700;color:#f3f4f7;font-size:12.5px;margin-bottom:7px}
+#mapStyleScroll .agua-zoom-section .zoomrangerow{grid-template-columns:114px minmax(0,1fr)}
+#mapStyleScroll .agua-zoom-section .zoomrangepair{display:flex;gap:9px}
+#mapStyleScroll .agua-zoom-section .zoomrangebox{flex:1;min-width:0}
+#mapStyleScroll .agua-dot-heading{display:flex;align-items:center;justify-content:space-between;
+  border-top:1px solid #353941;margin:11px 0 9px;padding-top:9px;color:#f3f4f7;font-size:12.5px}
+#mapStyleScroll .agua-dot-heading>.row{display:flex;margin:0;gap:0}
+#mapStyleScroll .agua-dot-heading>.row>label{display:none}
+#mapStyleScroll .agua-label-body>.mapacc{background:#25272b}
+#mapStyleScroll .agua-label-body>.mapacc>summary{font-size:12.5px;background:#2a2c31;color:#cad0dc}
+
 #modalBg{position:fixed;inset:0;background:rgba(2,6,12,.72);display:none;align-items:center;justify-content:center;z-index:100}
 #modal{background:var(--p1);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:96vw;max-height:94vh;overflow:auto;min-width:420px}
 #modal h3{margin:0 0 10px;font:800 22px "Barlow Condensed",sans-serif}.mb{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
