@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.63` (`VERSION`).
+- **Last reviewed application version:** `0.9.65` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -463,3 +463,13 @@ User specifically requested the previously recorded AguaceroWX **place labels** 
 
 ## v0.9.64 – 7-Day icons: matched visual size (Claude)
 - engine.js `iconVis`/`iconFit`: each icon's box is scaled so its visible art has the same overall "mass" (geometric mean of solid-pixel width × height) – a round sun, a flat cloud and a cloud with rain/snow now look similar in size, still top-aligned (v0.9.62). Newly built 7-day scenes only; engine.js only, ChatGPT code untouched.
+
+## v0.9.65 — restore AguaceroWX video label-panel layout (ChatGPT, 2026-10-17)
+
+**User request:** The user reports the current map **labels look correct**, but the **Map Style → Place Labels settings LAYOUT** no longer looks like the original AguaceroWX video. Restore the recorded *visual arrangement only*, retaining all numeric settings, Mapbox label rendering, verified video restore button, saved styles and Claude's work. The relevant `MAP_STYLE_REFERENCE.md` specifies the video order: Road Signs, Road Names, Continent/Country/State/County, Cities/Towns/Villages/Hamlets and airport/other groups, with independent type sections, zoom, font, size, density, population, and dots.
+
+- `studio/ui.js` **UI only**: Inside the existing **Place Labels** accordion in the independent Map Style flyout, created scoped Aguacero-style expandable label cards whose headings have right-aligned independent enable checkboxes. Each City/Town/Village/Hamlet category displays Font, Size (with live numeric readout), Text/Outline colors, Outline width, Density %, Population, Background and Shadow, a separate Zoom range area with min/max number boxes, and a separate Place dots area (toggle plus dot style/offset settings). Existing Uppercase/Opacity/Spacing settings are kept under **Advanced text options** rather than removed. Disabled categories still show their controls for comparison to the original reference. Road Signs, Road Names, Airport, POI, Country, State, County, Water, Natural and other auxiliary label groups use the same heading/row layout with their existing controls. Existing `g.MB.applyAguaceroPlaceLabels(b)` restore button stays unchanged. No Mapbox settings names, values, or default presets are changed.
+- `studio/index.html` CSS only: Scoped styling of label-card headings, right-side checkboxes, numeric slider readouts, zoom range and dot dividers under `#mapStyleScroll`; no global interface or Mapbox rendering CSS changes.
+- `tests/map_city_labels.test.js`: 24 mock/regression tests passed (the previous 22 plus two UI-specific tests). UI mock checks all four independent headings, input value change affecting only the selected style key, disabled tier controls still present, zoom/dot controls, and unchanged restore action; source JS syntax passed. **The actual live browser/popout visual has not yet been verified by user**; avoid claiming pixel-identical recreation from only the written video checklist.
+- **Files changed:** `studio/ui.js`, `studio/index.html`, `tests/map_city_labels.test.js`, `VERSION`, `AI_HANDOFF.md`. **No changes to `studio/mapbox.js`, `studio/engine.js`, `studio/export.js`, any cloud storage/auth or scene data, and no label settings values changed.** Keep later Claude commits by using fresh `main` compare and non-force fast-forward only.
+
