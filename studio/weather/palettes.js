@@ -39,7 +39,7 @@ add({id:'radar/reflectivity',category:'radar',name:'Reflectivity — broadcast s
  productIds:['mrms_mosaic_reflectivity','nexrad_level2_base_reflectivity'],
  units:'dBZ',continuous:false,belowColor:null,
  note:'Initial NWS-inspired legend, not a certified NOAA or NEXRAD official LUT. Edit/save your custom table anytime.',
- stops:[[-10,'#000000'],[5,'#04e9e7'],[10,'#019ff4'],[15,'#0300f4'],
+ stops:[[5,'#04e9e7'],[10,'#019ff4'],[15,'#0300f4'],
  [20,'#02fd02'],[25,'#01c501'],[30,'#008e00'],[35,'#fdf802'],
  [40,'#e5bc00'],[45,'#fd9500'],[50,'#fd0000'],[55,'#d40000'],
  [60,'#bc0000'],[65,'#f800fd'],[70,'#9854c6'],[75,'#ffffff']]});
