@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.55` (`VERSION`).
+- **Last reviewed application version:** `0.9.56` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -389,3 +389,12 @@ User supplied v0.9.54 screenshot with no Place Labels section in the floating Ma
 - **User data:** No changes to `studio/mapbox.js`, label defaults, saved map presets, cloud storage, or font, size, color, density, halo, zoom settings. All current user choices remain unchanged. No Mapbox token touched. Browser popup visually awaits user confirmation.
 - **Claude overlap:** Only `studio/ui.js` (the shared popup wiring, one targeted lookup fix), `tests/map_city_labels.test.js`, `VERSION`, and `AI_HANDOFF.md` changed. `studio/engine.js` and `studio/index.html` untouched. Source branch started from v0.9.54 `5a2f471`; recheck main before fast-forward, no force-push.
 
+
+## v0.9.56 — consistent place typography across zoom; black flat-map coastlines (ChatGPT, 2026-10-16)
+
+**Starting main:** v0.9.55 `ec6f0e6`, verified before editing. User supplied screenshots and confirmed two remaining issues: City/Town label appearances differ as map zoom crosses the Mapbox-native/custom transition; Dark and Custom Color modes display **bright white shorelines** while other boundaries are black.
+
+- `studio/mapbox.js` now builds **both** the native low-zoom Mapbox settlement major/minor layers and the custom WX Studio high-zoom City/Town/Village symbol layers from ONE shared `tierTextStyle(cfg,tier,overview)` helper. Explicit same **text-field**, font stack, exact user pixel size, uppercase, letter spacing (0), line height (1.2), wrapping width (10), anchor/justify, offset, text fill, opacity, halo color/width, and optional shadow at every zoom. The independently configurable **Overview label gap** remains 2 px by default, while the high-zoom controls keep existing tier spacing; these affect collision density, NOT text appearance. The old synthetic major-city fallback's hidden **+2px font-size increase** was removed. Preserved the working low-zoom native baseline filters/collision priorities and the user-requested three independent category settings and cloud presets.
+- Removed the unintended exception in `installSeparatedWaterOutlines` that converted `broadcastCoastlineColor:'#050505'` (near-black) into `'#e0e4eb'` (pale white) whenever `broadcastBase` was Dark or Custom Color. All maps now honor the **same saved coastline color**, with near-black fallback; ocean & minor-island geometries/width remain untouched. User-selected nondefault coastline colors are respected in all map styles, and optional inland-water outlines stay independent.
+- `tests/map_city_labels.test.js` now includes 15 deterministic JS/Mapbox mock tests, explicitly comparing low/high zoom text layout and paint for Cities and Towns, checking that synthetic major-city fallback font size exactly matches the user's saved City size, verifying black coastlines on Satellite/Dark/Custom, and preservation of custom coastline color. The earlier 13 visibility, original-filter, density, UI, migration and optional dot tests all still pass.
+- **Files changed:** `studio/mapbox.js`, `tests/map_city_labels.test.js`, `VERSION`, `AI_HANDOFF.md`. **Claude overlap:** no changes to `studio/ui.js`, `studio/engine.js`, `studio/index.html`, cloud presets, scene objects, banner assets, or map navigation. No new repository-root files. **Important live QA:** ask user to check typography on the same city at 8 → 7.5 → 7 → 6 → 5 and flat globe coastline colors. Mock tests cannot fully simulate Mapbox glyph availability or WebGL collision layout.
