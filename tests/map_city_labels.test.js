@@ -226,6 +226,16 @@ test('overview city coverage increases eligible cities without ignoring collisio
   'a less prominent CITY from the original minor layer moves to the City layer');
  assert.equal(evalFilter(map.getLayer('settlement-minor-label').filter,minorCity),false,
   'the original minor layer must not render city text with Town typography');
+ // Both rank layers and the higher-zoom custom layers must apply the exact
+ // user-selected City and Town sizes at the zoom-7.5 handoff.
+ assert.equal(map.getLayer('settlement-major-label').layout['text-size'],conf.broadcastCitySize);
+ assert.equal(map.getLayer('settlement-minor-label').layout['text-size'],conf.broadcastTownSize);
+ assert.equal(map.getLayer('wd-city-labels').layout['text-size'],conf.broadcastCitySize);
+ assert.equal(map.getLayer('wd-town-labels').layout['text-size'],conf.broadcastTownSize);
+ assert.equal(map.getLayer('settlement-major-label').maxzoom,7.5);
+ assert.equal(map.getLayer('wd-city-labels').minzoom,7.5);
+ assert.equal(map.getLayer('settlement-minor-label').maxzoom,7.5);
+ assert.equal(map.getLayer('wd-town-labels').minzoom,7.5);
  assert.deepEqual(map.__wdOriginalOverviewFilters['settlement-major-label'],stockMajor,
   'original major filter cached unchanged');
  assert.deepEqual(map.__wdOriginalOverviewFilters['settlement-minor-label'],stockMinor,
