@@ -565,7 +565,16 @@
           }
           return mapAccordion('places-'+tier.toLowerCase(),title,items,tier==='City');
         };
+        const applyAguaLabels=()=>{
+          const base={Enabled:true,Font:'Roboto Bold',Size:16,Color:'#ffffff',HaloColor:'#000000',Population:'all',TextBackground:false,DropShadow:false,Uppercase:true,Dots:false,DotColor:'#ffffff',DotOutlineColor:'#000000',DotOutlineWidth:1,DotNameOffset:4,DotShadow:false};
+          const per={City:{HaloWidth:2.5,DensityPct:97,MinZoom:2,MaxZoom:22,DotSize:3.5},Town:{HaloWidth:2,DensityPct:96,MinZoom:2,MaxZoom:22,DotSize:3},Village:{HaloWidth:1.5,DensityPct:96,MinZoom:6,MaxZoom:22,DotSize:2.5}};
+          for(const t of Object.keys(per))for(const [k,v] of Object.entries(Object.assign({},base,per[t])))b['broadcast'+t+k]=v;
+          b.broadcastShowCities=true;b.broadcastUppercaseLabels=true;
+          commit();renderPanels();toast('AguaceroWX label settings applied (City, Town, Village)');
+        };
         p.append(mapAccordion('labels','Place Labels',[
+          h('div',{className:'btnrow'},h('button',{text:'Apply my AguaceroWX label settings',on:{click:applyAguaLabels}})),
+          h('div',{className:'hint',text:'Sets City, Town and Village to Roboto Bold 16 px, white text, black outline, density 96–97%, All places, zoom 2–22 (Villages 6–22). Hamlets are drawn with Villages.'}),
           B('broadcastShowCities','check',{label:'Show places',rerender:true}),
           B('broadcastKeepMajorCities','check',{label:'Keep major cities'}),
           B('broadcastOverviewCityDensity','select',{label:'Overview city coverage (below zoom 7.5)',options:[
