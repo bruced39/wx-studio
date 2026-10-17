@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.54` (`VERSION`).
+- **Last reviewed application version:** `0.9.55` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -378,4 +378,14 @@ User supplied live screenshots showing different apparent label fonts/sizes at z
 - `studio/ui.js` map-style preset loading now detects OLD saved presets without tier-font keys. It clears only currently initialized new-tier properties before copying the old preset settings, ensuring `MB.ensureConfig` migrates the preset's original font, color, halo, etc., rather than inheriting stale values from the current scene. Existing map cameras, objects and show asset IDs unchanged.
 - **Testing:** 12 deterministic mocked JS/Mapbox regression tests pass in `tests/map_city_labels.test.js`, including zero-city-label gap/stock native filter, font continuity at overview/high zoom, per-tier fonts/colors/sizes, old saved-style migration, separate enable toggles and optional dots. Production Mapbox WebGL/glyph rendering, text backgrounds and cloud-style loading still need the user's live QA.
 - **Claude overlap:** Started from latest `main` v0.9.53 commit `720fc0e`; touched **`studio/ui.js`** (the shared Map Style panel and targeted legacy-preset loader) and `studio/mapbox.js`, `tests/map_city_labels.test.js`, `VERSION`, `AI_HANDOFF.md`. Did NOT modify Claude's `studio/engine.js`, `studio/index.html`, cloud Storage clients, banners/templates/widgets, or map navigation. Recheck main and use non-force fast-forward before deployment.
+
+
+## v0.9.55 — restore Place Labels to Map Style popup (ChatGPT, 2026-10-16)
+
+User supplied v0.9.54 screenshot with no Place Labels section in the floating Map Style window. Root cause: `scenePanel()` correctly builds a `mapAccordion('labels','Place Labels', ...)` with separate collapsible Cities/Towns/Villages, but `renderMapStylePanel()` was still using `addGroup('City + Town Labels','Labels')`. The `byTitle` lookup therefore silently found nothing and dropped the entire section.
+
+- `studio/ui.js`: change the floating popup's group lookup to `addGroup('Place Labels')` so the existing accordion and nested subcategories appear at the proper position (after Water Features, before Terrain). No reimplementation or reset of the label panel.
+- `tests/map_city_labels.test.js`: regression check that the scene accordion title and popup lookup match, and Cities/Towns/Villages remain nested. All 13 existing/new mocked tests and JavaScript syntax checks passed.
+- **User data:** No changes to `studio/mapbox.js`, label defaults, saved map presets, cloud storage, or font, size, color, density, halo, zoom settings. All current user choices remain unchanged. No Mapbox token touched. Browser popup visually awaits user confirmation.
+- **Claude overlap:** Only `studio/ui.js` (the shared popup wiring, one targeted lookup fix), `tests/map_city_labels.test.js`, `VERSION`, and `AI_HANDOFF.md` changed. `studio/engine.js` and `studio/index.html` untouched. Source branch started from v0.9.54 `5a2f471`; recheck main before fast-forward, no force-push.
 
