@@ -33,15 +33,15 @@ for(const sat of goes)for(const sector of sectors){
   projection:'GOES fixed grid',retentionHours:null,
   caveat:'Mesoscale sectors M1/M2 MOVE: derive footprint from each file, not a fixed map bbox.'};
  const products=[
-  {id:'abi_c02',label:'ABI 0.64µm Visible — native 0.5 km',prefix:'ABI-L2-CMIP'+sector.code,
+  {id:'abi_c02',label:'ABI 0.64µm Visible — native 0.5 km',prefix:'ABI-L2-CMIP'+(sector.code.startsWith('M')?'M':sector.code),
    channel:'C02',resolutionKm:0.5,palette:null,display:'single-band grayscale reflectance'},
-  {id:'abi_c13',label:'ABI 10.3µm Clean IR — native 2 km',prefix:'ABI-L2-CMIP'+sector.code,
+  {id:'abi_c13',label:'ABI 10.3µm Clean IR — native 2 km',prefix:'ABI-L2-CMIP'+(sector.code.startsWith('M')?'M':sector.code),
    channel:'C13',resolutionKm:2,palette:'satellite/ir-enhanced',display:'brightness temperature'},
-  {id:'abi_multichannel',label:'ABI multi-channel color foundation',prefix:'ABI-L2-MCMIP'+sector.code,
+  {id:'abi_multichannel',label:'ABI multi-channel color foundation',prefix:'ABI-L2-MCMIP'+(sector.code.startsWith('M')?'M':sector.code),
    channel:'multiple',resolutionKm:'0.5–2',palette:null,display:'derived GeoColor/RGB; no scalar LUT'},
-  {id:'abi_cloud_top_temp',label:'Cloud Top Temperature (ACHT)',prefix:'ABI-L2-ACHT'+sector.code,
+  {id:'abi_cloud_top_temp',label:'Cloud Top Temperature (ACHT)',prefix:'ABI-L2-ACHT'+(sector.code.startsWith('M')?'M':sector.code),
    channel:'derived',resolutionKm:2,palette:'satellite/cloud-top-temperature',display:'kelvin'},
-  {id:'abi_cloud_top_height',label:'Cloud Top Height (ACHA)',prefix:'ABI-L2-ACHA'+sector.code,
+  {id:'abi_cloud_top_height',label:'Cloud Top Height (ACHA)',prefix:'ABI-L2-ACHA'+(sector.code.startsWith('M')?'M':sector.code),
    channel:'derived',resolutionKm:2,palette:'satellite/cloud-top-height',display:'meters'}
  ];
  for(const p of products)push({...common,...p,id:sat.id+'_'+sector.id+'_'+p.id,
