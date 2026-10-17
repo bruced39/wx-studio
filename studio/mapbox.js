@@ -122,7 +122,19 @@
     // changing Cities never changes Towns or Villages afterwards.
     const legacyPct={sparse:20,normal:60,dense:80,maximum:100};
     const placeType=bg.broadcastPlaceDensity||WD_DEFAULTS.broadcastPlaceDensity;
-    for(const tier of LABEL_TIERS){
+    // A completely NEW map has no persisted place-label keys: do not
+    // manufacture old DIN font settings from compatibility fallbacks before
+    // the canonical Aguacero defaults are inserted below. Old saved maps
+    // DO contain label properties, and still require lossless migration.
+    const legacyHasLabels=[
+      'broadcastLabelFont','broadcastLabelColor','broadcastLabelHaloColor',
+      'broadcastLabelHaloWidth','broadcastLabelOpacity','broadcastLabelSpacing',
+      'broadcastLabelDensity','broadcastPlaceDensity','broadcastUppercaseLabels',
+      'broadcastCitySize','broadcastTownSize','broadcastVillageSize'
+    ].some(k=>Object.prototype.hasOwnProperty.call(bg,k))||
+      LABEL_TIERS.some(t=>['Enabled','Font','Size','Color','MinZoom'].some(
+        suffix=>Object.prototype.hasOwnProperty.call(bg,'broadcast'+t+suffix)));
+    if(legacyHasLabels)for(const tier of LABEL_TIERS){
       const p='broadcast'+tier;
       const oldVillage=tier==='Hamlet'?'broadcastVillage':null;
       // Old scene/preset labels must remain unchanged. Prior to the Hamlet
