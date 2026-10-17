@@ -494,3 +494,6 @@ User specifically requested the previously recorded AguaceroWX **place labels** 
 - Any object (icons, H/L, fronts, text, images…) can glide along a path: Object tab → "Motion path" → "Move along a path". Drag the lettered handles on the stage; "+ Add stop" adds C, D, …; start time, travel time, ease, smooth curve, repeat.
 - Data: `o.move = {on, pts:[[dx,dy]…] (screen-px offsets from the object = A), start, dur, ease, smooth, loop}`. Engine: `E.moveDefault/moveSamples/moveOffset`; applied in `drawObjectAnimated` (shifts a copy of the object, so shadows/Layer Style follow). Editor shows A at its normal spot with the route + handles; motion plays in Scene/Show/Present/export.
 - Files: studio/engine.js, studio/ui.js. Not touched: ChatGPT's mapbox.js / label work / tests.
+
+## v0.9.69 – "+ Map scene" works with no map scene
+- studio/ui.js `#bAddMap`: if the current scene has no map, copies another map scene's map, else uses the saved/built-in default map. No change to other files; ChatGPT's files untouched.

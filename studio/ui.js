@@ -1752,7 +1752,7 @@
     modal('Export image', h('div', {}, fld('Scenes', what), fld('Size', size), fld('Format', fmt), fld('Crop position', pos), hint, msg, res), [h('button', { text: 'Close', on: { click: closeModal } }), go]);
   }
   $('#bImg').onclick = imageDialog;
-  $('#bAddMap').onclick = () => { const src = cur(); if (!isMap(src.bg)) { toast('Select a scene that has a map first'); return; } const sc = E.newScene({ name: 'Map ' + (S.show.scenes.length + 1), bg: JSON.parse(JSON.stringify(src.bg)), title: { show: false, text: '', sub: '' } }); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); toast('New scene with the same map – draw on it'); };
+  $('#bAddMap').onclick = () => { const cs = cur(), other = S.show.scenes.find(x => isMap(x.bg)), fresh = isMap(cs.bg) ? null : (other ? null : defaultMapBg()), srcBg = isMap(cs.bg) ? cs.bg : (other ? other.bg : fresh); const sc = E.newScene({ name: 'Map ' + (S.show.scenes.length + 1), bg: JSON.parse(JSON.stringify(srcBg)), title: { show: false, text: '', sub: '' } }); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); toast(isMap(cs.bg) ? 'New scene with the same map – draw on it' : (other ? 'New map scene (copied from your other map scene) – draw on it' : 'New map scene with your default map – draw on it')); };
   $('#bExport').onclick = exportDialog;
 
   /* ---------- top bar ---------- */
