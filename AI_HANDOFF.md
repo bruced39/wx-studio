@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.57` (`VERSION`).
+- **Last reviewed application version:** `0.9.60` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -418,3 +418,21 @@ User supplied v0.9.54 screenshot with no Place Labels section in the floating Ma
 - engine.js: `E.registerVideo/E.vid/E.seekVideo`, `drawBackground` video branch, live playback sync (`syncVideo`; thumbnails pass `thumb:true`), `prepareFrame` now also seeks video backgrounds frame-exactly for MP4 export/image export. `E.exporting` flag set in export.js (`X.run` wrapper, cleared before the realtime-WebM fallback) and in imageDialog.
 - Audio not included. Tested headless with WebM (upload, background, image export at scene end = last video frame, reload persistence, realtime WebM export); H.264 WebCodecs frame-seek export path not testable headless – please confirm in Chrome/Edge.
 - Did not touch ChatGPT's map/label/cloud code.
+
+## v0.9.60 — AguaceroWX place-label defaults + one canonical restore button (ChatGPT, 2026-10-16)
+
+**Starting latest main** was Claude's **v0.9.59 video backgrounds**, commit `f262b1b`. It was detected while building the first draft against v0.9.58. Rebased all changes on the new commit instead of overwriting his code. Claude's Videos tab, video import, engine/export/video handling, cloud assets and all map/scene navigation stay intact.
+
+User specifically requested the previously recorded AguaceroWX **place labels** to become the default for new WX Studio/Weather Director map scenes while keeping Claude's one-click `Apply my AguaceroWX label settings` button to restore those defaults after experiments. Verified reference as recorded from the user's Aguacero screenshots and Claude's v0.9.58 handoff (no Mapbox label system exists in the separate WxFusion forecasting repository).
+
+- **One shared source of truth**, in `studio/mapbox.js`: `MB.AGUACERO_PLACE_LABELS`, used by both `MB.DEFAULTS` (new scenes / Reset all to defaults) and `MB.applyAguaceroPlaceLabels(bg)` (restore button). UI no longer duplicates numeric defaults. Common tiers: Enabled, **Roboto Bold 16px**, white text `#ffffff`, black outline `#000000`, uppercase, All population, backgrounds/shadows/dots OFF.
+- **Cities:** halo 2.5px, density 97%, zoom 2–22, inactive dot size 3.5px.
+- **Towns:** halo 2px, density 96%, zoom 2–22, inactive dot size 3px.
+- **Villages:** halo 1.5px, density 96%, zoom 6–22, inactive dot size 2.5px.
+- **Hamlets (new independent accordion and renderer):** halo 1px, density 96%, zoom 8–22, inactive dot size 2px. Previously hamlets were bundled with Villages and could not have their own font/size/zoom. Separate `wd-hamlet-labels` and `wd-hamlet-dots` use a `type:'hamlet'` Mapbox filter; Village layer now handles `type:'village'` exclusively. No duplicated names.
+- Low-zoom major city minimum restored to 2 (not the unrelated old 0) when applying Aguacero reference. Overview coverage/gap/rank use the existing WX Studio controls (More cities, 2px gap, rank9), as these **were not specified** in the Aguacero screenshot; both defaults and button share these WX-specific values. Existing global label values remain for compatibility.
+- **Backwards compatibility:** `MB.ensureConfig` distinguishes fresh new map configs (fill Aguacero defaults directly) from old saved shows with legacy typography (migrate their original values, never overwrite selected fonts/colors/zoom). Old saved styles without an independent Hamlet tier inherit the saved Village appearance and zoom, not arbitrary settings in the current scene. `studio/ui.js` resets only temporary tier-label fields before importing saved styles, preventing stale cross-scene state. Existing modern cloud presets retain all their selected tier fields. The user's active map and saved cloud data are not bulk-reset by deployment; pressing the restore button changes only label settings.
+- **Tests:** `tests/map_city_labels.test.js` increased to 20 deterministic tests. Includes exact default/button equality for all four tiers, button restoring fields but not other scene settings, fresh map initialisation, old custom style preservation, old preset import, separate Hamlet/Village filters and visibility, plus the 15 existing zoom, placement, typography and coastline tests. All pass in V8 mock runner; JS syntax checked. **Live WebGL Mapbox rendering requires user validation.**
+- **Touched:** `studio/mapbox.js`, `studio/ui.js` (targeted label panel + saved style import, preserving all Claude video additions), `tests/map_city_labels.test.js`, `VERSION`, `AI_HANDOFF.md`. **Untouched:** `studio/engine.js`, `studio/export.js`, `studio/index.html`, cloud client code, scripts/config/secrets.
+- **Scope:** Only Map Style → Place Labels / City-Town-Village-Hamlet settings. Airport, road, country, water and other label-category configurations not part of this release. Do not claim that these non-place categories now match Aguacero one-to-one.
+
