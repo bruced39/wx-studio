@@ -981,24 +981,25 @@
   let vidList = [];
   const vidDB = () => new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-vids', 1); r.onupgradeneeded = () => r.result.createObjectStore('v', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } });
   const vidTx = async (mode, fn) => { const d = await vidDB(); return new Promise((res, rej) => { const t = d.transaction('v', mode), s = t.objectStore('v'), q = fn(s); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
-  async function restoreVideos() { try { vidList = (await vidTx('readonly', s => s.getAll())) || []; vidList.sort((a, b) => b.t - a.t); vidList.forEach(r => E.registerVideo(r.id, r.blob, r.name)); if (S.tab === 'bgs') renderPanels(); } catch (e) { /* IndexedDB unavailable */ } }
+  async function restoreVideos() { try { vidList = (await vidTx('readonly', s => s.getAll())) || []; vidList.sort((a, b) => b.t - a.t); vidList.forEach(r => (r.kind === 'gif' ? E.registerGif : E.registerVideo)(r.id, r.blob, r.name)); if (S.tab === 'bgs') renderPanels(); } catch (e) { /* IndexedDB unavailable */ } }
   async function addVideoFiles(files) {
     for (const f of files) {
-      if (!/^video\//.test(f.type) && !/\.(mp4|m4v|mov|webm)$/i.test(f.name)) { toast('Not a video file: ' + f.name); continue; }
-      const rec = { id: 'vid_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: f.name.replace(/\.[^.]+$/, ''), blob: f, t: Date.now() };
-      E.registerVideo(rec.id, f, rec.name); vidList.unshift(rec);
+      const isGif = f.type === 'image/gif' || /\.gif$/i.test(f.name);
+      if (!isGif && !/^video\//.test(f.type) && !/\.(mp4|m4v|mov|webm)$/i.test(f.name)) { toast('Not a video or GIF file: ' + f.name); continue; }
+      const rec = { id: 'vid_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: f.name.replace(/\.[^.]+$/, ''), blob: f, t: Date.now(), kind: isGif ? 'gif' : 'video' };
+      (isGif ? E.registerGif : E.registerVideo)(rec.id, f, rec.name); vidList.unshift(rec);
       try { await vidTx('readwrite', s => s.put(rec)); } catch (e) { toast('Could not save the video in this browser (it will work until you reload)'); }
     }
     renderPanels();
   }
   function useVideo(rec) {
-    const sc = cur(), v = E.videos[rec.id]; const go = () => { const asp = v.w / v.h; sc.bg = Object.assign({}, sc.bg, { type: 'video', vid: rec.id, vidStart: 0, vidLoop: false, fit: Math.abs(asp - 16 / 9) < 0.04 ? 'fill' : 'blur', kenburns: false }); if (v.dur > 0) sc.duration = Math.max(1, Math.round(v.dur * 10) / 10); commit(); refreshAll(); toast('Video set as this scene’s background (scene length matched to the video)'); };
-    if (v.ok) go(); else { toast('Loading video…'); v.el.addEventListener('loadedmetadata', () => setTimeout(go, 50), { once: true }); }
+    const sc = cur(), v = E.videos[rec.id]; if (v.err) { toast('This GIF could not be read: ' + v.err); return; } const go = () => { const asp = v.w / v.h; sc.bg = Object.assign({}, sc.bg, { type: 'video', vid: rec.id, vidStart: 0, vidLoop: !!v.gif, fit: Math.abs(asp - 16 / 9) < 0.04 ? 'fill' : 'blur', kenburns: false }); if (v.dur > 0) sc.duration = Math.max(1, Math.round(v.dur * 10) / 10); commit(); refreshAll(); toast('Video set as this scene’s background (scene length matched to the video)'); };
+    if (v.ok) go(); else if (v.gif) { toast('Reading GIF frames…'); const iv = setInterval(() => { if (v.ok) { clearInterval(iv); go(); } else if (v.err) { clearInterval(iv); toast('This GIF could not be read: ' + v.err); } }, 150); } else { toast('Loading video…'); v.el.addEventListener('loadedmetadata', () => setTimeout(go, 50), { once: true }); }
   }
   function videosPanel(p) {
-    p.append(h('div', { className: 'hint', text: 'Upload an MP4 (for example a satellite/radar loop saved from AguaceroWX) and use it as a scene background. Videos are stored in this browser only – they are NOT inside the show file, so on another computer add them again. Sound is not included.' }));
-    const fi = h('input', { type: 'file', accept: 'video/*,.mp4,.m4v,.mov,.webm', multiple: true, style: 'display:none', onchange: e => { addVideoFiles([...e.target.files]); e.target.value = ''; } });
-    const dz = h('div', { id: 'drop', text: 'Upload videos: click to browse or drop MP4 files here' }); dz.onclick = () => fi.click();
+    p.append(h('div', { className: 'hint', text: 'Upload an MP4 or an animated GIF (for example a satellite/radar loop from AguaceroWX) and use it as a scene background. GIFs keep looping for as long as the scene lasts. Videos are stored in this browser only – they are NOT inside the show file, so on another computer add them again. Sound is not included.' }));
+    const fi = h('input', { type: 'file', accept: 'video/*,image/gif,.mp4,.m4v,.mov,.webm,.gif', multiple: true, style: 'display:none', onchange: e => { addVideoFiles([...e.target.files]); e.target.value = ''; } });
+    const dz = h('div', { id: 'drop', text: 'Upload videos or animated GIFs: click to browse or drop files here' }); dz.onclick = () => fi.click();
     ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('hov'); })); dz.addEventListener('dragleave', () => dz.classList.remove('hov'));
     dz.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('hov'); addVideoFiles([...e.dataTransfer.files]); });
     p.append(fi, dz);

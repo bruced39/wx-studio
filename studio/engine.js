@@ -75,10 +75,73 @@
     el.onloadedmetadata = () => { v.ok = true; v.dur = el.duration || 0; v.w = el.videoWidth; v.h = el.videoHeight; if (E.onAsset) E.onAsset(); };
     el.src = URL.createObjectURL(blob); return v;
   };
+  /* ---- animated GIF: decoded to frames in memory (works in every browser; deterministic for export) ---- */
+  function gifLzw(minCode, data, npix) {
+    const clear = 1 << minCode, eoi = clear + 1; let size = minCode + 1, mask = (1 << size) - 1, next = eoi + 1;
+    const prefix = new Uint16Array(4096), suffix = new Uint8Array(4096), stack = new Uint8Array(4097), out = new Uint8Array(npix);
+    for (let i = 0; i < clear; i++) suffix[i] = i;
+    let op = 0, bits = 0, nb = 0, di = 0, old = -1, first = 0;
+    while (op < npix) {
+      while (nb < size && di < data.length) { bits |= data[di++] << nb; nb += 8; }
+      if (nb < size) break;
+      const code = bits & mask; bits >>= size; nb -= size;
+      if (code === clear) { size = minCode + 1; mask = (1 << size) - 1; next = eoi + 1; old = -1; continue; }
+      if (code === eoi) break;
+      if (old === -1) { out[op++] = suffix[code]; old = code; first = suffix[code]; continue; }
+      let sp = 0, c = code;
+      if (code >= next) { stack[sp++] = first; c = old; }
+      while (c >= clear) { stack[sp++] = suffix[c]; c = prefix[c]; }
+      first = suffix[c]; stack[sp++] = first;
+      if (next < 4096) { prefix[next] = old; suffix[next] = first; next++; if ((next & mask) === 0 && next < 4096) { size++; mask = (1 << size) - 1; } }
+      old = code;
+      while (sp > 0 && op < npix) out[op++] = stack[--sp];
+    }
+    return out;
+  }
+  function gifDecode(buf) {
+    const d = new Uint8Array(buf); if (d[0] !== 0x47 || d[1] !== 0x49 || d[2] !== 0x46) throw new Error('Not a GIF file');
+    let p = 6; const W = d[p] | d[p + 1] << 8, H = d[p + 2] | d[p + 3] << 8, fl = d[p + 4]; p += 7;
+    let gct = null; if (fl & 0x80) { const n = 2 << (fl & 7); gct = d.subarray(p, p + n * 3); p += n * 3; }
+    const start = p; let count = 0, q = start;           // pass 1: count frames to size the memory budget
+    while (q < d.length) { const b = d[q++]; if (b === 0x3B) break; if (b === 0x21) { q++; let s; while ((s = d[q++])) q += s; } else if (b === 0x2C) { const pk = d[q + 8]; q += 9; if (pk & 0x80) q += (2 << (pk & 7)) * 3; q++; let s; while ((s = d[q++])) q += s; count++; } else break; }
+    if (!count) throw new Error('No frames in GIF');
+    const scale = Math.min(1, 1920 / W, Math.sqrt(260e6 / (4 * W * H * count))), sw = Math.max(1, Math.round(W * scale)), sh = Math.max(1, Math.round(H * scale));
+    const comp = document.createElement('canvas'); comp.width = W; comp.height = H; const cx = comp.getContext('2d', { willReadFrequently: true });
+    const tmp = document.createElement('canvas'), tx = tmp.getContext('2d'); const frames = [], delays = [];
+    let gce = null, prevDisp = 0, prevRect = null, saved = null; p = start;
+    while (p < d.length) {
+      const b = d[p++]; if (b === 0x3B) break;
+      if (b === 0x21) { const lab = d[p++]; if (lab === 0xF9) gce = { disp: (d[p + 1] >> 2) & 7, trans: (d[p + 1] & 1) ? d[p + 4] : -1, delay: (d[p + 2] | d[p + 3] << 8) * 10 }; let s; while ((s = d[p++])) p += s; }
+      else if (b === 0x2C) {
+        const fx = d[p] | d[p + 1] << 8, fy = d[p + 2] | d[p + 3] << 8, fw = d[p + 4] | d[p + 5] << 8, fh = d[p + 6] | d[p + 7] << 8, pk = d[p + 8]; p += 9;
+        let ct = gct; if (pk & 0x80) { const n = 2 << (pk & 7); ct = d.subarray(p, p + n * 3); p += n * 3; }
+        const minCode = d[p++], chunks = []; let tot = 0, s; while ((s = d[p++])) { chunks.push(d.subarray(p, p + s)); p += s; tot += s; }
+        const data = new Uint8Array(tot); let o = 0; chunks.forEach(c => { data.set(c, o); o += c.length; });
+        let idx = gifLzw(minCode, data, fw * fh);
+        if (pk & 0x40) { const re = new Uint8Array(fw * fh); let r = 0; for (const [st, step] of [[0, 8], [4, 8], [2, 4], [1, 2]]) for (let y = st; y < fh; y += step, r++) re.set(idx.subarray(r * fw, (r + 1) * fw), y * fw); idx = re; }
+        if (prevDisp === 2 && prevRect) cx.clearRect(prevRect.x, prevRect.y, prevRect.w, prevRect.h); else if (prevDisp === 3 && saved) cx.putImageData(saved, 0, 0);
+        if (gce && gce.disp === 3) saved = cx.getImageData(0, 0, W, H);
+        const im = new ImageData(fw, fh), px = im.data, tr = gce ? gce.trans : -1;
+        for (let i = 0; i < idx.length; i++) { const v = idx[i], j = i * 4; if (v === tr || !ct) { px[j + 3] = 0; continue; } px[j] = ct[v * 3]; px[j + 1] = ct[v * 3 + 1]; px[j + 2] = ct[v * 3 + 2]; px[j + 3] = 255; }
+        tmp.width = fw; tmp.height = fh; tx.putImageData(im, 0, 0); cx.drawImage(tmp, fx, fy);
+        const fc = document.createElement('canvas'); fc.width = sw; fc.height = sh; fc.getContext('2d').drawImage(comp, 0, 0, sw, sh);
+        let dl = gce ? gce.delay : 100; if (dl < 20) dl = 100; frames.push(fc); delays.push(dl);
+        prevDisp = gce ? gce.disp : 0; prevRect = { x: fx, y: fy, w: fw, h: fh }; gce = null;
+      } else break;
+    }
+    return { w: sw, h: sh, frames, delays };
+  }
+  E.registerGif = function (id, blob, name) {
+    let v = E.videos[id]; if (v && v.blob === blob) return v;
+    v = E.videos[id] = { id, name: name || id, blob, gif: true, ok: false, dur: 0, w: 0, h: 0, frames: [], starts: [] };
+    blob.arrayBuffer().then(buf => { const g2 = gifDecode(buf); let t = 0; v.starts = g2.delays.map(dl => { const s = t; t += dl / 1000; return s; }); v.frames = g2.frames; v.dur = t; v.w = g2.w; v.h = g2.h; v.ok = true; if (E.onAsset) E.onAsset(); }).catch(err => { v.err = String(err && err.message || err); if (E.onAsset) E.onAsset(); });
+    return v;
+  };
+  const gifFrame = (v, tt) => { let lo = 0, hi = v.starts.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (v.starts[m] <= tt) lo = m; else hi = m - 1; } return v.frames[lo]; };
   E.vid = id => (id && E.videos[id] && E.videos[id].ok && E.videos[id].w) ? E.videos[id] : null;
   const vidTime = (b, v, t) => { const d = Math.max(0.1, v.dur), s = clamp(+b.vidStart || 0, 0, d), x = s + Math.max(0, t); return b.vidLoop ? x % d : Math.min(x, d - 0.04); };
   E.seekVideo = function (b, t) {
-    const v = E.vid(b.vid); if (!v) return Promise.resolve(); const tt = vidTime(b, v, t), el = v.el;
+    const v = E.vid(b.vid); if (!v || v.gif) return Promise.resolve(); const tt = vidTime(b, v, t), el = v.el;
     return new Promise(res => { let fin = false; const done = () => { if (fin) return; fin = true; el.removeEventListener('seeked', done); res(); }; el.addEventListener('seeked', done); if (!el.paused) el.pause(); el.currentTime = tt; setTimeout(done, 1500); });
   };
   function syncVideo(b, v, t, opts) {
@@ -400,8 +463,9 @@
         } else { const s = Math.max(W / im.width, H / im.height) * kb; const w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h); } }
     } else if (b.type === 'video') {
       c.fillStyle = '#000'; c.fillRect(0, 0, W, H); const v = E.vid(b.vid);
-      if (v) { syncVideo(b, v, t, opts); try { drawVideoFit(c, v.el, v.w, v.h, b); } catch (err2) { /* frame not ready yet */ } }
-      else { c.save(); c.fillStyle = 'rgba(255,255,255,0.7)'; c.font = `600 28px ${SANS}`; c.textAlign = 'center'; c.fillText(E.videos[b.vid] ? 'Loading video…' : 'Video not found in this browser – add it again in Assets → Videos', W / 2, H / 2); c.restore(); }
+      if (v && v.gif) { try { drawVideoFit(c, gifFrame(v, vidTime(b, v, t)), v.w, v.h, b); } catch (err2) { /* ignore */ } }
+      else if (v) { syncVideo(b, v, t, opts); try { drawVideoFit(c, v.el, v.w, v.h, b); } catch (err2) { /* frame not ready yet */ } }
+      else { c.save(); c.fillStyle = 'rgba(255,255,255,0.7)'; c.font = `600 28px ${SANS}`; c.textAlign = 'center'; c.fillText(E.videos[b.vid] ? (E.videos[b.vid].err ? 'GIF could not be read: ' + E.videos[b.vid].err : 'Loading video…') : 'Video not found in this browser – add it again in Assets → Videos', W / 2, H / 2); c.restore(); }
     } else if (b.type === 'solid') { c.fillStyle = b.color || '#101820'; c.fillRect(0, 0, W, H); }
     else {
       const gc = E.GRADS[b.grad] || E.GRADS.sky, gr = c.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, gc[0]); gr.addColorStop(1, gc[1]); c.fillStyle = gr; c.fillRect(0, 0, W, H);
