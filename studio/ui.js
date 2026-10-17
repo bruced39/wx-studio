@@ -526,45 +526,83 @@
           ['Open Sans Bold','Open Sans Bold'],['Open Sans Semibold','Open Sans Semibold'],
           ['Open Sans Regular','Open Sans Regular']
         ];
+        // AguaceroWX-style label editor. Scope presentation ONLY to these
+        // label groups; the settings object and the Mapbox render pipeline
+        // are deliberately not changed.
+        const aguaSlider=(key,label,min,max,step,unit='')=>{
+          const value=h('span',{className:'mapstyle-slider-value',text:String(b[key])+unit});
+          const input=h('input',{type:'range',min,max,step,value:b[key]});
+          const fmt=n=>String(Number((+n).toFixed(3)))+unit;
+          input.addEventListener('input',()=>{
+            b[key]=+input.value;value.textContent=fmt(input.value);
+          });
+          input.addEventListener('change',commit);
+          return h('div',{className:'row agua-value-row'},
+            h('label',{text:label}),h('div',{className:'mapstyle-slider'},input,value));
+        };
+        const aguaHeaderGroup=(key,title,enableKey,items,defaultOpen=false)=>{
+          const toggle=h('input',{type:'checkbox',checked:!!b[enableKey],
+            className:'agua-section-toggle','aria-label':'Enable '+title});
+          // Checkboxes in an expandable summary must not toggle the heading.
+          toggle.addEventListener('click',e=>e.stopPropagation());
+          toggle.addEventListener('keydown',e=>e.stopPropagation());
+          toggle.addEventListener('change',()=>{
+            b[enableKey]=toggle.checked;commit();renderPanels();
+          });
+          const open=S.mapAcc[key]==null?!!defaultOpen:!!S.mapAcc[key];
+          const box=h('details',{className:'mapacc agua-label-group',open},
+            h('summary',{className:'agua-label-summary'},
+              h('span',{text:title}),toggle),
+            h('div',{className:'mapaccbody agua-label-body'},...items));
+          box.addEventListener('toggle',()=>{S.mapAcc[key]=box.open;});
+          return box;
+        };
+        const aguaZoom=(title,minKey,maxKey)=>
+          h('div',{className:'agua-zoom-section'},
+            h('div',{className:'agua-section-title',text:'Zoom range'}),
+            zoomRangeRow(b,title+' labels',minKey,maxKey,{min:0,max:24,step:.5}));
+        const aguaDotHeader=(tier,title)=>{
+          const key='broadcast'+tier+'Dots';
+          return h('div',{className:'agua-dot-heading'},
+            h('strong',{text:title+' dots'}),
+            B(key,'check',{label:'',rerender:true}));
+        };
         const placeTier=(tier,title)=>{
           const prefix='broadcast'+tier;
-          const items=[B(prefix+'Enabled','check',{label:'Show '+title.toLowerCase(),rerender:true})];
-          if(b[prefix+'Enabled']!==false){
-            items.push(
-              B(prefix+'Font','select',{label:'Font',options:placeFonts}),
-              B(prefix+'Size','range',{label:'Size (px)',min:7,max:40,step:1}),
-              B(prefix+'Color','color',{label:'Text color'}),
-              B(prefix+'HaloColor','color',{label:'Outline color'}),
-              B(prefix+'HaloWidth','range',{label:'Outline width (px)',min:0,max:6,step:.25}),
-              B(prefix+'DensityPct','range',{label:'Density (%)',min:0,max:100,step:1}),
-              B(prefix+'Population','select',{label:'Population / prominence',options:[
-                ['all','All available places'],['major','Major places only'],['top','Most prominent only']
-              ]}),
+          const items=[
+            B(prefix+'Font','select',{label:'Font',options:placeFonts}),
+            aguaSlider(prefix+'Size','Size',7,40,1,'px'),
+            B(prefix+'Color','color',{label:'Text color'}),
+            B(prefix+'HaloColor','color',{label:'Outline color'}),
+            aguaSlider(prefix+'HaloWidth','Outline width',0,6,.25,'px'),
+            aguaSlider(prefix+'DensityPct','Density',0,100,1,'%'),
+            B(prefix+'Population','select',{label:'Population',options:[
+              ['all','All'],['major','Major only'],['top','Most prominent']
+            ]}),
+            B(prefix+'TextBackground','check',{label:'Text background',rerender:true})
+          ];
+          if(b[prefix+'TextBackground'])
+            items.push(B(prefix+'BackgroundColor','color',{label:'Background color'}));
+          items.push(
+            B(prefix+'DropShadow','check',{label:'Drop shadow'}),
+            aguaZoom(tier,prefix+'MinZoom',prefix+'MaxZoom'),
+            aguaDotHeader(tier,tier),
+            B(prefix+'DotColor','color',{label:'Dot color'}),
+            B(prefix+'DotOutlineColor','color',{label:'Outline color'}),
+            aguaSlider(prefix+'DotOutlineWidth','Outline width',0,5,.25,'px'),
+            aguaSlider(prefix+'DotSize','Size',1,12,.5,'px'),
+            aguaSlider(prefix+'DotNameOffset','Name offset',0,20,.5,'px'),
+            B(prefix+'DotShadow','check',{label:'Drop shadow'}),
+            mapAccordion('agua-advanced-'+tier.toLowerCase(),'Advanced text options',[
               B(prefix+'Uppercase','check',{label:'Uppercase'}),
-              B(prefix+'Opacity','range',{label:'Text opacity (%)',min:0,max:1,step:.05}),
-              B(prefix+'Spacing','range',{label:'Label spacing',min:0,max:3,step:.05}),
-              B(prefix+'TextBackground','check',{label:'Text background',rerender:true})
-            );
-            if(b[prefix+'TextBackground'])
-              items.push(B(prefix+'BackgroundColor','color',{label:'Text background color'}));
-            items.push(
-              B(prefix+'DropShadow','check',{label:'Drop shadow'}),
-              zoomRangeRow(b,'Zoom range',prefix+'MinZoom',prefix+'MaxZoom',{min:0,max:24,step:.5}),
-              B(prefix+'Dots','check',{label:'Place dots',rerender:true})
-            );
-            if(b[prefix+'Dots']){
-              items.push(
-                B(prefix+'DotColor','color',{label:'Dot color'}),
-                B(prefix+'DotOutlineColor','color',{label:'Dot outline color'}),
-                B(prefix+'DotOutlineWidth','range',{label:'Dot outline width (px)',min:0,max:5,step:.25}),
-                B(prefix+'DotSize','range',{label:'Dot size (px)',min:1,max:12,step:.5}),
-                B(prefix+'DotNameOffset','range',{label:'Name offset (px)',min:0,max:20,step:.5}),
-                B(prefix+'DotShadow','check',{label:'Dot shadow'})
-              );
-            }
-            items.push(h('div',{className:'hint',text:'Density and Population use available Mapbox settlement prominence data; actual named locations still depend on zoom, source tiles and collision avoidance.'}));
-          }
-          return mapAccordion('places-'+tier.toLowerCase(),title,items,tier==='City');
+              aguaSlider(prefix+'Opacity','Text opacity',0,1,.05,''),
+              aguaSlider(prefix+'Spacing','Label spacing',0,3,.05,'')
+            ],false)
+          );
+          // Each tier is visible and editable even when disabled, matching
+          // the recorded AguaceroWX dialog; no style values are reset.
+          return aguaHeaderGroup('places-'+tier.toLowerCase(),title,
+            prefix+'Enabled',items,tier==='City');
         };
         const auxLabelTier=(tier,title)=>{
           const pfx='broadcast'+tier+'Label';
