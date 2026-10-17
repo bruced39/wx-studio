@@ -105,6 +105,50 @@
   // Respect the reference City minimum even for the native overview
   // fallback. A user can explicitly lower this separately afterwards.
   AGUACERO_PLACE_LABELS.broadcastMajorCityMinZoom=2;
+  // Additional label settings transcribed from the user's ORIGINAL
+  // AguaceroWX screen recording (17 Oct 2026), beyond the four 16px place
+  // classes. Enabled/disabled states are significant even for groups that
+  // are hidden by default. Changes are restricted to labels, never roads'
+  // geometry, boundaries, map camera, assets, or scene settings.
+  const otherReference={
+    Continent:{Enabled:false,Font:'Roboto Bold',Size:16,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1.5,MinZoom:.75,MaxZoom:3},
+    Country:{Enabled:false,Font:'Roboto Bold',Size:14,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:1,MaxZoom:10},
+    State:{Enabled:false,Font:'Roboto Bold',Size:12,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:3,MaxZoom:9},
+    County:{Enabled:false,Font:'Open Sans Regular',Size:10,Color:'#656565',HaloColor:'#ffffff',HaloWidth:1,MinZoom:7,MaxZoom:16},
+    Airport:{Enabled:true,Font:'Roboto Bold',Size:11,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:8,MaxZoom:24},
+    POI:{Enabled:false,Font:'Roboto Bold',Size:10,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:6,MaxZoom:24},
+    Subdivision:{Enabled:false,Font:'Roboto Bold',Size:11,Color:'#000000',HaloColor:'#ffffff',HaloWidth:1,MinZoom:10,MaxZoom:15},
+    Water:{Enabled:false,Font:'Roboto Bold',Size:10,Color:'#0a7eb9',HaloColor:'#ffffff',HaloWidth:1,MinZoom:13,MaxZoom:24},
+    Natural:{Enabled:false,Font:'Roboto Bold',Size:10,Color:'#339758',HaloColor:'#ffffff',HaloWidth:1,MinZoom:4,MaxZoom:24}
+  };
+  for(const [kind,values] of Object.entries(otherReference)){
+    for(const [key,value] of Object.entries({
+      DropShadow:false,TextBackground:false,...values
+    })) AGUACERO_PLACE_LABELS['broadcast'+kind+'Label'+key]=value;
+  }
+  // The reference video explicitly shows map-label caps and fading On,
+  // Road Signs and Road Names On. Road/shield LINE rendering is unchanged.
+  Object.assign(AGUACERO_PLACE_LABELS,{
+    broadcastLabelFade:true,
+    broadcastHideAllLabels:false,
+    broadcastShowRoadShields:true,
+    broadcastRoadShieldSize:1.2,
+    broadcastRoadShieldDensity:5,
+    broadcastRoadSignDensityPct:100,
+    broadcastRoadShieldMinZoom:6,
+    broadcastRoadShieldMaxZoom:24,
+    broadcastRoadSignInterstates:true,broadcastRoadSignUS:true,
+    broadcastRoadSignState:true,broadcastRoadSignOther:true,
+    broadcastRoadSignExits:true,
+    broadcastShowRoadLabels:true,
+    broadcastRoadLabelMinZoom:15,broadcastRoadLabelMaxZoom:24,
+    broadcastRoadNameFont:'Open Sans Regular',broadcastRoadNameScale:1,
+    broadcastRoadNameColor:'#ffffff',broadcastRoadNameHaloColor:'#000000',
+    broadcastRoadNameHaloWidth:1,broadcastRoadNameDensityPct:30,
+    broadcastRoadNameTextBackground:false,broadcastRoadNameDropShadow:false,
+    broadcastShowPOI:false,
+    broadcastShowNaturalLabels:false
+  });
   Object.assign(WD_DEFAULTS,AGUACERO_PLACE_LABELS);
   MB.AGUACERO_PLACE_LABELS=Object.freeze(AGUACERO_PLACE_LABELS);
   MB.applyAguaceroPlaceLabels=cfg=>{
@@ -193,7 +237,8 @@
     const m={
       'DIN Pro Bold':['DIN Pro Bold','Arial Unicode MS Bold'],'DIN Pro Medium':['DIN Pro Medium','Arial Unicode MS Regular'],
       'Roboto Bold':['Roboto Bold','Arial Unicode MS Bold'],'Roboto Medium':['Roboto Medium','Arial Unicode MS Regular'],
-      'Open Sans Bold':['Open Sans Bold','Arial Unicode MS Bold'],'Open Sans Semibold':['Open Sans Semibold','Arial Unicode MS Regular']
+      'Open Sans Bold':['Open Sans Bold','Arial Unicode MS Bold'],'Open Sans Semibold':['Open Sans Semibold','Arial Unicode MS Regular'],
+      'Open Sans Regular':['Open Sans Regular','Arial Unicode MS Regular']
     };
     return m[name]||['DIN Pro Bold','Arial Unicode MS Bold'];
   }
@@ -268,7 +313,7 @@
         'text-field':['coalesce',['get','name_en'],['get','name']],
         'text-font':wdFontStack(t.font),
         'text-size':requestedSize,
-        'text-transform':t.uppercase?'uppercase':'none',
+        'text-transform':t.uppercase&&cfg.broadcastUppercaseLabels!==false?'uppercase':'none',
         'text-letter-spacing':0,
         'text-line-height':1.2,
         'text-max-width':10,
@@ -282,7 +327,8 @@
         'text-opacity':t.opacity,
         'text-halo-color':t.halo,
         'text-halo-width':t.haloWidth,
-        'text-halo-blur':t.shadow?1.3:.15
+        'text-halo-blur':t.shadow?1.3:.15,
+        'text-opacity-transition':{duration:cfg.broadcastLabelFade===false?0:250}
       }
     };
   }
@@ -779,6 +825,31 @@
     },220);
   }
 
+  // Apply recorded non-settlement label appearance to EXISTING Mapbox
+  // native symbol layers. Disabled categories remain off as in the video.
+  // Avoid any changes to the user's independent Cities/Towns/Hamlets
+  // typography or the rank/filter fixes that restored those labels.
+  function applyRecordedAuxLabel(map,layer,cfg,tier){
+    const p='broadcast'+tier+'Label';
+    const enabled=cfg.broadcastHideAllLabels!==true&&cfg[p+'Enabled']===true;
+    try{map.setLayoutProperty(layer.id,'visibility',enabled?'visible':'none');}catch(e){}
+    if(!enabled)return;
+    const min=Number.isFinite(+cfg[p+'MinZoom'])?Math.max(0,+cfg[p+'MinZoom']):0,
+      max=Number.isFinite(+cfg[p+'MaxZoom'])?Math.min(24,+cfg[p+'MaxZoom']):24;
+    try{map.setLayerZoomRange(layer.id,min,Math.max(min+.01,max));}catch(e){}
+    for(const [prop,value] of [
+      ['text-font',wdFontStack(cfg[p+'Font']||'Roboto Bold')],
+      ['text-size',+cfg[p+'Size']||11],
+      ['text-transform',cfg.broadcastUppercaseLabels===false?'none':'uppercase']
+    ])try{map.setLayoutProperty(layer.id,prop,value);}catch(e){}
+    for(const [prop,value] of [
+      ['text-color',cfg[p+'Color']||'#000000'],
+      ['text-halo-color',cfg[p+'HaloColor']||'#ffffff'],
+      ['text-halo-width',Math.max(0,+cfg[p+'HaloWidth']||0)],
+      ['text-halo-blur',cfg[p+'DropShadow']?1.3:.15],
+      ['text-opacity-transition',{duration:cfg.broadcastLabelFade===false?0:250}]
+    ])try{map.setPaintProperty(layer.id,prop,value);}catch(e){}
+  }
   function addBroadcastCartography(map,cfg){
     if(!map||cfg.mbStyle!=='broadcast')return;
     const layers=map.getStyle().layers||[];
@@ -871,13 +942,27 @@
     for(const l of layers){
       const id=String(l.id||'').toLowerCase(),sl=String(l['source-layer']||'').toLowerCase(); if(id.startsWith('wd-'))continue;
       try{
+        if(l.type==='symbol'&&cfg.broadcastHideAllLabels===true){
+          map.setLayoutProperty(l.id,'visibility','none');
+          continue;
+        }
         if(l.type==='symbol'){
-          const adminPlace=sl==='place_label'&&(id.includes('state')||id.includes('province')||id.includes('country')||id.includes('continent')||id.includes('region'));
+          const adminTier=id.includes('continent')?'Continent':
+            id.includes('country')?'Country':
+            (id.includes('state')||id.includes('province')||id.includes('region'))?'State':
+            id.includes('county')?'County':id.includes('subdivision')?'Subdivision':null;
+          const adminPlace=sl==='place_label'&&!!adminTier;
           const place=sl==='place_label'||id.includes('settlement')||id.includes('place-label');
           const shield=id.includes('road-number')||id.includes('road-shield')||id.includes('shield');
           const roadLabel=sl==='road'||id.includes('road-label')||shield;
-          const poi=sl==='poi_label'||id.includes('poi'),natural=sl==='natural_label'||id.includes('natural')||id.includes('water-label');
-          if(adminPlace||place){
+          const airport=id.includes('airport')||id.includes('aerodrome');
+          const poi=sl==='poi_label'||id.includes('poi'),
+            natural=sl==='natural_label'||id.includes('natural')||id.includes('water-label');
+          if(adminPlace){
+            applyRecordedAuxLabel(map,l,cfg,adminTier);
+          }else if(airport){
+            applyRecordedAuxLabel(map,l,cfg,'Airport');
+          }else if(place){
             const overview=nativeOverviewRange(l);
             if(overview){
               // Keep the native zoom-aware feature selection and collision
@@ -937,11 +1022,33 @@
               requestedMax=shield?(+cfg.broadcastRoadShieldMaxZoom||24):(+cfg.broadcastRoadLabelMaxZoom||16),
               mx=Math.max(min+.5,requestedMax);
             try{map.setLayerZoomRange(l.id,Math.max(zr.min,min),Math.max(Math.max(zr.min,min)+.01,Math.min(zr.max,mx)));}catch(e){}
-            if(vis&&shield){const d=Math.max(1,Math.min(5,+cfg.broadcastRoadShieldDensity||3)),sp=[900,700,520,350,220][d-1],sz=Math.max(.6,Math.min(2,+cfg.broadcastRoadShieldSize||1));try{map.setLayoutProperty(l.id,'symbol-spacing',sp);}catch(e){}try{map.setLayoutProperty(l.id,'icon-size',sz);}catch(e){}}
-            else if(vis&&!shield){try{map.setLayoutProperty(l.id,'text-font',wdFontStack(cfg.broadcastLabelFont));}catch(e){}try{map.setPaintProperty(l.id,'text-color',cfg.broadcastLabelColor);}catch(e){}try{map.setPaintProperty(l.id,'text-halo-color',cfg.broadcastLabelHaloColor);}catch(e){}}
-          }else if(poi)map.setLayoutProperty(l.id,'visibility',cfg.broadcastBase==='satellite'&&cfg.broadcastShowPOI?'visible':'none');
-          else if(natural)map.setLayoutProperty(l.id,'visibility',cfg.broadcastBase==='satellite'&&cfg.broadcastShowNaturalLabels?'visible':'none');
-          else map.setLayoutProperty(l.id,'visibility','none');
+            if(vis&&shield){
+              const pct=Math.max(0,Math.min(100,+cfg.broadcastRoadSignDensityPct||100)),
+                spacing=220+(100-pct)*11,
+                sz=Math.max(.6,Math.min(2,+cfg.broadcastRoadShieldSize||1));
+              try{map.setLayoutProperty(l.id,'symbol-spacing',spacing);}catch(e){}
+              try{map.setLayoutProperty(l.id,'icon-size',sz);}catch(e){}
+            }else if(vis&&!shield){
+              if(!map.__wdOriginalRoadTextSizes)map.__wdOriginalRoadTextSizes={};
+              if(!Object.prototype.hasOwnProperty.call(map.__wdOriginalRoadTextSizes,l.id))
+                map.__wdOriginalRoadTextSizes[l.id]=l.layout?.['text-size']||12;
+              const orig=map.__wdOriginalRoadTextSizes[l.id],
+                scale=Math.max(.5,Math.min(2,+cfg.broadcastRoadNameScale||1));
+              for(const [prop,value] of [
+                ['text-font',wdFontStack(cfg.broadcastRoadNameFont||'Open Sans Regular')],
+                ['text-size',scale===1?orig:['*',orig,scale]],
+                ['text-transform',cfg.broadcastUppercaseLabels===false?'none':'uppercase']
+              ])try{map.setLayoutProperty(l.id,prop,value);}catch(e){}
+              try{map.setPaintProperty(l.id,'text-color',cfg.broadcastRoadNameColor||'#fff');}catch(e){}
+              try{map.setPaintProperty(l.id,'text-halo-color',cfg.broadcastRoadNameHaloColor||'#000');}catch(e){}
+              try{map.setPaintProperty(l.id,'text-halo-width',Math.max(0,+cfg.broadcastRoadNameHaloWidth||0));}catch(e){}
+              try{map.setLayoutProperty(l.id,'symbol-spacing',Math.round(220+(100-(+cfg.broadcastRoadNameDensityPct||30))*7));}catch(e){}
+            }
+          }else if(poi){
+            applyRecordedAuxLabel(map,l,cfg,'POI');
+          }else if(natural){
+            applyRecordedAuxLabel(map,l,cfg,id.includes('water')?'Water':'Natural');
+          }else map.setLayoutProperty(l.id,'visibility','none');
         }else if(l.type==='line'){
           const road=sl==='road'||id.includes('road')||id.includes('street')||id.includes('motorway'),aeroway=sl==='aeroway'||id.includes('runway')||id.includes('taxiway')||id.includes('aeroway'),boundary=sl==='admin'||id.includes('boundary')||id.includes('admin');
           if(road||aeroway){
@@ -1016,7 +1123,7 @@
       'wd-hamlet-labels'].forEach(id=>{
       try{if(map.getLayer(id))map.removeLayer(id);}catch{}
     });
-    if(source&&cfg.broadcastShowCities!==false){
+    if(source&&cfg.broadcastShowCities!==false&&cfg.broadcastHideAllLabels!==true){
       const minZoom=(value,fallback)=>Math.max(0,Math.min(23.99,Number.isFinite(+value)?+value:fallback));
       const maxZoom=(value,min)=>Math.max(min+.01,Math.min(24,Number.isFinite(+value)?+value:24));
       const cityMin=minZoom(cfg.broadcastCityMinZoom,3),cityMax=maxZoom(cfg.broadcastCityMaxZoom,cityMin);
@@ -1148,7 +1255,7 @@
   }
   async function setup(bg) {
     MB.ensureConfig(bg);const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
-    if(styleKey!==curStyleKey){D.setStyle('mapbox://styles/mapbox/'+st);await once(D,'style.load');curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;D.__wdOriginalZoomRanges={};D.__wdOriginalRasterVisibility={};D.__wdOriginalOverviewFilters={};}
+    if(styleKey!==curStyleKey){D.setStyle('mapbox://styles/mapbox/'+st);await once(D,'style.load');curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;D.__wdOriginalZoomRanges={};D.__wdOriginalRasterVisibility={};D.__wdOriginalOverviewFilters={};D.__wdOriginalRoadTextSizes={};}
     if(pr!==curProj){D.setProjection(pr);curProj=pr;}
     fog(bg);applyTerrain(D,bg);
     if(bg.mbStyle==='broadcast'&&cfgKey!==curCfgKey){addBroadcastCartography(D,bg);curCfgKey=cfgKey;}
