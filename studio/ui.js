@@ -605,46 +605,42 @@
             prefix+'Enabled',items,tier==='City');
         };
         const auxLabelTier=(tier,title)=>{
-          const pfx='broadcast'+tier+'Label';
-          const controls=[
-            B(pfx+'Enabled','check',{label:'Show '+title.toLowerCase(),rerender:true})
+          const prefix='broadcast'+tier+'Label';
+          const nodes=[
+            B(prefix+'Font','select',{label:'Font',options:placeFonts}),
+            aguaSlider(prefix+'Size','Size',7,40,1,'px'),
+            B(prefix+'Color','color',{label:'Text color'}),
+            B(prefix+'HaloColor','color',{label:'Outline color'}),
+            aguaSlider(prefix+'HaloWidth','Outline width',0,6,.25,'px'),
+            B(prefix+'DropShadow','check',{label:'Drop shadow'}),
+            aguaZoom(tier,prefix+'MinZoom',prefix+'MaxZoom')
           ];
-          // Display stored fields even when disabled, just as the actual
-          // AguaceroWX dialog does, so the user can compare reference values.
-          controls.push(
-            B(pfx+'Font','select',{label:'Font',options:placeFonts}),
-            B(pfx+'Size','range',{label:'Size (px)',min:7,max:40,step:1}),
-            B(pfx+'Color','color',{label:'Text color'}),
-            B(pfx+'HaloColor','color',{label:'Outline color'}),
-            B(pfx+'HaloWidth','range',{label:'Outline width (px)',min:0,max:6,step:.25}),
-            B(pfx+'DropShadow','check',{label:'Drop shadow'}),
-            zoomRangeRow(b,'Zoom range',pfx+'MinZoom',pfx+'MaxZoom',{min:0,max:24,step:.25})
-          );
-          return mapAccordion('aux-'+tier.toLowerCase(),title,controls,false);
+          return aguaHeaderGroup('aux-'+tier.toLowerCase(),title,
+            prefix+'Enabled',nodes,false);
         };
-        const roadSignControls=()=>mapAccordion('aux-road-signs','Road Signs',[
-          B('broadcastShowRoadShields','check',{label:'Road signs'}),
-          B('broadcastRoadShieldSize','range',{label:'Size (×)',min:.5,max:2,step:.05}),
-          B('broadcastRoadSignDensityPct','range',{label:'Density (%)',min:0,max:100,step:1}),
-          B('broadcastRoadSignInterstates','check',{label:'Interstates'}),
-          B('broadcastRoadSignUS','check',{label:'U.S. highways'}),
-          B('broadcastRoadSignState','check',{label:'State routes'}),
-          B('broadcastRoadSignOther','check',{label:'Other signs'}),
-          B('broadcastRoadSignExits','check',{label:'Exits'}),
-          zoomRangeRow(b,'Zoom range','broadcastRoadShieldMinZoom','broadcastRoadShieldMaxZoom',{min:0,max:24,step:.5})
-        ],false);
-        const roadNameControls=()=>mapAccordion('aux-road-names','Road Names',[
-          B('broadcastShowRoadLabels','check',{label:'Road names'}),
-          B('broadcastRoadNameFont','select',{label:'Font',options:placeFonts}),
-          B('broadcastRoadNameScale','range',{label:'Size (×)',min:.5,max:2,step:.05}),
-          B('broadcastRoadNameColor','color',{label:'Text color'}),
-          B('broadcastRoadNameHaloColor','color',{label:'Outline color'}),
-          B('broadcastRoadNameHaloWidth','range',{label:'Outline width (px)',min:0,max:6,step:.25}),
-          B('broadcastRoadNameDensityPct','range',{label:'Density (%)',min:0,max:100,step:1}),
-          B('broadcastRoadNameTextBackground','check',{label:'Text background'}),
-          B('broadcastRoadNameDropShadow','check',{label:'Drop shadow'}),
-          zoomRangeRow(b,'Zoom range','broadcastRoadLabelMinZoom','broadcastRoadLabelMaxZoom',{min:0,max:24,step:.5})
-        ],false);
+        const roadSignControls=()=>aguaHeaderGroup('aux-road-signs','Road Signs',
+          'broadcastShowRoadShields',[
+            aguaSlider('broadcastRoadShieldSize','Size',.5,2,.05,'×'),
+            aguaSlider('broadcastRoadSignDensityPct','Density',0,100,1,'%'),
+            B('broadcastRoadSignInterstates','check',{label:'Interstates'}),
+            B('broadcastRoadSignUS','check',{label:'U.S. highways'}),
+            B('broadcastRoadSignState','check',{label:'State routes'}),
+            B('broadcastRoadSignOther','check',{label:'Other signs'}),
+            B('broadcastRoadSignExits','check',{label:'Exits'}),
+            aguaZoom('Road sign','broadcastRoadShieldMinZoom','broadcastRoadShieldMaxZoom')
+          ],false);
+        const roadNameControls=()=>aguaHeaderGroup('aux-road-names','Road Names',
+          'broadcastShowRoadLabels',[
+            B('broadcastRoadNameFont','select',{label:'Font',options:placeFonts}),
+            aguaSlider('broadcastRoadNameScale','Size',.5,2,.05,'×'),
+            B('broadcastRoadNameColor','color',{label:'Text color'}),
+            B('broadcastRoadNameHaloColor','color',{label:'Outline color'}),
+            aguaSlider('broadcastRoadNameHaloWidth','Outline width',0,6,.25,'px'),
+            aguaSlider('broadcastRoadNameDensityPct','Density',0,100,1,'%'),
+            B('broadcastRoadNameTextBackground','check',{label:'Text background'}),
+            B('broadcastRoadNameDropShadow','check',{label:'Drop shadow'}),
+            aguaZoom('Road name','broadcastRoadLabelMinZoom','broadcastRoadLabelMaxZoom')
+          ],false);
         const applyAguaLabels=()=>{
           // Mapbox DEFAULTS, this restore button, and new-map settings all
           // share one verified Aguacero place-label reference. Avoid
