@@ -574,3 +574,41 @@ test('Hamlets are separate from Villages in feature filters, zoom and styling',(
  assert.equal(render({...base,broadcastHamletEnabled:false}).some(l=>l.id==='wd-hamlet-labels'),false);
  assert.ok(render({...base,broadcastHamletEnabled:false}).some(l=>l.id==='wd-small-place-labels'));
 });
+
+test('loading older cloud style does not leak another scene Hamlet/City settings',()=>{
+ const start=source.indexOf('  const WD_DEFAULTS = {');
+ const end=source.indexOf('  const wdConfigKey = bg =>',start);
+ const model=new Function('MB',source.slice(start,end)+';return MB;')({});
+ const from=ui.indexOf('    // Always discard ONLY the scene');
+ const to=ui.indexOf('    if(cfg.proj===',from);
+ assert.ok(from>=0&&to>from,'cloud map style import code exists');
+ const importStyle=new Function('b','cfg','g',ui.slice(from,to)+';return b;');
+ const active={broadcastCityFont:'Roboto Bold',
+  broadcastCitySize:37,broadcastHamletFont:'Open Sans Bold',
+  broadcastHamletMinZoom:1,broadcastVillageFont:'DIN Pro Medium',
+  broadcastVillageMinZoom:3,broadcastLandColor:'#556677'};
+ model.ensureConfig(active);
+ const older={broadcastCityFont:'DIN Pro Bold',broadcastCitySize:19,
+  broadcastTownFont:'Roboto Medium',broadcastVillageFont:'Open Sans Semibold',
+  broadcastVillageMinZoom:10,broadcastVillageSize:12,
+  broadcastLandColor:'#223344'};
+ importStyle(active,older,{MB:model});
+ model.ensureConfig(active);
+ assert.equal(active.broadcastCitySize,19);
+ assert.equal(active.broadcastCityFont,'DIN Pro Bold');
+ assert.equal(active.broadcastTownFont,'Roboto Medium');
+ assert.equal(active.broadcastVillageFont,'Open Sans Semibold');
+ assert.equal(active.broadcastHamletFont,'Open Sans Semibold');
+ assert.equal(active.broadcastHamletMinZoom,10);
+ assert.equal(active.broadcastHamletSize,12);
+ assert.equal(active.broadcastLandColor,'#223344');
+ // A new-style preset's own Hamlet choices must survive full import.
+ const modern={broadcastCityFont:'Roboto Bold',broadcastHamletFont:'Roboto Medium',
+   broadcastHamletMinZoom:9,broadcastHamletSize:14,
+   broadcastVillageFont:'DIN Pro Bold',broadcastVillageMinZoom:6};
+ importStyle(active,modern,{MB:model});
+ model.ensureConfig(active);
+ assert.equal(active.broadcastHamletFont,'Roboto Medium');
+ assert.equal(active.broadcastHamletMinZoom,9);
+ assert.equal(active.broadcastHamletSize,14);
+});
