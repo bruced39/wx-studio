@@ -145,7 +145,16 @@ function boot(){
   }
   requestAnimationFrame(loop);
  }
- N.load().then(()=>{lastKey='';if(N.active)render();});
+ N.load().then(()=>{
+    // Fix Claude's placeholder KBOS airport entry, including when NOAA's
+    // all-station directory request is unavailable and NE fallback is used.
+    const planned=g.WXData?.planned?.find(p=>p.id==='nexrad');
+    if(planned){
+      planned.sites=N.stations.map(x=>({id:x.id,label:x.id+' '+x.name}));
+      planned.defaultSite='KBOX';
+    }
+    lastKey='';if(N.active)render();
+  });
  requestAnimationFrame(loop);
  return true;
 }
