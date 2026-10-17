@@ -362,3 +362,19 @@ test('optional place dots render at the user-selected size and outline, never by
  assert.equal(dot.paint['circle-blur'],.35);
  assert.equal(on.find(x=>x.id==='wd-city-labels').layout['text-offset'][1],-.2);
 });
+
+test('floating Map Style popup imports the renamed Place Labels accordion',()=>{
+ // Regression: v0.9.54 renamed the source panel to Place Labels, but the
+ // popup still looked for City + Town Labels, hiding the whole section.
+ const scenePanel=ui.slice(ui.indexOf("        // Aguacero-style independent expandable place-label categories."),
+                           ui.indexOf("        // All four boundary width sliders",ui.indexOf("        // Aguacero-style")));
+ const popup=ui.slice(ui.indexOf('function renderMapStylePanel('),
+                      ui.indexOf("  $('#bMapStyle').onclick",ui.indexOf('function renderMapStylePanel(')));
+ assert.ok(scenePanel.includes("p.append(mapAccordion('labels','Place Labels'"));
+ assert.ok(popup.includes("addGroup('Place Labels');"),
+  'popup must find the source accordion by its real title');
+ assert.ok(!popup.includes("addGroup('City + Town Labels'"),
+  'outdated title lookup must not silently hide settings');
+ for(const tier of ['City','Town','Village'])
+  assert.ok(scenePanel.includes("placeTier('"+tier+"'"),tier+' settings should remain nested and collapsible');
+});
