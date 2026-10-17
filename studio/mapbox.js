@@ -789,6 +789,26 @@
     if(!map.__wdOriginalZoomRanges)map.__wdOriginalZoomRanges={};
     if(!map.__wdOriginalRasterVisibility)map.__wdOriginalRasterVisibility={};
     if(!map.__wdOriginalOverviewFilters)map.__wdOriginalOverviewFilters={};
+    // Mapbox's "major" and "minor" layers are split by SYMBOLRANK, not
+    // by CITY versus TOWN. Both contain both feature types. First preserve
+    // the original filters of BOTH native rank layers, then route features
+    // to a SINGLE layer by actual Streets v8 feature.type:
+    //   city -> City settings; town -> Town settings.
+    // Otherwise a prominent town is drawn using City typography at z7,
+    // and Town typography at z8, even if the user never changed settings.
+    const originalOverviewLayers=layers.filter(l=>overviewIsMajor(l)||overviewIsMinor(l));
+    for(const l of originalOverviewLayers){
+      if(!Object.prototype.hasOwnProperty.call(map.__wdOriginalOverviewFilters,l.id))
+        map.__wdOriginalOverviewFilters[l.id]=l.filter
+          ?JSON.parse(JSON.stringify(l.filter)):null;
+    }
+    const nativeStockUnion=layer=>{
+      const matching=originalOverviewLayers.filter(l=>l.source===layer.source)
+        .map(l=>map.__wdOriginalOverviewFilters[l.id]);
+      // A native layer with no filter legitimately accepts all places.
+      if(!matching.length||matching.some(f=>f==null))return null;
+      return matching.length===1?matching[0]:['any',...matching];
+    };
     for(const l of layers){
       const id=String(l.id||'').toLowerCase(),sl=String(l['source-layer']||'').toLowerCase(); if(id.startsWith('wd-'))continue;
       try{
@@ -808,22 +828,28 @@
               // labels must honor the same user settings at every zoom.
               try{map.setLayerZoomRange(l.id,overview.min,overview.max);}catch(e){}
               map.setLayoutProperty(l.id,'visibility','visible');
-              // Capture the pristine Mapbox filter ONCE, before changing it.
-              // This persists through slider edits but is reset when the map
-              // loads a different base style (see setup() below).
-              if(!Object.prototype.hasOwnProperty.call(map.__wdOriginalOverviewFilters,l.id))
-                map.__wdOriginalOverviewFilters[l.id]=l.filter
-                  ?JSON.parse(JSON.stringify(l.filter)):null;
-              const original=map.__wdOriginalOverviewFilters[l.id];
+              const kind=overview.major?'city':'town',
+                original=nativeStockUnion(l);
+              // Use the combined ORIGINAL major+minor rank selection so a
+              // city originally in Mapbox's minor layer is not lost, and a
+              // town originally in major is reassigned to Town typography.
+              // Supplemental density rules only ADD candidates.
               try{
-                // Even when the extra-density rule is too restrictive for a
-                // particular tile/zoom, the original settlement names remain.
-                const combined=nativeOverviewFilter(original,overview.major);
-                map.setFilter(l.id,overview.major?combined:
-                  ['all',combined,['==',['get','type'],'town']]);
+                map.setFilter(l.id,[
+                  'all',
+                  ['match',['get','class'],['settlement','disputed_settlement'],true,false],
+                  ['==',['get','type'],kind],
+                  nativeOverviewFilter(original,overview.major)
+                ]);
               }catch(e){
-                console.warn('WX Studio extra overview labels unavailable; using stock filter',l.id,e);
-                try{map.setFilter(l.id,original);}catch(ignore){}
+                console.warn('WX Studio type-based overview label filter',l.id,e);
+                // Safety fallback STILL filters by place type; restoring the
+                // original major filter here would recreate mixed fonts.
+                try{map.setFilter(l.id,[
+                  'all',
+                  ['match',['get','class'],['settlement','disputed_settlement'],true,false],
+                  ['==',['get','type'],kind]
+                ]);}catch(ignore){}
               }
               // Preserve original symbol-sort-key and placement/collision
               // priority so Mapbox's major-city coverage remains reliable.
