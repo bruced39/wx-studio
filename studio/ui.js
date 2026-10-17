@@ -1389,7 +1389,9 @@
       B('waterwaysOpacity','range',{label:'Opacity (%)',min:0,max:1,step:.01}),
       zoomRangeRow(b,'Waterways','waterwaysMinZoom','waterwaysMaxZoom',{min:0,max:24,step:.5})
     ],false));
-    addGroup('City + Town Labels','Labels');
+    // The source scene accordion is now titled Place Labels (v0.9.54).
+    // The floating Map Style popup must import that same accordion name.
+    addGroup('Place Labels');
     scroll.append(mapAccordion('styleTerrain','Terrain',[
       B('terrainHillshadeShow','check',{label:'Show Terrain / hillshade'}),
       B('terrainHillshadeIntensity','range',{label:'Intensity (%)',min:0,max:1,step:.01}),
