@@ -661,6 +661,11 @@
           B('broadcastOverviewCityDensity','select',{label:'Overview city coverage (below zoom 7.5)',options:[
             ['standard','Standard'],['more','More cities'],['many','Many cities']]}),
           B('broadcastOverviewLabelGap','range',{label:'Overview label gap (px)',min:0,max:20,step:.5}),
+          B('broadcastAutoDeclutter','check',{label:'Automatically declutter labels when zoomed out',rerender:true}),
+          ...(b.broadcastAutoDeclutter!==false?[
+            aguaSlider('broadcastDeclutterStrength','Decluttering strength',0,2,.1,'×'),
+            h('div',{className:'hint',text:'Preserves your selected font and 16 px sizes. Increases collision spacing at broad zoom levels so fewer names compete; normal spacing returns as you zoom closer. Lowering City/Town density also works below zoom 7.5.'})
+          ]:[]),
           B('broadcastMajorCityRank','range',{label:'Major-city rank — higher shows more',min:1,max:19,step:1}),
           B('broadcastMajorCityMinZoom','range',{label:'Major-city minimum zoom',min:0,max:12,step:.5}),
           B('broadcastHideAllLabels','check',{label:'Hide all labels'}),
