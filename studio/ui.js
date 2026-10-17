@@ -566,15 +566,20 @@
           return mapAccordion('places-'+tier.toLowerCase(),title,items,tier==='City');
         };
         const applyAguaLabels=()=>{
-          const base={Enabled:true,Font:'Roboto Bold',Size:16,Color:'#ffffff',HaloColor:'#000000',Population:'all',TextBackground:false,DropShadow:false,Uppercase:true,Dots:false,DotColor:'#ffffff',DotOutlineColor:'#000000',DotOutlineWidth:1,DotNameOffset:4,DotShadow:false};
-          const per={City:{HaloWidth:2.5,DensityPct:97,MinZoom:2,MaxZoom:22,DotSize:3.5},Town:{HaloWidth:2,DensityPct:96,MinZoom:2,MaxZoom:22,DotSize:3},Village:{HaloWidth:1.5,DensityPct:96,MinZoom:6,MaxZoom:22,DotSize:2.5}};
-          for(const t of Object.keys(per))for(const [k,v] of Object.entries(Object.assign({},base,per[t])))b['broadcast'+t+k]=v;
-          b.broadcastShowCities=true;b.broadcastUppercaseLabels=true;
-          commit();renderPanels();toast('AguaceroWX label settings applied (City, Town, Village)');
+          // Mapbox DEFAULTS, this restore button, and new-map settings all
+          // share one verified Aguacero place-label reference. Avoid
+          // duplicating numeric values here where they can go out of sync.
+          if(!g.MB?.applyAguaceroPlaceLabels){
+            toast('AguaceroWX label preset is not loaded; no changes made.');
+            return;
+          }
+          g.MB.applyAguaceroPlaceLabels(b);
+          commit();renderPanels();
+          toast('AguaceroWX City, Town, Village and Hamlet labels restored');
         };
         p.append(mapAccordion('labels','Place Labels',[
           h('div',{className:'btnrow'},h('button',{text:'Apply my AguaceroWX label settings',on:{click:applyAguaLabels}})),
-          h('div',{className:'hint',text:'Sets City, Town and Village to Roboto Bold 16 px, white text, black outline, density 96–97%, All places, zoom 2–22 (Villages 6–22). Hamlets are drawn with Villages.'}),
+          h('div',{className:'hint',text:'Restores the verified AguaceroWX defaults for Cities, Towns, Villages and Hamlets: 16 px Roboto Bold, white text, black outlines, independent density and zoom ranges. Only place-label settings are changed.'}),
           B('broadcastShowCities','check',{label:'Show places',rerender:true}),
           B('broadcastKeepMajorCities','check',{label:'Keep major cities'}),
           B('broadcastOverviewCityDensity','select',{label:'Overview city coverage (below zoom 7.5)',options:[
@@ -584,7 +589,8 @@
           B('broadcastMajorCityMinZoom','range',{label:'Major-city minimum zoom',min:0,max:12,step:.5}),
           placeTier('City','Cities'),
           placeTier('Town','Towns'),
-          placeTier('Village','Villages')
+          placeTier('Village','Villages'),
+          placeTier('Hamlet','Hamlets')
         ],false));
 
         // All four boundary width sliders share ONE physical pixel scale.
@@ -1212,20 +1218,18 @@
     const b=cur().bg;
     if(!b||b.type!=='mapbox')return;
     const cfg=item.settings||{};
-    // An older cloud/browser style may only contain shared font/halo/color
-    // fields. Clear previously initialized per-tier values in the CURRENT
-    // scene before loading it so ensureConfig migrates the preset's actual
-    // original typography, not whatever was last selected in this scene.
-    const hasIndependentLabels=['City','Town','Village'].some(t=>
-      Object.prototype.hasOwnProperty.call(cfg,'broadcast'+t+'Font'));
-    if(!hasIndependentLabels){
-      for(const tier of ['City','Town','Village'])
-        for(const suffix of ['Enabled','Font','Color','HaloColor','HaloWidth',
-          'DensityPct','Population','TextBackground','BackgroundColor','DropShadow',
-          'Uppercase','Opacity','Spacing','Dots','DotColor','DotOutlineColor',
-          'DotOutlineWidth','DotSize','DotNameOffset','DotShadow'])
-          delete b['broadcast'+tier+suffix];
-    }
+    // Always discard ONLY the scene's old tier-label values before
+    // importing this saved style. Otherwise a v0.9.58 preset without an
+    // independent Hamlet tier can retain an unrelated Hamlet font/zoom
+    // from the scene that happened to be open. Imported modern styles
+    // restore all their own saved values; older styles are losslessly
+    // migrated by MB.ensureConfig() from their saved shared/Village values.
+    for(const tier of ['City','Town','Village','Hamlet'])
+      for(const suffix of ['Enabled','Font','Size','Color','HaloColor','HaloWidth',
+        'DensityPct','Population','TextBackground','BackgroundColor','DropShadow',
+        'Uppercase','Opacity','Spacing','MinZoom','MaxZoom','Dots','DotColor',
+        'DotOutlineColor','DotOutlineWidth','DotSize','DotNameOffset','DotShadow'])
+        delete b['broadcast'+tier+suffix];
     for(const k of Object.keys(g.MB.DEFAULTS))if(Object.prototype.hasOwnProperty.call(cfg,k))b[k]=cfg[k];
     if(cfg.proj==='globe'||cfg.proj==='mercator')b.proj=cfg.proj;
     b.mbStyle='broadcast';g.MB.ensureConfig(b);
