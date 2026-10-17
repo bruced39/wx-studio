@@ -21,6 +21,9 @@ const labels=new Function('wdFontStack','labelPadding',
  between('  function tierAppearance(','  // Natural Earth land polygons')+
  ';return {settlementLayer,tierAppearance,tierTextStyle,addLabelDots,applyLabelBackground,tierFilter};')(fontStack,padding);
 const maker=labels.settlementLayer;
+const auxLabel=new Function('wdFontStack',
+ between('  function applyRecordedAuxLabel(','  function addBroadcastCartography(')+
+ ';return applyRecordedAuxLabel;')(fontStack);
 const buildCode=between("    ['wd-major-city-labels'",'\n  }\n\n  MB.token');
 const build=new Function('cfg','map','source','settlementLayer','tierAppearance','addLabelDots','applyLabelBackground',
   'const nativeOverviewEnabled=false,nativeOverviewEnd=7.5;'+buildCode+';return map.layers;');
@@ -94,9 +97,9 @@ test('UI exposes editable min and max zoom ranges for every place type',()=>{
 test('Mapbox native settlement names remain visible at zoom 6.0; custom labels take over at 7.5',()=>{
  const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
  const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
-  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle',
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle','applyRecordedAuxLabel',
   nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding,
-    labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle);
+    labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle,auxLabel);
  const orig=id=>({id,type:'symbol',source:'composite','source-layer':'place_label',
   minzoom:2,maxzoom:15,layout:{visibility:'visible'},paint:{}});
  const map={layers:[orig('settlement-major-label'),orig('settlement-minor-label'),orig('state-label')],
@@ -161,9 +164,9 @@ test('Mapbox native settlement names remain visible at zoom 6.0; custom labels t
 test('overview city coverage increases eligible cities without ignoring collisions',()=>{
  const nativeCode=between('  function addBroadcastCartography(','  MB.token =');
  const fn=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
-  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle',
+  'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding','tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle','applyRecordedAuxLabel',
   nativeCode+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},maker,fontStack,padding,
-    labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle);
+    labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle,auxLabel);
  // Simulate a Mapbox Streets v12 stock filter: these real built-in
  // constraints MUST survive every WX Studio rank/density setting.
  // Streets v12 major and minor divide by symbolrank, NOT city vs town.
@@ -335,9 +338,9 @@ test('native low zoom uses independent City and Town fonts without duplicate cit
  const code=between('  function addBroadcastCartography(','  MB.token =');
  const install=new Function('streetsSource','installBaseTints','installHillshade','installLandWaterFeatures',
   'installTransportation','installOverlays','settlementLayer','wdFontStack','labelPadding',
-  'tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle',
+  'tierAppearance','addLabelDots','applyLabelBackground','tierTextStyle','applyRecordedAuxLabel',
   code+';return addBroadcastCartography;')(()=> 'composite',()=>{},()=>{},()=>{},()=>{},()=>{},
-   labels.settlementLayer,fontStack,padding,labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle);
+   labels.settlementLayer,fontStack,padding,labels.tierAppearance,labels.addLabelDots,()=>{},labels.tierTextStyle,auxLabel);
  const native=id=>({id,type:'symbol','source-layer':'place_label',
   filter:['==',['get','class'],'settlement'],layout:{visibility:'visible'},paint:{}});
  const map={layers:[native('settlement-major-label'),native('settlement-minor-label')],
