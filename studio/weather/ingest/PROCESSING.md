@@ -1,8 +1,10 @@
 # WX Studio — NOAA native decoder worker (first implementation)
 
-Status: source-format decoders and frame exporter are implemented in Python, but
-NOT a deployed live WX Studio feed. The worker requires native science packages,
-a network-connected host, real NOAA sample-file QA, scheduler and HTTPS publication.
+Status (v0.9.74): deployable separate Python/Docker NOAA decoder + read-only
+HTTPS-ready manifest/frame server and browser/Mapbox source bridge implemented.
+**NOT deployed or demonstrated against live NOAA raw files yet.** A networked
+host, scientific dependency installation, real observations, secure HTTPS domain,
+and CORS/browser acceptance tests are required before feeds are honestly LIVE.
 
 ## Setup on a separate worker
 
@@ -73,3 +75,78 @@ be rendered BELOW the City's/Town's symbol layers in the eventual live bridge.
 Sources: https://registry.opendata.aws/noaa-goes/
          https://registry.opendata.aws/noaa-nexrad/
          https://mrms.ncep.noaa.gov/2D/MergedReflectivityQC/
+
+## Independent worker + HTTP service (v0.9.74)
+
+The decoder's `cli.py` remains the actual raw NetCDF4/GRIB2/Level-II
+converter. No scientific packages were added to Streamlit.
+
+Production build on a **separate Linux Docker host** (at least approximately
+6 GB worker memory, persistent disk sized to the selected loops):
+
+```bash
+docker compose -f studio/weather/ingest/compose.yml up --build -d
+curl http://127.0.0.1:8788/health
+curl http://127.0.0.1:8788/catalog
+```
+
+The decoder container polls four authentic NOAA inputs sequentially every
+5 minutes by default: GOES-19 East CONUS C02 visible (~0.5 km source band)
+and C13 IR (~2 km), MRMS MergedReflectivityQC native 1 km GRIB2, and KBOX
+NEXRAD Level-II lowest-sweep native polar data with ~250 m reflectivity gate
+sampling. These are NOT GeoColor or RTMA/forecast model products.
+The worker refuses stale downloads and oversized source requests rather than
+mislabeling or automatically decimating observations. The host retains a
+bounded rolling frame cache (default 180 per product); actual source cadence
+and missing scans determine how far back a loop can go. A newly launched worker
+has NO four-hour history until it accumulates or otherwise ingests real scans.
+
+Publisher endpoints, CORS-clean by default:
+```
+GET /health
+GET /catalog
+GET /manifests/mrms-reflectivity.json
+GET /manifests/goes-east-conus-C02.json
+GET /manifests/goes-east-conus-C13.json
+GET /manifests/nexrad-reflectivity-KBOX.json
+GET /frames/{product}/{observation_timestamp_ms}.png
+```
+
+`/catalog` includes only verified, currently fresh product manifests.
+If NOAA is unavailable/stale, the service reports `no-fresh-data` and the
+browser does not register the source as live. This ensures the old synthetic
+`demo` feed is never substituted as NOAA output. Weather imagery is a
+Mapbox IMAGE SOURCE + RASTER LAYER inserted below its coastline, boundary,
+road, city, town and other vector overlays; the exporter waits for imagery
+before snapping the map. The loop bar itself remains Claude's unchanged UI.
+
+**HTTPS requirement:** Docker Compose binds port 8788 to the host loopback.
+Configure an HTTPS reverse proxy to that loopback port on the worker and
+point your **WX Studio Streamlit secrets** to that HTTPS domain:
+
+```toml
+WX_WEATHER_PROCESSOR_URL = "https://your-worker-domain.example"
+```
+
+Set `WX_WEATHER_PUBLIC_BASE_URL` on the worker to the same external HTTPS
+base, and `WX_WEATHER_CORS_ORIGIN` to your actual studio origin if possible.
+No service-role keys are sent to the browser; the public NOAA-derived frames
+are read-only. Never make the processing worker a public writable endpoint.
+The existing `WXWeatherProcessorBridge` registers GOES/MRMS/NEXRAD only
+after it receives a valid and fresh catalog. It refreshes available observations
+while the editor remains open and refuses mismatched NEXRAD site choices.
+
+Offline QA:
+```bash
+python -m unittest discover -s tests -p test_noaa_service.py -v
+node --test tests/weather_underlay.test.js
+python -m unittest discover -s tests -p test_noaa_ingest.py -v
+```
+
+**Still unverified:** This ChatGPT environment cannot download NOAA raw files,
+cannot install packages on a user-owned public Docker host or provide a public
+TLS domain, and has no authorized host credentials. Successful actual NetCDF,
+GRIB2 and Level-II conversions, on-map alignment across zooms, and cross-domain
+browser fetch must be established on the worker before declaring feeds LIVE.
+C02 is NOT GeoColor. GOES West and movable mesoscale sectors need separately
+configured products and ROIs. RTMA variable and model fields await selection.
