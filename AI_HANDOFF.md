@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-18 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.94` (`VERSION`).
+- **Last reviewed application version:** `0.9.95` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -837,3 +837,14 @@ User supplied **Recording 2026-10-18 181814.mp4** from after the v0.9.90 live-ed
 - `tests/test_no_docker_windows.py` (new) covers product allowlist, loopback-only bind, crash/interrupt cleanup, reused-port refusal, official portable installer and package declaration, and browser PNA preflight. Source files created/inspected; **DO NOT CLAIM native Windows package installation, NOAA download or live browser verified** until user runs local launcher and shares actual fresh catalog. A real installed Windows micromamba environment and NOAA network availability remain prerequisites. Mismatched browser local-network access can still need user permission.
 
 **No other work touched:** no edit to Claude's `studio/ui.js`, `studio/engine.js`, `studio/index.html`, `studio/dataloop.js`, `studio/weather_workspace.js`, `studio/hl_art.js`, WEATHER palettes/catalog/mosaic preview, mapbox/labels, scripts or scene assets. User is working with Claude concurrently; ALWAYS fetch latest main before publication and fast-forward with expected SHA and force:false. No processing secrets, paid cloud keys, or source-native resolution downgrades.
+
+## v0.9.95 — Windows ecCodes DLL startup repair (ChatGPT, 2026-10-18)
+
+**Starting main:** v0.9.94 `a2aa2fb`. User ran the no-Docker Windows PowerShell launcher from a ZIP checkout; it created `%LOCALAPPDATA%\\WXStudioNOAA\\science-env`, then exited after `RuntimeError: Cannot find the ecCodes library` from `eccodes/gribapi/bindings.py`. This is a native-library loading error **before** the NOAA service or ingest starts. In v0.9.94 the launch script invoked `science-env\\python.exe` directly, without micromamba activation; Windows Conda native ecCodes DLLs are normally in `science-env\\Library\\bin`, whose availability depends on activation. ECMWF docs also distinguish `eccodes` (native DLL) and `python-eccodes` (bindings). This is the likely root cause; user's live Windows machine cannot be accessed from ChatGPT, so final confirmation must come from their PowerShell output.
+
+- `weather_processor/start_no_docker_windows.ps1`: use `& $Micromamba run --prefix $EnvDir python` for **all** Python invocations (ecCodes selfcheck, full scientific dependency check and `weather_processor.local_host` launcher) so the environment's DLL search path and activation vars are present for the API and NOAA ingest child processes too. On ecCodes selfcheck failure only, attempt one targeted `micromamba install --yes --prefix $EnvDir --channel conda-forge eccodes python-eccodes` to repair missing/mismatched native binary/bindings without wiping existing environment. Repeat selfcheck and abort (no fabricated live sources) if it fails. Existing local bind `127.0.0.1`, worker supervision, product choices and Ctrl+C handling preserved.
+- `weather_processor/environment-windows.yaml`: explicitly require `python-eccodes` in addition to `eccodes` and `cfgrib` for new installs. No global Python/pip changes. `tests/test_no_docker_windows.py`: verify activated runner is used for all Python entrypoints, targeted repair and both scientific requirements; existing lifecycle and loopback tests unchanged.
+- `weather_processor/NO_DOCKER_WINDOWS.md`: step-by-step recovery from the exact screenshot: download updated repo ZIP only, REUSE installed science-env, start MRMS first, check real ecCodes selfcheck, /health and /catalog. No Docker installation needed.
+- **Tests and limits:** source-level assertions/branch diff reviewed against v0.9.94; no live Windows PowerShell/micromamba installation or actual ecCodes/NOAA network run available in the sandbox. User must run updated ZIP and report whether selfcheck passes; don't claim live feeds until a fresh real catalog appears.
+- **Claude overlap:** No updates to `studio/ui.js`, `studio/mapbox.js`, `studio/index.html`, `studio/engine.js`, `studio/dataloop.js`, all weather palettes, saved maps, Supabase or cloud data. Only Windows launcher, its environment yaml/docs/tests, VERSION and this handoff. Guarded fast-forward with expected parent SHA/no force.
+
