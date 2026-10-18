@@ -113,8 +113,18 @@ def test_official_installer_and_native_windows_science_dependencies():
     assert "Docker Desktop" not in ps
     assert "WXStudioNOAA" in ps
     assert "micromamba create" not in ps  # invoke the downloaded executable, not a system installation
+    # Native DLLs on Windows are in science-env/Library/bin, NOT on PATH if
+    # you directly execute science-env/python.exe. Use an activated mamba
+    # runner for both preflight and the parent worker (and its children).
+    assert "& $Micromamba run --prefix $EnvDir python -m eccodes selfcheck" in ps
+    assert "& $Micromamba run --prefix $EnvDir python -c " in ps
+    assert "& $Micromamba run --prefix $EnvDir python -m weather_processor.local_host" in ps
+    assert "& $Python -c" not in ps
+    assert "& $Python -m weather_processor.local_host" not in ps
+    assert "install --yes --prefix $EnvDir --channel conda-forge eccodes python-eccodes" in ps
+    assert "Remove-Item -LiteralPath $EnvDir" not in ps
     for package in ["python=3.12", "fastapi", "boto3", "arm_pyart", "eccodes",
-                    "cfgrib", "h5netcdf", "rasterio", "pyproj"]:
+                    "python-eccodes", "cfgrib", "h5netcdf", "rasterio", "pyproj"]:
         assert package in env
     assert "conda-forge" in env
 
