@@ -101,7 +101,7 @@ with sync_playwright() as p:
     # help section
     expand(pg, 'connect', 'Connect local NOAA processor')
     ht = pg.evaluate("document.getElementById('wxws-connect').textContent")
-    chk('A: Connect help — no-Docker start script (first-run switch), Docker option, /health, /catalog, the Streamlit checkbox, docker logs', all(x in ht for x in ['start_no_docker_windows.ps1', '-InstallMicromamba', 'Docker Desktop', 'start_local_windows.ps1', '/health', '/catalog', 'Use free local NOAA processor on this computer', 'docker logs -f wxstudio-noaa-local', 'waiting-for-real-noaa-frames']), '')
+    chk('A: Connect help — no-Docker start script (first-run switch), Docker option, /health, /catalog, the Streamlit checkbox, docker logs', all(x in ht for x in ['start_no_docker_windows.ps1', '-InstallMicromamba', 'Docker Desktop', 'start_local_windows.ps1', '/health', '/catalog', 'Use free local NOAA processor on this computer', 'docker logs -f wxstudio-noaa-local', 'waiting-for-real-noaa-frames', 'Cannot find the ecCodes library']), '')
     links = pg.evaluate("[...document.querySelectorAll('#wxws-connect a')].map(a=>[a.href,a.target,a.rel])")
     chk('A: help links point at http://127.0.0.1:8080 and open in a new tab safely', [l[0] for l in links] == [EP + '/health', EP + '/catalog'] and all(l[1] == '_blank' and 'noopener' in l[2] for l in links), links)
     chk('A: help says what is not verified (honest)', 'Not verified yet' in ht)
