@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.76` (`VERSION`).
+- **Last reviewed application version:** `0.9.77` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -591,3 +591,12 @@ Starting latest main: v0.9.72 commit `d45bd350`. User asked WHEN NetCDF, GRIB2 a
 **Tests:** Added `tests/map_loading_recovery.test.js` (6 deterministic mocked tests: no render, slow tiles, ordinary two-render completion, cancelled generation, startup/style deadlines, and error latch with only 1 attempted WebGL snapshot). Updated **one existing** `tests/data_loop_layout.test.js` assertion to ensure visible map is no longer blocked by projector. Ran 5/5 weather-loop tests, 26/26 city-label tests, and 6/6 new Mapbox tests = **37/37 passing** in an isolated JS mock; `studio/mapbox.js` parsed. **No live Firefox/Mapbox GL token or real tile rendering was available for verification**, so ask user to confirm v0.9.76, Ctrl+F5, and report any precise displayed error if still blank. Distinguish browser WebGL/token/network failure from logical spinner.
 
 **Changed files:** `studio/mapbox.js`, `tests/data_loop_layout.test.js`, NEW `tests/map_loading_recovery.test.js`, `VERSION`, `AI_HANDOFF.md`. Did NOT edit Claude-owned `studio/dataloop.js`, `studio/engine.js`, `studio/index.html`, `studio/ui.js`, or weather-source modules. Started from main v0.9.75 `eb201e6`, compare main and publish via guarded non-force fast-forward only.
+
+## v0.9.77 — Mapbox startup projector variable hotfix (ChatGPT, 2026-10-18)
+
+User's actual Firefox screenshot of deployed v0.9.76 showed a blank map and the exact message **"Mapbox: assignment to undeclared variable pProj"**. Root cause: the map-state declaration in studio/mapbox.js omitted the projector projection variable pProj, but the successful initial-map-load path (after the Mapbox load event), MB.reset(), MB.xf(), and MB.panByPixels() still assign to it. On strict-mode Firefox, successful map loading raises a ReferenceError and destroys the visible map.
+
+- Fix: declare pProj = null alongside curProj and pKey (one production-line change). Keep the optional P projector and the visible D map independent; no other map behavior or saved preferences changed.
+- Regression: two tests added to tests/map_loading_recovery.test.js. One boots projector state in strict mode and switches projection; the other calls MB.reset() when the optional projector failed. 8/8 loading tests pass in V8. Against the original unpatched v0.9.76 source, the two new tests both FAIL, proving they reproduce the bug. Source JavaScript syntax check passed.
+- Only studio/mapbox.js, tests/map_loading_recovery.test.js, VERSION, AI_HANDOFF.md changed. Claude's dataloop.js, engine.js, index.html, ui.js, weather workers, NOAA sources, palettes, and user map-label/cloud styles were not modified.
+- Starting main v0.9.76 SHA 18686e5. Recheck main and publish using expected SHA and force=false only. Browser QA pending: reload v0.9.77, confirm map renders and test Globe/Mercator projection.
