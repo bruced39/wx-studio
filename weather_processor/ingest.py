@@ -167,6 +167,8 @@ def nexrad_candidates(noaa: PublicNoaa, site: str, now) -> list[tuple[str, str, 
 def ingest_product(noaa: PublicNoaa, store: FrameStore, product: str, *, now=None, limit=2):
     now = now or dt.datetime.now(UTC)
     successes = []
+    attempts = 0
+    max_attempts = max(3, limit * 3)
     if product == MRMS:
         frames = noaa.mrms_entries()
         for time_label in frames:
@@ -175,6 +177,9 @@ def ingest_product(noaa: PublicNoaa, store: FrameStore, product: str, *, now=Non
                 continue
             if store.has(product, stamp):
                 continue
+            if attempts >= max_attempts:
+                break
+            attempts += 1
             try:
                 raw = noaa.mrms_bytes(time_label)
                 image = mrms_grib2_gz(raw, REGIONS["east"])
@@ -189,6 +194,9 @@ def ingest_product(noaa: PublicNoaa, store: FrameStore, product: str, *, now=Non
         for bucket, key, stamp in goes_candidates(noaa, product, now):
             if store.has(product, stamp):
                 continue
+            if attempts >= max_attempts:
+                break
+            attempts += 1
             try:
                 raw = noaa.read_s3(bucket, key)
                 with tempfile.TemporaryDirectory(prefix="wx_abi_") as tmp:
@@ -212,6 +220,9 @@ def ingest_product(noaa: PublicNoaa, store: FrameStore, product: str, *, now=Non
         for bucket, key, stamp in nexrad_candidates(noaa, site, now):
             if store.has(product, stamp):
                 continue
+            if attempts >= max_attempts:
+                break
+            attempts += 1
             try:
                 raw = noaa.read_s3(bucket, key)
                 with tempfile.TemporaryDirectory(prefix="wx_l2_") as tmp:
