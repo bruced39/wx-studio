@@ -1239,6 +1239,8 @@
   // stays in front of the weather. No changes to saved map styles.
   const WX_FRAME_SOURCE='wd-weather-data-image',WX_FRAME_LAYER='wd-weather-data-raster';
   MB._weatherFrame=null;MB._weatherKey='';
+  // Expose this only after the full above/below ordering path is present.
+  MB.weatherLayerPositionSupported=true;
   MB.setWeatherFrame=function(frame){
     const valid=frame&&typeof frame.url==='string'&&
       (frame.url.startsWith('https://')||frame.url.startsWith('data:image/png;base64,'))&&
@@ -1248,7 +1250,8 @@
     const requested=valid?frame:null;
     const key=requested?[
       requested.id||requested.url,requested.bbox.join(','),
-      Math.max(0,Math.min(1,+requested.opacity||0))
+      Math.max(0,Math.min(1,+requested.opacity||0)),
+      requested.order==='above-labels'?'above-labels':'below-labels'
     ].join('|'):'';
     if(key===MB._weatherKey)return;
     MB._weatherFrame=requested;MB._weatherKey=key;
@@ -1277,15 +1280,20 @@
     const layers=map.getStyle().layers||[];
     // First line, circle or symbol in the stock style. WX Studio overlays
     // (including labels) are symbol/line layers ABOVE this insertion point.
-    const before=layers.find(l=>['line','symbol','circle'].includes(l.type)&&
+    const above=spec.order==='above-labels';
+    const before=above?undefined:layers.find(l=>['line','symbol','circle'].includes(l.type)&&
       l.id!==WX_FRAME_LAYER)?.id;
+    // "Above Labels" means on top of the Mapbox style, including its
+    // custom WD city/town layers. Scene drawings/captions remain separate
+    // canvas objects above the Mapbox image in the video pipeline.
+    // "Below Labels" preserves the proven native NOAA raster underlay.
     if(!map.getLayer(WX_FRAME_LAYER)){
       map.addLayer({id:WX_FRAME_LAYER,type:'raster',source:WX_FRAME_SOURCE,
         paint:{'raster-opacity':Math.max(0,Math.min(1,+spec.opacity||0)),
           'raster-fade-duration':0}},before);
     }else{
       map.setPaintProperty(WX_FRAME_LAYER,'raster-opacity',Math.max(0,Math.min(1,+spec.opacity||0)));
-      if(before)map.moveLayer(WX_FRAME_LAYER,before);
+      map.moveLayer(WX_FRAME_LAYER,before);
     }
     map.__wdWeatherKey=MB._weatherKey;
     map.triggerRepaint();
