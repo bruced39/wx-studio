@@ -7,7 +7,7 @@ function build(){
  assert.ok(a>0&&b>a,'thumbnail source exists');
  const copies=[],renders=[],timers=[];
  const stage={width:1920,height:1080,tag:'live-editor'};
- const thumb={width:0,height:0,tag:'rendered-thumbnail'};
+ const thumb={width:0,height:0,tag:'rendered-thumbnail',getContext(){return {drawImage(){}};}};
  const cv=[0,1].map(i=>({width:192,height:108,getContext(){return {
    drawImage(img){copies.push({target:i,tag:img.tag});}
  }}}));
