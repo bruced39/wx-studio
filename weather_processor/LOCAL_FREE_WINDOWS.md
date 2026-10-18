@@ -1,4 +1,4 @@
-# WX Studio NOAA Processor — FREE local Windows option
+# WX Studio NOAA Processor — FREE local Windows option (Docker alternative)\n\n**If you do not have or want Docker, use [NO_DOCKER_WINDOWS.md](NO_DOCKER_WINDOWS.md) instead.** The no-Docker path has an isolated Windows scientific environment and uses the same source-native GOES, MRMS and NEXRAD decoders.
 
 NO paid cloud hosting. WX Studio's native NetCDF4, GRIB2 and NEXRAD Level II decoders run on your own Windows PC. Your browser receives images at http://127.0.0.1:8080. Streamlit Community Cloud only hosts the studio interface. This requires no rental server, credit card, public tunnel, open firewall port or monthly hosting fee.
 
