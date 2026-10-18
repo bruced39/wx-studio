@@ -37,7 +37,7 @@ GOES_START = re.compile(r"_s(\d{13,14})")
 NEXRAD_START = re.compile(r"(K[A-Z0-9]{3})(\d{8})_(\d{6})_V\d{2}")
 REGIONS = {
     "east": [-82.0, 35.5, -64.5, 49.0],
-    "west": [-127.0, 30.0, -104.0, 50.0],
+    "west": [-125.0, 33.0, -107.0, 49.0],
 }
 DEFAULT_PRODUCTS = "mrms-reflectivity,goes-east-conus-C02,nexrad-reflectivity-KBOX"
 MAX_DOWNLOAD = int(os.environ.get("WX_MAX_SOURCE_BYTES", str(250_000_000)))
@@ -185,7 +185,7 @@ def ingest_product(noaa: PublicNoaa, store: FrameStore, product: str, *, now=Non
             if len(successes) >= limit:
                 break
     elif (match := GOES.fullmatch(product)):
-        region, _, channel = match.groups()
+        region, sector, channel = match.groups()
         for bucket, key, stamp in goes_candidates(noaa, product, now):
             if store.has(product, stamp):
                 continue
@@ -194,8 +194,10 @@ def ingest_product(noaa: PublicNoaa, store: FrameStore, product: str, *, now=Non
                 with tempfile.TemporaryDirectory(prefix="wx_abi_") as tmp:
                     filename = Path(tmp) / "scan.nc"
                     filename.write_bytes(raw)
-                    image = goes_abi_netcdf(filename, channel, REGIONS[region])
-                store.put(product, stamp, image, REGIONS[region],
+                    image, scan_bbox = goes_abi_netcdf(
+                        filename, channel, None if sector.startswith("meso") else REGIONS[region]
+                    )
+                store.put(product, stamp, image, scan_bbox,
                           f"NOAA GOES-{19 if region == 'east' else 18} ABI {channel} NetCDF4")
                 successes.append(stamp)
             except ValueError as e:
