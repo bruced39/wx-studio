@@ -87,7 +87,10 @@ test('export shows one bottom bar; live canvas and thumbnails never draw a secon
 test('Mapbox map remains usable if weather imagery errors; startup errors are explicit',()=>{
   assert.match(map,/try\{applyWeatherUnderlay\(D\)\}catch\(error\)/);
   assert.match(map,/withTimeout\(loadLib\(\),20000/);
-  assert.match(map,/withTimeout\(Promise\.all\(\[once\(D, 'load'\),once\(P, 'load'\)\]\),25000/);
+  // The visible Mapbox map must not be blocked by a second empty projector.
+  assert.match(map,/withTimeout\(once\(D,'load'\),25000/);
+  assert.doesNotMatch(map,/Promise\.all\(\[once\(D, 'load'\),once\(P, 'load'\)\]\)/);
+  assert.match(map,/function settle\(m,generation\)/);
   assert.match(map,/MB\.status='error';MB\.err=/);
 });
 test('frame date and scrub position use the exact rendered underlay frame',()=>{
