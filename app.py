@@ -17,6 +17,15 @@ with st.sidebar:
     height = st.slider("Studio height (px)", 700, 1400, 940, 20)
     st.caption("Mapbox: uses MAPBOX_PUBLIC_TOKEN (WXfusion) or MAPBOX_TOKEN from Streamlit secrets; you can also paste a public token inside the studio.")
     st.caption("Tip: use Chrome or Edge. MP4 export uses your browser's H.264 encoder.")
+    # Browser-side loopback access: NOAA processing stays on this Windows PC.
+    # No cloud processor, paid hosting, public tunnel, or remote API key.
+    local_noaa = st.checkbox(
+        "Use free local NOAA processor on this computer",
+        value=False,
+        help="Connect the studio browser to the NOAA decoder running on this PC at 127.0.0.1:8080. "
+             "Start the decoder with weather_processor/start_local_windows.ps1 first. "
+             "Browser access to localhost may require permission.",
+    )
 
 
 def _html() -> str:
@@ -75,7 +84,9 @@ def _processor_url() -> str:
         return value
     return ""
 
-_processor = _processor_url()
+# If selected, connect the BROWSER directly to the user's own machine.
+# Streamlit Community Cloud never processes NOAA data or accesses localhost.
+_processor = "http://127.0.0.1:8080" if local_noaa else _processor_url()
 if _processor:
     _inject += "<script>window.WX_WEATHER_PROCESSOR_URL=" + json.dumps(_processor).replace("<", "\\u003c") + ";</script>"
 
