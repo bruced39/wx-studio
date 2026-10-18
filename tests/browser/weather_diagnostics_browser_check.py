@@ -101,7 +101,7 @@ with sync_playwright() as p:
     # help section
     expand(pg, 'connect', 'Connect local NOAA processor')
     ht = pg.evaluate("document.getElementById('wxws-connect').textContent")
-    chk('A: Connect help — Docker Desktop, the start script, /health, /catalog, the Streamlit checkbox, docker logs', all(x in ht for x in ['Docker Desktop', 'start_local_windows.ps1', '/health', '/catalog', 'Use free local NOAA processor on this computer', 'docker logs -f wxstudio-noaa-local', 'waiting-for-real-noaa-frames']), '')
+    chk('A: Connect help — no-Docker start script (first-run switch), Docker option, /health, /catalog, the Streamlit checkbox, docker logs', all(x in ht for x in ['start_no_docker_windows.ps1', '-InstallMicromamba', 'Docker Desktop', 'start_local_windows.ps1', '/health', '/catalog', 'Use free local NOAA processor on this computer', 'docker logs -f wxstudio-noaa-local', 'waiting-for-real-noaa-frames']), '')
     links = pg.evaluate("[...document.querySelectorAll('#wxws-connect a')].map(a=>[a.href,a.target,a.rel])")
     chk('A: help links point at http://127.0.0.1:8080 and open in a new tab safely', [l[0] for l in links] == [EP + '/health', EP + '/catalog'] and all(l[1] == '_blank' and 'noopener' in l[2] for l in links), links)
     chk('A: help says what is not verified (honest)', 'Not verified yet' in ht)
@@ -137,7 +137,7 @@ with sync_playwright() as p:
     open_panel(pg); expand(pg, 'status', 'Data Source Status'); pg.wait_for_timeout(700)
     pg.locator('#wxws [data-diag=processor] button', has_text='Run diagnostics').click(); pg.wait_for_timeout(900)
     s = strip(pg); chk('C: strip says Waiting for NOAA frames', s['pill'] == 'Waiting for NOAA frames', s)
-    c = card(pg); chk('C: card shows /health answered with waiting-for-real-noaa-frames and 0 products', c and '✓ answered' in c['text'] and 'waiting-for-real-noaa-frames' in c['text'] and '0 products' in c['text'] and 'docker logs' in c['text'], c)
+    c = card(pg); chk('C: card shows /health answered with waiting-for-real-noaa-frames and 0 products', c and '✓ answered' in c['text'] and 'waiting-for-real-noaa-frames' in c['text'] and '0 products' in c['text'] and 'processor window' in c['text'], c)
     r = row(pg, 'mrms-reflectivity'); chk('C: MRMS row says Waiting for NOAA frames; nothing LIVE', r and r['state'] == 'waiting' and r['pill'] == 'Waiting for NOAA frames', r)
     chk('C: not one source is live or connected', pg.evaluate("![...document.querySelectorAll('#wxws .ws-drow')].some(r=>/^(live|connected)$/.test(r.dataset.state))"))
     chk('C: no page errors', not pg.errs, pg.errs); ctx.close()

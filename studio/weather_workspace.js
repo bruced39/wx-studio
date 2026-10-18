@@ -161,7 +161,7 @@
     const ep = i.endpoint || '', local = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(ep), h = i.health, c = i.catalog;
     let reach = 'unknown', err = '';
     const out = (state, pill, title, short, detail) => ({ state, pill, title, short, detail, err, mode: !ep ? 'none' : local ? 'local' : 'hosted', local });
-    if (!ep) return out('notconfigured', 'notconnected', 'Not connected', 'No processor enabled', 'No NOAA processor is enabled. Demo patterns work without one; for real NOAA data, start the free local processor (see "Connect local NOAA processor") and tick its checkbox in the Streamlit sidebar.');
+    if (!ep) return out('notconfigured', 'notconnected', 'Not connected', 'No processor enabled', 'No NOAA processor is enabled. Demo patterns work without one; for real NOAA data, start the free local processor on this computer (see "Connect local NOAA processor") and tick its checkbox in the Streamlit sidebar.');
     if (h || c) { reach = (h && h.ok) || (c && c.ok) ? 'ok' : 'fail'; err = (h && h.error) || (c && c.error) || ''; }
     else if (i.bridgeStatus === 'unavailable') { reach = 'fail'; err = i.bridgeError || ''; }
     else if (i.bridgeStatus === 'available' || i.bridgeStatus === 'no-fresh-data') reach = 'ok';
@@ -171,7 +171,7 @@
       : out('unavailable', 'unavailable', 'Unavailable', 'Processor unreachable', 'Cannot reach the NOAA processor at ' + ep + (err ? ' (' + err + ')' : '') + '.');
     if (c && c.ok === false && c.error) return out('unavailable', 'unavailable', 'Unavailable', 'Processor error', 'The processor answered, but its catalog could not be used: ' + c.error + '.');
     const n = c && c.ok ? c.products.length : (i.bridgeStatus === 'available' ? null : 0);
-    if (n === 0 || (h && h.ok && h.status === 'waiting-for-real-noaa-frames' && !n)) return out('waiting', 'waiting', 'Waiting for NOAA frames', 'Waiting for NOAA frames', 'The processor is running, but it has not published fresh decoded NOAA observations yet. First downloads can take several minutes; check "docker logs -f wxstudio-noaa-local".');
+    if (n === 0 || (h && h.ok && h.status === 'waiting-for-real-noaa-frames' && !n)) return out('waiting', 'waiting', 'Waiting for NOAA frames', 'Waiting for NOAA frames', 'The processor is running, but it has not published fresh decoded NOAA observations yet. First downloads can take several minutes; watch the processor window (Docker: "docker logs -f wxstudio-noaa-local").');
     return out('online', 'connected', 'Connected', n == null ? 'Processor online' : n + ' product' + (n === 1 ? '' : 's') + ' listed', (n == null ? 'The processor is online' : n + ' product' + (n === 1 ? ' is' : 's are') + ' listed with fresh observations') + '. A product counts as LIVE only after its newest frame has been downloaded and decoded (Verify frame, or the active weather loop).');
   };
   /* Plain-text report to paste into a chat or an issue. */
@@ -706,19 +706,20 @@
   function secConnect(box) {
     const pm = procModel(), ep = bridgeEp();
     box.append(el('div', { className: 'ws-note', text: 'Real NOAA satellite and radar come from a small free program that downloads and decodes NOAA data. It can run on this Windows computer (no paid server). Demo patterns work without it.' }));
-    box.append(el('div', { className: 'ws-card', attrs: { 'data-diag': 'connect-status' } }, el('div', { className: 'nm' }, el('b', { text: 'This studio is pointed at' }), el('span', { className: 'ws-pill ' + pm.pill, text: pm.title })), el('div', { className: 'ws-note', style: 'margin:6px 0 0', text: ep ? ep + (pm.mode === 'local' ? ' — the NOAA processor on this computer' : ' — a hosted NOAA processor') : 'nothing yet (step 5 below turns it on)' })));
+    box.append(el('div', { className: 'ws-card', attrs: { 'data-diag': 'connect-status' } }, el('div', { className: 'nm' }, el('b', { text: 'This studio is pointed at' }), el('span', { className: 'ws-pill ' + pm.pill, text: pm.title })), el('div', { className: 'ws-note', style: 'margin:6px 0 0', text: ep ? ep + (pm.mode === 'local' ? ' — the NOAA processor on this computer' : ' — a hosted NOAA processor') : 'nothing yet (step 4 below turns it on)' })));
     const li = (...k) => el('li', null, ...k);
     box.append(el('ol', { className: 'ws-steps' },
-      li('Install ', el('b', { text: 'Docker Desktop' }), ' (free for personal use) and start it; wait until its engine says it is running.'),
-      li('Keep a copy of the ', el('b', { text: 'bruced39/wx-studio' }), ' folder on this computer (git clone or ZIP). Docker builds from it.'),
-      li('In PowerShell, inside that folder, start the processor (the first start downloads and builds, so it takes a while):', cmd('powershell -ExecutionPolicy Bypass -File .\\weather_processor\\start_local_windows.ps1'), el('span', { className: 'ws-note', text: 'Short on memory? Try one product first: add  -Products "mrms-reflectivity"' })),
+      li('Keep a copy of the ', el('b', { text: 'bruced39/wx-studio' }), ' folder on this computer (git clone or ZIP).'),
+      li(el('b', { text: 'Start the processor' }), ' — option A needs no Docker. In PowerShell, inside that folder (first time only, add ', el('code', { text: '-InstallMicromamba' }), '; later runs leave it off):', cmd('powershell -ExecutionPolicy Bypass -File .\\weather_processor\\start_no_docker_windows.ps1 -InstallMicromamba'),
+        el('span', { className: 'ws-note', text: 'The first setup downloads several GB into %LOCALAPPDATA%\\WXStudioNOAA (your system Python is not changed). Keep that window open; Ctrl+C stops it. Short on memory? Add  -Products "mrms-reflectivity"  to try one product first.' }),
+        el('span', { className: 'ws-note', text: 'Option B, with Docker Desktop (free for personal use) running:' }), cmd('powershell -ExecutionPolicy Bypass -File .\\weather_processor\\start_local_windows.ps1')),
       li('Check it on the same computer: open ', el('a', { href: 'http://127.0.0.1:8080/health', target: '_blank', rel: 'noopener', text: 'http://127.0.0.1:8080/health' }), ' — at first it says “waiting-for-real-noaa-frames”, then “ready” once real NOAA scans are decoded. Then open ', el('a', { href: 'http://127.0.0.1:8080/catalog', target: '_blank', rel: 'noopener', text: '/catalog' }), ' — it lists each product with its newest observation time.'),
       li('In this Streamlit app, open the sidebar and tick ', el('b', { text: 'Use free local NOAA processor on this computer' }), '. The page reloads.'),
       li('If the browser asks to allow access to local devices or the local network, allow it for this site. Then press ', el('b', { text: 'Run diagnostics' }), ' in Data Source Status.')));
-    box.append(el('div', { className: 'ws-sub', text: 'Handy commands' }), cmd('docker logs -f wxstudio-noaa-local'), cmd('docker stop wxstudio-noaa-local'), cmd('docker start wxstudio-noaa-local'));
+    box.append(el('div', { className: 'ws-sub', text: 'Docker option: handy commands' }), cmd('docker logs -f wxstudio-noaa-local'), cmd('docker stop wxstudio-noaa-local'), cmd('docker start wxstudio-noaa-local'));
     box.append(el('div', { className: 'ws-note', text: 'The website itself never contacts your computer — your browser does. The computer must stay on for live data. A source shows LIVE only after a real frame has been downloaded and decoded, and is recent.' }));
     box.append(el('div', { className: 'ws-note warn', text: 'Not verified yet by us: running the processor on your Windows PC, and your browser’s permission for loopback access from the hosted page. If it is blocked, Data Source Status will say “no response”.' }));
-    box.append(el('div', { className: 'ws-btns' }, el('button', { className: 'ws-btn pri', text: 'Run diagnostics', disabled: !ep || dg.busy, title: ep ? '' : 'Enable the processor first (step 5)', on: { click: () => runDiag({ manual: true }) } })));
+    box.append(el('div', { className: 'ws-btns' }, el('button', { className: 'ws-btn pri', text: 'Run diagnostics', disabled: !ep || dg.busy, title: ep ? '' : 'Enable the processor first (step 4)', on: { click: () => runDiag({ manual: true }) } })));
   }
 
   /* ---------- palettes ---------- */
