@@ -114,14 +114,39 @@ def test_full_disk_and_meso_candidates_not_mislabeled():
     class Fake:
         def list_s3(self, bucket, prefix):
             assert bucket == "noaa-goes19"
-            if "ABI-L2-CMIPM" not in prefix:
+            if "ABI-L2-CMIPM" not in prefix or not prefix.endswith("/11/"):
                 return []
+            # A real S3 scan exists in its observation-hour prefix ONCE.
+            # Fake S3 results must not return the same scan in three hours.
             return [{"Key": prefix + "OR_ABI-L2-CMIPM1-M6C02_G19_s20262911105001_e20262911105500_c20262911106000.nc",
                      "Size": 100}]
     rows = ingest.goes_candidates(Fake(), "goes-east-meso1-C02", now)
     assert len(rows) == 1
     assert rows[0][2].hour == 11
     assert rows[0][0] == "noaa-goes19"
+
+
+def test_goes_candidate_regex_accepts_single_and_double_digit_abi_scan_modes():
+    # Regression against an f-string containing \\d{1,2}: Python evaluates
+    # the single curly braces as a tuple, and NO real GOES scan matches it.
+    now = dt.datetime(2026, 10, 18, 11, 10, tzinfo=UTC)
+    for mode in ("M6", "M16"):
+        class Fake:
+            def list_s3(self, bucket, prefix):
+                if not prefix.endswith("/11/"):
+                    return []
+                return [{"Key": prefix + f"OR_ABI-L2-CMIPC-{mode}C02_G19_s20262911105001_e20262911105500_c20262911106000.nc",
+                         "Size": 100}]
+        rows = ingest.goes_candidates(Fake(), "goes-east-conus-C02", now)
+        assert len(rows) == 1
+        assert rows[0][2].hour == 11
+    class NotAnotherProduct:
+        def list_s3(self, bucket, prefix):
+            if not prefix.endswith("/11/"):
+                return []
+            return [{"Key": prefix + "OR_ABI-L2-CMIPM2-M6C02_G19_s20262911105001_e20262911105500_c20262911106000.nc",
+                     "Size": 100}]
+    assert ingest.goes_candidates(NotAnotherProduct(), "goes-east-meso1-C02", now) == []
 
 
 def test_mrms_decoding_rejects_pre_rendered_noaa_png_and_invalid_gzip():
