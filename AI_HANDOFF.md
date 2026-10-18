@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-18 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.91` (`VERSION`).
+- **Last reviewed application version:** `0.9.93` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -815,3 +815,11 @@ User supplied **Recording 2026-10-18 181814.mp4** from after the v0.9.90 live-ed
 **Not verified:** real Mapbox rendering with badges over a live map (sandbox has no Mapbox token), MP4 export of a show containing badges (the engine draws them through the same `renderScene` path the export uses, but no encode was run), and how the badges look on your real saved shows.
 
 **Observation (pre-existing, not changed):** in headless viewports narrower than ~16:9 for the centre column the editor **preview** canvas is stretched (displayed aspect 1.45–1.50 instead of 1.78) because `#stageWrap` has both `aspect-ratio:16/9` and `height:100%` with `max-width:100%` (`studio/index.html` lines 32–33, from Phase 1). Exports are always 1920×1080 and round. Identical on untouched main. It would make badges (and every other object) look slightly oval in the preview on narrower windows; a fix is to size the wrapper by whichever of width/height is limiting.
+
+## v0.9.93 — repair pre-existing Mapbox reset test fixture (ChatGPT, 2026-10-18)
+
+**Starting production main:** Claude's v0.9.92 `aaef874dbeb246d9a67506df30f5709e5363be17`, with new H/L metallic artwork. Claude reported that `node --test tests/*.test.js` had one longstanding failure from v0.9.91: "Mapbox reset clears projector state even when optional P is unavailable." Inspected `studio/mapbox.js` and `tests/map_loading_recovery.test.js`; reproduced on unchanged main as `ReferenceError: snapshotBusy is not defined` inside the ISOLATED fixture. This is **not** a production reset failure: the real Mapbox closure correctly declares `let snapshotBusy=false,previewHold=null,previewRestorePending=false,previewRestoreKey=null;` later in the same module. The source-extraction test included projector variables but omitted those four preview-state declarations, introduced by the earlier editor preview stabilizer.
+
+- **Only executable file changed:** `tests/map_loading_recovery.test.js`. Include the ACTUAL preview-state declaration from `studio/mapbox.js` in the isolated simulated reset closure, populate all four with nondefault "busy/held/pending/key" values, and assert `MB.reset()` clears them and `MB.lastKey` as well as projector state, generation counter, status, and error.
+- **Negative control:** With exactly the same mapbox.js and test harness, untouched main passed 7 tests and failed the projector reset test with missing `snapshotBusy`; patched test passed all **8/8** in the module. No edits whatsoever to `studio/mapbox.js`, `studio/ui.js`, `studio/engine.js`, `studio/index.html`, Claude's `studio/hl_art.js`/PNG, weather data sources, palettes, new layer ordering/smooth-color columns (v0.9.89), or cloud data.
+- Changed files: `tests/map_loading_recovery.test.js`, `VERSION`, `AI_HANDOFF.md`. Requires optional full repo/CI suite confirmation (no complete repo checkout was used in this connector-backed change). Publishing uses guarded `expected_sha` fast-forward only; never force.
