@@ -108,8 +108,12 @@ with sync_playwright() as p:
     pg.click('#wxws [data-play]'); pg.wait_for_timeout(120); pl = pg.evaluate("WXData.state.get(WX.S.show.scenes[WX.S.si]).playing"); pg.click('#wxws [data-play]')
     chk('mini playback: play/pause toggles', pl is True and pg.evaluate("WXData.state.get(WX.S.show.scenes[WX.S.si]).playing") is False)
     # stack + capability gating
+    # since v0.9.89 the real Mapbox layer supports ordering, so the capability is normally ON (weather starts below labels: only the up arrow is enabled)
+    cap = pg.evaluate("WXWeatherWorkspace.capabilities.layerPosition"); arrows = pg.evaluate("[...document.querySelectorAll('#wxws .ws-stack .me button')].map(x=>x.disabled)")
+    chk('layer order arrows follow the Mapbox capability (on: only "move above labels" enabled)', arrows == ([False, True] if cap else [True, True]), [cap, arrows])
+    pg.evaluate("WXWeatherWorkspace.capabilities.layerPosition=false;WXWeatherWorkspace.render()")
     arrows = pg.evaluate("[...document.querySelectorAll('#wxws .ws-stack .me button')].map(x=>x.disabled)")
-    chk('layer order arrows disabled until the map supports it', arrows == [True, True], arrows)
+    chk('layer order arrows are disabled when the capability is off', arrows == [True, True], arrows)
     pg.evaluate("WXWeatherWorkspace.capabilities.layerPosition=true;WXWeatherWorkspace.render()")
     pg.click('#wxws .ws-stack .me button[title^="Move above"]'); pg.wait_for_timeout(100)
     chk('with capability: moving above labels writes dataLoop.order', dl(pg).get('order') == 'above-labels' and pg.evaluate("document.querySelector('#wxws .ws-stack div:nth-child(2) span').textContent")=='Weather data')
@@ -165,10 +169,10 @@ with sync_playwright() as p:
     pg.evaluate("WXWeatherWorkspace.ui.grp.satellite=true;WXWeatherWorkspace.render()")
     pg.locator('#wxws .ws-pal', has_text='Infrared brightness temperature').first.locator('button', has_text='Copy & edit').click(); pg.wait_for_timeout(150)
     pg.fill('#wxws .ws-edit input[type=text]', 'Boston IR')
-    chk('editor warns that smooth blending is not stored in the cloud', 'stepped' in pg.evaluate("document.querySelector('#wxws .ws-edit').textContent"))
+    chk('editor says smooth blending is saved with the palette (no false "stepped" warning)', 'Smooth color blending is saved' in pg.evaluate("document.querySelector('#wxws .ws-edit').textContent") and 'stepped' not in pg.evaluate("document.querySelector('#wxws .ws-edit').textContent"))
     pg.locator('#wxws .ws-edit button', has_text='Save to my cloud palettes').click(); pg.wait_for_timeout(500)
     sv = [c for c in pg.evaluate("__cloud.calls") if c[0] == 'save']
-    chk('cloud save: arguments sent to WXWeatherPaletteCloud.save', len(sv) == 1 and sv[0][1]['category'] == 'satellite' and sv[0][1]['productId'] == 'abi_c13' and sv[0][1]['name'] == 'Boston IR' and sv[0][1]['units'] == '°C' and len(sv[0][1]['stops']) == 13 and not sv[0][1]['id'], sv[:1] and {k: v for k, v in sv[0][1].items() if k != 'stops'})
+    chk('cloud save: arguments sent to WXWeatherPaletteCloud.save', len(sv) == 1 and sv[0][1]['category'] == 'satellite' and sv[0][1]['productId'] == 'abi_c13' and sv[0][1]['name'] == 'Boston IR' and sv[0][1]['units'] == '°C' and len(sv[0][1]['stops']) == 13 and sv[0][1].get('continuous') is True and not sv[0][1]['id'], sv[:1] and {k: v for k, v in sv[0][1].items() if k != 'stops'})
     chk('cloud save: registered with productIds [abi_c13]', pg.evaluate("Object.values(WXWeatherPalettes.custom).some(p=>p.name==='Boston IR'&&p.productIds[0]==='abi_c13'&&p.id.startsWith('my/satellite/'))"))
     # export
     pg.evaluate("WXWeatherWorkspace.ui.grp.satellite=true;WXWeatherWorkspace.render()")

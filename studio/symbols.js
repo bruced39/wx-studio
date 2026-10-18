@@ -51,26 +51,49 @@
     c.fillStyle = fg || '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(text, x, y + size * 0.04); c.restore();
   }
 
-  /* ---------- H / L pressure centres ---------- */
+  /* ---------- H / L pressure centres ----------
+   * The badge artwork is the user's own transparent PNG (hl_art.js). Until it has decoded, the original drawn
+   * letter is used instead so a pressure centre never disappears from a preview or export. */
+  const HLI = {}, HL_RING = 0.964;   // opaque ring = 96.4% of the artwork width (the rest is its soft shadow)
+  function hlArt(kind) {
+    let e = HLI[kind]; if (e) return e.ok ? e : null;
+    const A = g.WX_HL_ART; if (!A || !A[kind] || typeof Image === 'undefined') return null;
+    e = HLI[kind] = { ok: false, lv: [] }; const im = new Image();
+    im.onload = () => {   // mip chain: small or animated badges stay smooth instead of shimmering
+      e.lv = [im]; let w = im.naturalWidth, src = im;
+      while (w > 60) { w = Math.round(w / 2); const cv = document.createElement('canvas'); cv.width = cv.height = w; const x = cv.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(src, 0, 0, w, w); e.lv.push(cv); src = cv; }
+      e.ok = true;
+    };
+    im.src = A[kind]; return null;
+  }
+  if (typeof document !== 'undefined') Object.keys(g.WX_HL_ART || {}).forEach(hlArt);   // start decoding at page load so even the first preview/export frame already has the badge
+  const lvW = l => l.naturalWidth || l.width;
   function drawHL(c, kind, x, y, size, value, t, o) {
     o = o || {}; const col = kind === 'H' ? '#2f7bff' : '#ff3b3b', glow = kind === 'H' ? 'rgba(47,123,255,' : 'rgba(255,59,59,';
-    const prog = o.progress == null ? 1 : o.progress;
+    const prog = o.progress == null ? 1 : o.progress, art = hlArt(kind), badge = size * 1.15;   // visible ring diameter
     c.save(); c.translate(x, y); c.globalAlpha *= clamp(prog * 1.5, 0, 1);
     const sc = 0.6 + 0.4 * Math.min(1, prog * 1.3); c.scale(sc, sc);
     for (let k = 0; k < 2; k++) {                    // pulsing rings
-      const ph = fract(t * 0.5 + k * 0.5), r = size * (0.62 + ph * 0.5);
+      const ph = fract(t * 0.5 + k * 0.5), r = art ? size * (0.6 + ph * 0.5) : size * (0.62 + ph * 0.5);
       c.strokeStyle = glow + (0.55 * (1 - ph)) + ')'; c.lineWidth = size * 0.05; c.beginPath(); c.arc(0, 0, r, 0, TAU); c.stroke();
     }
     const gl = c.createRadialGradient(0, 0, size * 0.1, 0, 0, size * 0.8); gl.addColorStop(0, glow + '0.38)'); gl.addColorStop(1, glow + '0)');
     c.fillStyle = gl; c.beginPath(); c.arc(0, 0, size * 0.8, 0, TAU); c.fill();
-    c.font = `800 ${size * 1.05}px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.lineJoin = 'round'; c.lineWidth = size * 0.12; c.strokeStyle = 'rgba(255,255,255,0.95)';
     const bob = Math.sin(t * 1.6) * size * 0.015;
-    c.strokeText(kind, 0, bob); c.fillStyle = col; c.fillText(kind, 0, bob);
-    if (value !== '' && value != null) pill(c, String(value), 0, size * 0.66, size * 0.3, 'rgba(8,20,38,0.82)', '#fff');
+    if (art) {
+      const wd = badge / HL_RING, k = (c.getTransform ? c.getTransform().a : 1) || 1, want = wd * k;
+      let lvl = art.lv[0]; for (let i = art.lv.length - 1; i >= 0; i--) if (lvW(art.lv[i]) >= want) { lvl = art.lv[i]; break; }   // smallest level that is still sharp enough
+      c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high'; c.drawImage(lvl, -wd / 2, bob - wd / 2, wd, wd);
+    } else {
+      c.font = `800 ${size * 1.05}px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.lineJoin = 'round'; c.lineWidth = size * 0.12; c.strokeStyle = 'rgba(255,255,255,0.95)';
+      c.strokeText(kind, 0, bob); c.fillStyle = col; c.fillText(kind, 0, bob);
+    }
+    if (value !== '' && value != null) pill(c, String(value), 0, size * (art ? 0.78 : 0.66), size * 0.3, 'rgba(8,20,38,0.82)', '#fff');
     c.restore();
   }
-  const hlBounds = (x, y, size) => ({ x: x - size * 0.55, y: y - size * 0.55, w: size * 1.1, h: size * 1.4 });
+  const hlBounds = (x, y, size) => ({ x: x - size * 0.62, y: y - size * 0.62, w: size * 1.24, h: size * 1.6 });
+  g.WXHLBadgeReady = () => Object.keys(g.WX_HL_ART || {}).every(k => { hlArt(k); return !!(HLI[k] && HLI[k].ok); });
 
   /* ---------- fronts ----------
  * Glyphs sit on the LEFT-hand side of the drawing direction (the 'Flip side' option swaps them).
