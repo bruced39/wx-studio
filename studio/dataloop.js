@@ -141,17 +141,20 @@
     if(opts&&(opts.editing||opts.liveMap)&&!presenting)return;
     const dl = dlOf(scene); if (!dl || dl.showBar === false) return;
     const rt = rtOf(scene); if (!ready(rt).length) return;
-    const L = D.barLabels(scene), FONT = '600 26px "Barlow","Inter",system-ui,Arial,sans-serif', x0 = 56, x1 = W - 56, y0 = H - 150, bh = 86;
+    // Match the on-screen Aguacero-style dock at the absolute bottom
+    // of the 1920×1080 exported frame. Timestamp stays above blue scrub.
+    const L = D.barLabels(scene), FONT = '600 25px "Barlow","Inter",system-ui,Arial,sans-serif',
+      x0 = 12, x1 = W - 12, y0 = H - 70, bh = 70;
     c.save(); c.font = FONT; c.textBaseline = 'middle';
     c.fillStyle = 'rgba(8,14,26,0.9)'; rr(c, x0, y0, x1 - x0, bh, 14); c.fill();
     c.fillStyle = '#eaf2ff'; c.font = '700 34px system-ui,Arial,sans-serif'; c.textAlign = 'center';
     c.fillText('‹', x0 + 36, y0 + bh / 2 - 2); c.fillText('›', x0 + 100, y0 + bh / 2 - 2);
     c.font = FONT; c.textAlign = 'left'; c.fillStyle = '#9fb4d6'; c.fillText('−', x0 + 140, y0 + bh / 2); c.fillStyle = '#fff'; c.fillText(dl.speed + 'x', x0 + 172, y0 + bh / 2); c.fillStyle = '#9fb4d6'; c.fillText('+', x0 + 236, y0 + bh / 2);
-    const bx0 = x0 + 290, bx1 = x1 - 560, by = y0 + bh / 2 + 10;
+    const bx0 = x0 + 300, bx1 = x1 - 565, by = y0 + bh / 2 + 16;
     c.fillStyle = 'rgba(255,255,255,0.14)'; rr(c, bx0, by - 5, bx1 - bx0, 10, 5); c.fill();
     c.fillStyle = '#2f7bff'; rr(c, bx0, by - 5, Math.max(10, (bx1 - bx0) * L.loadedFrac), 10, 5); c.fill();
     c.fillStyle = '#fff'; c.beginPath(); c.arc(bx0 + (bx1 - bx0) * L.pos, by, 11, 0, 6.3); c.fill();
-    c.fillStyle = '#eaf2ff'; c.textAlign = 'right'; c.font = '600 24px system-ui,Arial,sans-serif'; c.fillText(L.stamp, bx1, y0 + 22);
+    c.fillStyle = '#eaf2ff'; c.textAlign = 'right'; c.font = '600 24px system-ui,Arial,sans-serif'; c.fillText(L.stamp, bx1, y0 + 13);
     c.font = FONT; c.fillStyle = '#ff5d5d'; c.textAlign = 'left'; c.fillText('LIVE', bx1 + 36, y0 + bh / 2); c.fillStyle = '#eaf2ff'; c.fillText(L.len + ' ▾', bx1 + 128, y0 + bh / 2); c.textAlign = 'right'; c.fillText(L.src + ' ▾', x1 - 22, y0 + bh / 2);
     c.restore();
   };
