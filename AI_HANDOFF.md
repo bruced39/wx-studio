@@ -5,9 +5,9 @@
 
 ## Last reviewed baseline
 
-- Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
+- Review date: 2026-10-18 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.81` (`VERSION`).
+- **Last reviewed application version:** `0.9.84` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -679,4 +679,16 @@ Checked GitHub Actions run `39145383004` (2026-10-18), which **failed** during s
 - Ran the actual two JS test files' logic in an isolated V8/Node-module imitation with all 10 cases passing, including GOES frame bounding/time spacing and off-origin frame URL rejection. **Do not claim all 70 repository tests reran**: only those 10 tests were evaluated here; Claude's prior 68/70 is background.
 - Checked the NOAA NWS public ImageServer `https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer?f=pjson`: real public metadata advertises a rolling four-hour MRMS image service and five-minute updates, but **live browser CORS, rendered location under Mapbox labels, and real NOAA image downloads/export have NOT been verified**. New test pass is not proof of live NOAA feeds.
 - **Files changed:** just `tests/weather_foundation.test.js`, `tests/weather_native_processor_bridge.test.js`, `VERSION`, and `AI_HANDOFF.md`. **Not touched:** Claude's `studio/dataloop.js`, `studio/ui.js`, `studio/index.html`, `studio/engine.js`, tests/data_menu, cloud palettes; ChatGPT's weather processor, underlay, map styles and weather source runtime. No secrets, cloud changes or costs. Recheck main and only fast-forward with expected SHA and force=false.
+
+
+## v0.9.84 — radar and IR DEMO frames recover without early palette registry (ChatGPT, 2026-10-18)
+
+User live-tested WX Studio v0.9.83: **Demo RGB (GeoColor-style) loaded and looped**, while the synthetic **radar dBZ** and **infrared BT** demos showed `Frames could not be loaded`. Investigation isolated their shared dependency: the two failed demos use `f.scalar` and require `WXWeatherPalettes` to convert numerical grids into canvases, while GeoColor supplies an already-coloured `f.load` canvas. The real `weather/palettes.js` registry includes both expected built-in tables, and a controlled test with the registry loaded passes all three. However, reproducing an early missing palette produced exactly the user-observed split: radar/IR error and RGB success. Furthermore `D.ensure(scene)` cached that original error for that scene even if the registry became available later.
+
+- `studio/dataloop.js` now has a **strictly synthetic-DEMO-only**, small self-contained canvas-colouring fallback for `demo` dBZ and `demo-ir` °C. This fallback is only used when the palette registry is missing/temporarily throws; it does NOT claim to be NOAA colors and never handles real data sources. Real NOAA scalar feeds still need a valid selected official/user-saved palette.
+- `D.ensure(scene)` tracks `rt.demoPaletteFallback` and automatically reloads/repaints the SAME scene when the appropriate `WXWeatherPalettes` table becomes available, instead of preserving a failed or emergency-coloured result forever. Ordinary normal registry colors take priority, without changing the GeoColor RGB path.
+- Failures now include the first frame error in the editor's status message (`Frames could not be loaded: …`) instead of a misleading generic message. A temporary synthetic color fallback explains itself visibly in the status text.
+- Added `tests/weather_demo_frames.test.js` with six tests: no-registry radar demo; no-registry infrared demo; unaffected RGB; SAME SCENE automatic reload after late palette installation; native weather palette rendering of both scalar demos; and **non-demo scalar input must remain an error** without a palette. All six passed in isolated V8 with real source strings and controlled DOM canvas mocks; `studio/dataloop.js` passed JS parse checks. This is not live Streamlit browser rendering or operational NOAA feed verification.
+- **Starting main:** v0.9.83 commit `66e4b36`. **Changed:** `studio/dataloop.js` (surgical fix to Claude's self-contained weather loop), `tests/weather_demo_frames.test.js` (new), `VERSION`, `AI_HANDOFF.md`. **Untouched:** `studio/engine.js`, `studio/index.html`, `studio/ui.js`, `studio/mapbox.js`, palettes, source catalogs, cloud authentication/storage and NOAA server/processor. No token/secret changes.
+- **Concurrency:** Recheck main before publish and only use guarded fast-forward expected SHA, force=false; Claude may be concurrently editing weather loop/menu. Rebase on his new main rather than overwrite.
 
