@@ -61,11 +61,42 @@
 
   function loadImage(url) { return new Promise((res, rej) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => res(im); im.onerror = () => rej(new Error('image failed: ' + url)); im.src = url; }); }
 
+  // Standalone colours ONLY for synthetic scalar DEMOS if the separate weather
+  // palette registry has not loaded yet. These are not NOAA tables or a
+  // substitute for any real observation product's required colour palette.
+  // Pre-coloured demo RGB frames need no palette and use their own loader.
+  function paintDemoFallback(sc,kind){
+    const cv=document.createElement('canvas');cv.width=sc.w;cv.height=sc.h;
+    const c=cv.getContext('2d');
+    if(!c)throw Error('Canvas 2D is unavailable for this demo');
+    const im=c.createImageData(sc.w,sc.h),d=im.data;
+    const stops=kind==='dbz'
+      ?[[5,[0,230,235]],[20,[0,205,0]],[35,[255,240,0]],
+        [50,[245,0,0]],[65,[236,0,236]],[75,[255,255,255]]]
+      :[[-95,[255,255,255]],[-75,[130,75,210]],[-55,[240,75,80]],
+        [-35,[250,230,75]],[-15,[75,175,205]],[5,[145,155,170]],
+        [40,[10,18,32]]];
+    for(let i=0;i<sc.data.length;i++){
+      const v=sc.data[i];if(!Number.isFinite(v)||(kind==='dbz'&&v<5))continue;
+      let k=0;while(k+1<stops.length&&v>=stops[k+1][0])k++;
+      const a=stops[k],b=stops[Math.min(k+1,stops.length-1)];
+      const ratio=kind==='dbz'||b===a?0:Math.max(0,Math.min(1,(v-a[0])/(b[0]-a[0])));
+      for(let j=0;j<3;j++)d[i*4+j]=Math.round(a[1][j]+(b[1][j]-a[1][j])*ratio);
+      d[i*4+3]=255;
+    }
+    c.putImageData(im,0,0);return cv;
+  }
+
   D.ensure = function (scene) {
     const dl = dlOf(scene); if (!dl) return Promise.resolve();
     const rt = rtOf(scene), key = keyOf(dl);
-    if (rt.key === key && rt.promise) return rt.promise;
-    const src = D.sources[dl.source]; rt.key = key; rt.frames = []; rt.loaded = 0; rt.total = 0; rt.gen++; const gen = rt.gen;
+    // A scalar demo that used emergency colours while the palette module was
+    // unavailable should automatically repaint from the correct built-in
+    // weather palette once it appears. Do not cache an early failed load for
+    // the lifetime of a scene.
+    if (rt.key === key && rt.promise && !(rt.demoPaletteFallback && palIdOf(dl))) return rt.promise;
+    const src = D.sources[dl.source]; rt.key = key; rt.frames = []; rt.loaded = 0; rt.total = 0;
+    rt.demoPaletteFallback = false; rt.gen++; const gen = rt.gen;
     if (!src) { rt.status = 'nosrc'; rt.msg = srcInfo(dl.source).label + ' is not connected yet'; rt.promise = Promise.resolve(); return rt.promise; }
     rt.status = 'loading'; rt.msg = 'Loading frames…';
     rt.promise = (async () => {
@@ -75,11 +106,39 @@
         rt.frames = (list || []).map(f => Object.assign({}, f, { img: null })); rt.total = rt.frames.length;
         if (!rt.total) { rt.status = 'empty'; rt.msg = 'No frames available'; return; }
         const pal = palIdOf(dl); rt.failed = 0;
-        let next = 0; const worker = async () => { while (next < rt.frames.length) { const f = rt.frames[next++]; try { f.img = f.scalar ? paintScalar(f.scalar, pal) : (f.load ? await f.load() : await loadImage(f.url)); } catch (e) { f.err = String(e && e.message || e); rt.failed++; } if (gen !== rt.gen) return; rt.loaded++; } };
+        let next = 0; const worker = async () => { while (next < rt.frames.length) {
+          const f = rt.frames[next++];
+          try {
+            if (f.scalar) {
+              // Only the built-in fake radar / IR demos may use emergency
+              // colours; live NOAA grids must have a real applicable palette.
+              if (!pal && src.demo) {
+                f.img = paintDemoFallback(f.scalar, src.kind);
+                rt.demoPaletteFallback = true;
+              } else {
+                try { f.img = paintScalar(f.scalar,pal); }
+                catch (e) {
+                  if (!src.demo) throw e;
+                  f.img = paintDemoFallback(f.scalar,src.kind);
+                  // A broken installed palette should not cause endless
+                  // relist/retry attempts on every editor animation frame.
+                  rt.demoPaletteFallback = !pal;
+                  console.warn('WX Studio: demo palette unavailable, displaying synthetic fallback',e);
+                }
+              }
+            } else f.img = f.load ? await f.load() : await loadImage(f.url);
+          } catch (e) { f.err = String(e && e.message || e); rt.failed++; }
+          if (gen !== rt.gen) return;
+          rt.loaded++;
+        } };
         await Promise.all([worker(), worker(), worker(), worker()]);
         if (gen !== rt.gen) return;
         rt.status = rt.frames.some(f => f.img) ? 'ready' : 'error';
-        rt.msg = rt.status !== 'ready' ? 'Frames could not be loaded' : (rt.failed ? rt.failed + ' of ' + rt.total + ' frames failed to load' : '');
+        const firstError=rt.frames.find(f=>f.err)?.err;
+        rt.msg = rt.status !== 'ready'
+          ? 'Frames could not be loaded' + (firstError ? ': ' + firstError : '')
+          : (rt.failed ? rt.failed + ' of ' + rt.total + ' frames failed to load'
+            : rt.demoPaletteFallback ? 'Demo using temporary colours until weather palettes finish loading' : '');
       } catch (e) { if (gen === rt.gen) { rt.status = 'error'; rt.msg = String(e && e.message || e); } }
     })();
     return rt.promise;
