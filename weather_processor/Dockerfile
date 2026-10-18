@@ -12,4 +12,7 @@ COPY weather_processor/ /opt/wxstudio/weather_processor/
 ENV WX_PROCESSOR_DATA_DIR=/data/frames
 RUN mkdir -p /data/frames
 EXPOSE 8080
-CMD ["uvicorn", "weather_processor.service:APP", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+# Default container runs BOTH NOAA decoders and the read-only API on ONE
+# shared filesystem; required by single-service cloud hosts. Compose uses
+# explicit commands below to preserve its two-process architecture.
+CMD ["python", "-m", "weather_processor.single_host"]
