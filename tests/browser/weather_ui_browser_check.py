@@ -16,6 +16,9 @@ with sync_playwright() as p:
     pg.goto((ROOT/'dist'/'studio.html').as_uri()); pg.wait_for_timeout(2500)
     pg.evaluate("document.getElementById('modalBg')&&document.getElementById('modalBg').remove()")
     ev=pg.evaluate
+    # This check drives the dock's ORIGINAL flyout (#dlMenu), which stays as the fallback when the Weather Data
+    # workspace panel is unavailable. The workspace panel itself is covered by weather_workspace_browser_check.py.
+    ev("(()=>{const W=window.WXWeatherWorkspace;if(W&&W.original){WXData.openMenu=W.original.openMenu;WXData.closeMenu=W.original.closeMenu}})()")
     # --- timestamps ---
     chk('stamp EDT', ev("WXData.fmtStamp(Date.UTC(2026,9,18,16,7))")=="Sun, Oct 18, 2026 12:07 PM EDT", ev("WXData.fmtStamp(Date.UTC(2026,9,18,16,7))"))
     chk('stamp EST', ev("WXData.fmtStamp(Date.UTC(2026,11,5,17,0))")=="Sat, Dec 5, 2026 12:00 PM EST", ev("WXData.fmtStamp(Date.UTC(2026,11,5,17,0))"))
@@ -144,7 +147,10 @@ with sync_playwright() as p:
     pg.click('#dlBar .dl-source'); pg.click('#dlMenu .dm-tab:has-text("Radar Mosaic")'); pg.click('#dlMenu .dm-row:has-text("Northeast preview")'); pg.wait_for_timeout(2500)
     m=ev("(()=>{const sc=WX.S.show.scenes[WX.S.si],rt=WXData.state.get(sc);return {src:sc.dataLoop.source,status:rt.status,n:rt.frames.length,loaded:rt.loaded,failed:rt.failed,t:rt.frames.map(f=>f.t),url:rt.frames[rt.frames.length-1].url,bbox:rt.frames[0].bbox}})()")
     chk('MRMS preview (mocked NOAA) loads 12 real-timestamp frames', m['src']=='mrms' and m['status']=='ready' and m['n']==12 and m['loaded']==12 and not m['failed'], {k:m[k] for k in ('status','n','loaded')})
-    chk('MRMS frame times strictly increasing, 5-minute spacing', all(b-a==300000 for a,b in zip(m['t'],m['t'][1:])))
+    # v0.9.85 caps the loop at 12 real scans spread over the requested hour, so one 5-minute scan may be skipped (a 10-minute gap).
+    # What must hold: increasing order, every gap a whole number of 5-minute scans, ~an hour of coverage, and only times NOAA returned.
+    gaps=[(b-a) for a,b in zip(m['t'],m['t'][1:])]; span=(m['t'][-1]-m['t'][0])/60000
+    chk('MRMS frame times increasing, whole 5-minute scans, ~1 hour covered, no invented times', all(g>0 and g%300000==0 for g in gaps) and span>=50 and all((m['t'][-1]-t)%300000==0 for t in m['t']), [g//60000 for g in gaps])
     chk('MRMS export URL carries the exact frame epoch + Northeast bbox', ('time=%d'%m['t'][-1]) in m['url'] and 'bbox=-82%2C35.5%2C-64.5%2C49' in m['url'] and m['bbox']==[-82.0,35.5,-64.5,49.0], m['url'][-140:])
     pg.click('#dlBar button[title^="Previous frame"]'); pg.wait_for_timeout(300)
     got=ev("(()=>{const sc=WX.S.show.scenes[WX.S.si],rt=WXData.state.get(sc);return [document.querySelector('#dlBar .dl-stamp').textContent,rt.lastIdx,MB._weatherFrame&&MB._weatherFrame.id,MB._weatherFrame&&MB._weatherFrame.url]})()")
