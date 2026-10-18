@@ -1490,7 +1490,10 @@
   }
   function onEditorFrameRendered(){
     if(snapshotBusy||!previewRestorePending||!previewRestoreKey||!D)return;
-    try{if(!D.loaded()||D.isMoving())return}catch(e){return}
+    // A completed render at the restored camera is sufficient. Waiting
+    // for D.loaded() can freeze the preview indefinitely when a NOAA
+    // raster or a remote map tile is slow/unavailable.
+    try{if(D.isMoving())return}catch(e){return}
     previewHold=null;previewRestorePending=false;previewRestoreKey=null;
     try{D.off('render',onEditorFrameRendered)}catch(e){}
     if(MB.onUpdate)MB.onUpdate();
