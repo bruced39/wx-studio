@@ -111,7 +111,7 @@ const frameUrl=(epochMs,bbox=TEST_BBOX,size=TEST_SIZE)=>{
  const q=new URLSearchParams({
    bbox:bbox.join(','),bboxSR:'4326',imageSR:'4326',
    size:size.join(','),format:'png32',transparent:'true',
-   interpolation:'+RSP_NearestNeighbor',
+   interpolation:'RSP_NearestNeighbor',
    time:String(epochMs),f:'image'
  });
  return IMAGE_SERVER+'/exportImage?'+q.toString();
