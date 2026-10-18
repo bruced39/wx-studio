@@ -1228,11 +1228,68 @@
   const norm = cam => ({ c: [num(cam.c[0], 0), clampLat(num(cam.c[1], 0))], z: Math.max(0, Math.min(22, num(cam.z, 3))), b: num(cam.b, 0), p: Math.max(0, Math.min(75, num(cam.p, 0))) });
   const clampLat = v => Math.max(-85, Math.min(85, v));
   const cloneBg = bg => { MB.ensureConfig(bg); const o={mbStyle:bg.mbStyle,proj:bg.proj};Object.keys(WD_DEFAULTS).forEach(k=>o[k]=bg[k]);return o; };
-  const keyOf = (bg, cam) => { const k = norm(cam); return [bg.mbStyle||'',styleOf(bg),projOf(bg),wdConfigKey(bg),MB.scale,k.c[0].toFixed(5),k.c[1].toFixed(5),k.z.toFixed(3),k.b.toFixed(2),k.p.toFixed(1)].join('|'); };
+  const keyOf = (bg, cam) => { const k = norm(cam); return [bg.mbStyle||'',styleOf(bg),projOf(bg),wdConfigKey(bg),MB.scale,k.c[0].toFixed(5),k.c[1].toFixed(5),k.z.toFixed(3),k.b.toFixed(2),k.p.toFixed(1),MB._weatherKey||'no-weather'].join('|'); };
   MB.keyOf = keyOf;
 
   /* ---- library + maps ---- */
-  let D = null, P = null, host = null, initP = null, curStyle = null, curStyleKey = null, curCfgKey = null, curProj = null, pProj = null, pKey = null, liveKey = null, renderGeneration = 0;
+  let D = null, P = null, host = null, initP = null, curStyle = null, curStyleKey = null, curCfgKey = null, curProj = null, pKey = null, liveKey = null, renderGeneration = 0;
+  // NOAA/weather imagery is a real Mapbox IMAGE SOURCE and RASTER LAYER,
+  // not a canvas drawn on top of a completed map. Every road, county/state
+  // boundary, coastline, city label and user-created WX Studio annotation
+  // stays in front of the weather. No changes to saved map styles.
+  const WX_FRAME_SOURCE='wd-weather-data-image',WX_FRAME_LAYER='wd-weather-data-raster';
+  MB._weatherFrame=null;MB._weatherKey='';
+  MB.setWeatherFrame=function(frame){
+    const valid=frame&&typeof frame.url==='string'&&
+      (frame.url.startsWith('https://')||frame.url.startsWith('data:image/png;base64,'))&&
+      frame.crs==='4326'&&Array.isArray(frame.bbox)&&frame.bbox.length===4&&
+      frame.bbox.every(Number.isFinite)&&
+      frame.bbox[0]<frame.bbox[2]&&frame.bbox[1]<frame.bbox[3];
+    const requested=valid?frame:null;
+    const key=requested?[
+      requested.id||requested.url,requested.bbox.join(','),
+      Math.max(0,Math.min(1,+requested.opacity||0))
+    ].join('|'):'';
+    if(key===MB._weatherKey)return;
+    MB._weatherFrame=requested;MB._weatherKey=key;
+    // Cached completed maps from an earlier weather time may NEVER be used.
+    MB.cache.clear();liveKey=null;
+    try{if(D&&MB.status==='ready')applyWeatherUnderlay(D);}catch(e){
+      console.warn('WX Studio Mapbox weather underlay',e);
+    }
+  };
+  function applyWeatherUnderlay(map){
+    if(!map||!map.getStyle()?.layers)return;
+    const spec=MB._weatherFrame;
+    if(!spec){
+      if(map.getLayer(WX_FRAME_LAYER))map.removeLayer(WX_FRAME_LAYER);
+      if(map.getSource(WX_FRAME_SOURCE))map.removeSource(WX_FRAME_SOURCE);
+      map.__wdWeatherKey='';
+      return;
+    }
+    const [w,s,e,n]=spec.bbox;
+    const coords=[[w,n],[e,n],[e,s],[w,s]];
+    if(!map.getSource(WX_FRAME_SOURCE)){
+      map.addSource(WX_FRAME_SOURCE,{type:'image',url:spec.url,coordinates:coords});
+    }else if(map.__wdWeatherKey!==MB._weatherKey){
+      map.getSource(WX_FRAME_SOURCE).updateImage({url:spec.url,coordinates:coords});
+    }
+    const layers=map.getStyle().layers||[];
+    // First line, circle or symbol in the stock style. WX Studio overlays
+    // (including labels) are symbol/line layers ABOVE this insertion point.
+    const before=layers.find(l=>['line','symbol','circle'].includes(l.type)&&
+      l.id!==WX_FRAME_LAYER)?.id;
+    if(!map.getLayer(WX_FRAME_LAYER)){
+      map.addLayer({id:WX_FRAME_LAYER,type:'raster',source:WX_FRAME_SOURCE,
+        paint:{'raster-opacity':Math.max(0,Math.min(1,+spec.opacity||0)),
+          'raster-fade-duration':0}},before);
+    }else{
+      map.setPaintProperty(WX_FRAME_LAYER,'raster-opacity',Math.max(0,Math.min(1,+spec.opacity||0)));
+      if(before)map.moveLayer(WX_FRAME_LAYER,before);
+    }
+    map.__wdWeatherKey=MB._weatherKey;
+    map.triggerRepaint();
+  }
   function loadLib() {
     if (g.mapboxgl) return Promise.resolve();
     return new Promise((res, rej) => {
@@ -1294,6 +1351,9 @@
     if(pr!==curProj){D.setProjection(pr);curProj=pr;}
     fog(bg);applyTerrain(D,bg);
     if(bg.mbStyle==='broadcast'&&cfgKey!==curCfgKey){addBroadcastCartography(D,bg);curCfgKey=cfgKey;}
+    // A style reset removes the image source; reinstall AFTER cartography and
+    // BEFORE snapshot so labels remain layered over each NOAA frame.
+    applyWeatherUnderlay(D);
   }
   function settle(m, generation) {
     return new Promise(res => {
