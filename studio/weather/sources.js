@@ -59,7 +59,7 @@ push({id:'mrms_nws_4hour_image',category:'radar',
  label:'NWS MRMS four-hour historical radar images',
  source:'NOAA NWS ArcGIS ImageServer',
  endpoint:'https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer',
- format:'ArcGIS time-enabled raster image',status:'needs-browser-CORS-and-timestamp-validation',
+ format:'ArcGIS time-enabled raster image',status:'browser-preview-under-test',
  cadenceMinutes:5,resolutionKm:1,historyHours:4,
  palette:null,display:'Pre-rendered NWS reflectivity (cannot recolor source values with LUT)',
  caveat:'Use ImageServer exportImage time=UTC epoch milliseconds; 4h rolling advertised but query current service time extent. Preserve source/native scale; do not misrepresent server resampling as higher detail.'});
@@ -88,4 +88,82 @@ C.NOAA={
  radarHistory:'https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer',
  stations:'https://gis.ncdc.noaa.gov/arcgis/rest/services/cdo/nexrad/MapServer/0'
 };
+
+/* ---------- First REAL weather source: NOAA MRMS regional radar preview ----------
+ * NOAA's time-enabled image service renders MRMS reflectivity imagery at
+ * ~5-minute update cadence with a moving history. THIS IS NOT raw 1-km
+ * GRIB2 and cannot support a custom reflectivity LUT. That decoder remains
+ * pending; this direct ArcGIS preview is an integration test for timestamps,
+ * georeferencing, WebGL-under-label placement, and playback.
+ *
+ * Keep requests in a fixed Northeast geographic test region initially.
+ * Do not claim national-native resolution or silently resample all CONUS:
+ * a separate view-aware cache/tile pipeline is required to achieve that.
+ * NO synthetic timestamps: query the actual NOAA image catalog.
+ */
+const IMAGE_SERVER=C.NOAA.radarHistory;
+const TEST_BBOX=Object.freeze([-82.0,35.5,-64.5,49.0]);
+const TEST_SIZE=Object.freeze([3072,2304]);
+const MS_5MIN=300000;
+const MAX_FRAMES=12;  // Initial one-hour test. Avoid 48 3072px textures in RAM.
+const epochTime=t=>Number.isFinite(+t)&&+t>1e12?Number(t):null;
+const frameUrl=(epochMs,bbox=TEST_BBOX,size=TEST_SIZE)=>{
+ const q=new URLSearchParams({
+   bbox:bbox.join(','),bboxSR:'4326',imageSR:'4326',
+   size:size.join(','),format:'png32',transparent:'true',
+   interpolation:'+RSP_NearestNeighbor',
+   time:String(epochMs),f:'image'
+ });
+ return IMAGE_SERVER+'/exportImage?'+q.toString();
+};
+async function noaaJson(url){
+ const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),15000);
+ try{
+  const r=await fetch(url,{mode:'cors',cache:'no-store',signal:abort.signal});
+  if(!r.ok)throw Error('NOAA radar service HTTP '+r.status);
+  const json=await r.json();
+  if(json.error)throw Error('NOAA radar service: '+(json.error.message||'ArcGIS error'));
+  return json;
+ }finally{clearTimeout(timeout)}
+}
+async function listNwsMrms({hours=1}={}){
+ // NOAA endpoint MUST be read at runtime; no assumed "latest" frame times.
+ const metadata=await noaaJson(IMAGE_SERVER+'?f=pjson');
+ const window=metadata.timeInfo?.timeExtent;
+ if(!Array.isArray(window)||window.length!==2)throw Error('NOAA MRMS time extent unavailable');
+ const start=epochTime(window[0]),end=epochTime(window[1]),now=Date.now();
+ if(!start||!end||start>=end)throw Error('Invalid NOAA MRMS time extent');
+ if(end<now-45*60000||end>now+10*60000)
+  throw Error('NOAA MRMS service time extent is not current (refusing stale radar)');
+ // Query actual image timestamps so every shown frame represents a real scan,
+ // not a guessed five-minute time offset with a misleading date/time.
+ const query=new URLSearchParams({
+  where:'1=1',outFields:'idp_validtime',returnGeometry:'false',
+  returnDistinctValues:'true',orderByFields:'idp_validtime DESC',
+  resultRecordCount:'150',f:'json'
+ });
+ const catalog=await noaaJson(IMAGE_SERVER+'/query?'+query.toString());
+ if(!Array.isArray(catalog.features))throw Error('NOAA MRMS timestamp catalog unavailable');
+ const requested=Math.max(1,Math.min(1,+hours||1)); // test phase: exactly 1 hour
+ const min=Math.max(start,end-requested*3600000,now-5*3600000);
+ const values=[...new Set(catalog.features.map(f=>epochTime(f.attributes?.idp_validtime)).filter(t=>
+  t!==null&&t>=min&&t<=end+MS_5MIN))].sort((a,b)=>a-b).slice(-MAX_FRAMES);
+ if(values.length<2)throw Error('NOAA MRMS returned fewer than two valid timed scans');
+ return values.map(t=>({
+  t,bbox:TEST_BBOX.slice(),crs:'4326',url:frameUrl(t)
+ }));
+}
+C.mrmsBrowserTest=Object.freeze({
+ service:IMAGE_SERVER,bbox:TEST_BBOX,size:TEST_SIZE,
+ frameUrl,list:listNwsMrms,note:'NOAA-rendered regional preview, not source-native decoded GRIB2'
+});
+if(g.WXData&&typeof g.WXData.registerSource==='function'){
+ g.WXData.registerSource({
+  id:'mrms',label:'NOAA MRMS · Northeast (test)',lengths:[1],
+  list:listNwsMrms,category:'radar',provider:'NOAA NWS ImageServer',
+  nativeData:false,format:'server-rendered PNG32',
+  attribution:'NOAA/NWS MRMS radar mosaic'
+ });
+ C.providerStatus='mrms-regional-browser-test';
+}
 })(typeof window!=='undefined'?window:globalThis);
