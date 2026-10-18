@@ -134,6 +134,11 @@
   /* ---------- in-video playback bar (canvas) ---------- */
   function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
   D.drawBar = function (c, scene, t, opts) {
+    // Editor bar is now a clickable map overlay; never draw a duplicate
+    // into live preview or thumbnails. MP4/PNG and Present still use canvas.
+    const presenting=typeof document!=='undefined' &&
+      !!document.querySelector('#stageWrap.present');
+    if(opts&&(opts.editing||opts.liveMap)&&!presenting)return;
     const dl = dlOf(scene); if (!dl || dl.showBar === false) return;
     const rt = rtOf(scene); if (!ready(rt).length) return;
     const L = D.barLabels(scene), FONT = '600 26px "Barlow","Inter",system-ui,Arial,sans-serif', x0 = 56, x1 = W - 56, y0 = H - 150, bh = 86;
@@ -153,18 +158,25 @@
 
   /* ---------- editor bar (DOM) ---------- */
   function css() {
-    if (document.getElementById('dlCss')) return;
-    const s = document.createElement('style'); s.id = 'dlCss';
-    s.textContent = '#dlBar{background:#0b1322;border:1px solid #1d2c47;border-radius:8px;padding:6px 10px;margin:6px 0 2px;font-size:13px;color:#dbe7fb}#dlBar .r{display:flex;align-items:center;gap:8px;flex-wrap:wrap}#dlBar .r+.r{margin-top:6px}#dlBar label{display:inline-flex;gap:5px;align-items:center;cursor:pointer}#dlBar button{background:#16233b;border:1px solid #2a3d61;color:#dbe7fb;border-radius:6px;padding:3px 9px;cursor:pointer;min-width:30px}#dlBar button:hover{background:#1f3254}#dlBar button.pl{background:#2f7bff;border-color:#2f7bff;color:#fff;border-radius:50%;width:32px;height:32px;padding:0}#dlBar select{width:auto!important;flex:0 0 auto;background:#16233b;color:#dbe7fb;border:1px solid #2a3d61;border-radius:6px;padding:3px 6px}#dlBar .sp{margin-left:auto;color:#9fb4d6}#dlBar .spd{min-width:34px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}#dlBar .prog{position:relative;flex:1;min-width:140px;height:14px;background:#1a2740;border-radius:7px;cursor:pointer;overflow:hidden}#dlBar .prog i{position:absolute;left:0;top:0;bottom:0;background:#2f7bff;border-radius:7px;transition:width .15s}#dlBar .prog b{position:absolute;top:1px;width:12px;height:12px;border-radius:50%;background:#fff;margin-left:-6px}#dlBar .live{color:#ff5d5d;font-weight:700}#dlBar input[type=checkbox]{width:auto!important}#dlBar .st{color:#9fb4d6;font-size:12px}';
-    document.head.append(s);
+    if(document.getElementById('dlCss'))return;
+    const style=document.createElement('style');style.id='dlCss';
+    style.textContent="#stageWrap #dlBar{position:absolute;left:0;right:0;bottom:0;z-index:8;background:rgba(8,14,26,.94);border-top:1px solid #344763;border-radius:0;padding:3px 8px 4px;margin:0;color:#e4eefc;font:600 12px/1.25 Barlow,Arial,sans-serif;box-sizing:border-box}#dlBar[hidden],#stageWrap.present #dlBar{display:none!important}#dlBar *{box-sizing:border-box}#dlBar .dl-row{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-height:39px}#dlBar .dl-ctrl{display:flex;align-items:center;gap:3px;flex:0 0 auto}#dlBar button,#dlBar select{background:#151c2c;border:1px solid #25354f;color:#eaf2ff;border-radius:5px;padding:3px 6px;height:27px;min-width:25px;white-space:nowrap;cursor:pointer;font:inherit}#dlBar button:hover,#dlBar select:hover{background:#213249}#dlBar button.pl{height:28px;width:28px;min-width:28px;padding:0;border-radius:50%;background:#4b55f2;color:white;border:0;font-size:15px}#dlBar button.loop-toggle{font-size:13px;min-width:25px}#dlBar select{width:auto!important;min-width:0;max-width:170px}#dlBar select.dl-source{max-width:180px;flex:0 1 auto}#dlBar .spd{min-width:29px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums}#dlBar .dl-timeline{display:flex;flex-direction:column;flex:1;min-width:80px;gap:2px}#dlBar .dl-stamp{font:600 11px/1.1 Barlow,Arial,sans-serif;text-align:right;min-height:12px;color:#e9f2ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#dlBar .prog{position:relative;flex:1;height:7px;background:#29354f;border-radius:6px;cursor:ew-resize;overflow:visible;margin:2px 1px 4px}#dlBar .prog i{position:absolute;left:0;top:0;bottom:0;background:#4b55f2;border-radius:6px;transition:width .12s}#dlBar .prog b{position:absolute;top:-4px;width:15px;height:15px;background:#7387ff;border:1px solid #d4dcff;border-radius:50%;margin-left:-7px}#dlBar .dl-live{color:#ff6565;font-weight:800;letter-spacing:.3px}#dlBar .dl-options{display:flex;gap:5px;align-items:center;flex:0 1 auto;min-width:0}#dlBar .dl-settings{position:absolute;right:8px;bottom:calc(100% + 4px);background:rgba(12,21,37,.97);border:1px solid #344763;border-radius:6px;padding:9px 11px;display:flex;align-items:center;gap:12px;box-shadow:0 3px 12px #020611;max-width:min(95%,550px)}#dlBar .dl-settings[hidden]{display:none!important}#dlBar .dl-settings label{display:inline-flex;gap:5px;align-items:center;white-space:nowrap;cursor:pointer}#dlBar input[type=checkbox]{width:auto!important}#dlBar input[type=range]{width:90px}#dlBar .st{font-weight:400;color:#9eb2cc;font-size:11px;white-space:nowrap}@media(max-width:950px){#stageWrap #dlBar{padding:2px 4px}#dlBar .dl-row{gap:3px}#dlBar select.dl-source{max-width:110px}#dlBar .dl-options{gap:2px}#dlBar button,#dlBar select{padding:2px 4px}}";
+    document.head.append(style);
   }
   function h(tag, a, ...kids) { const e = document.createElement(tag); Object.keys(a || {}).forEach(k => { if (k === 'on') Object.keys(a.on).forEach(ev => e.addEventListener(ev, a.on[ev])); else if (k === 'text') e.textContent = a[k]; else if (k === 'className') e.className = a[k]; else if (k in e && k !== 'list') e[k] = a[k]; else e.setAttribute(k, a[k]); }); kids.flat().forEach(c => { if (c != null) e.append(c.nodeType ? c : document.createTextNode(c)); }); return e; }
 
   function mountBar() {
     const WX = g.WX; if (!WX || !WX.S) return false;
-    const center = document.getElementById('center'), tools = document.getElementById('tools'); if (!center || !tools) return false;
+    const stage=document.getElementById('stageWrap');
+    if(!stage)return false;
+    if(document.getElementById('dlBar'))return true;
     css();
-    const bar = h('div', { id: 'dlBar' }); center.insertBefore(bar, tools);
+    const bar=h('div',{id:'dlBar','aria-label':'Weather data playback controls'});
+    stage.appendChild(bar);
+    // Do not let timeline scrubbing pan or draw on the map below it.
+    for(const ev of ['pointerdown','pointermove','pointerup','mousedown',
+      'mouseup','click','dblclick','touchstart','touchmove','touchend','wheel'])
+      bar.addEventListener(ev,e=>e.stopPropagation());
     let lastScene = null, lastSig = '', refs = null, lastT = 0;
     const cur = () => WX.S.show.scenes[WX.S.si];
     const dlRaw = () => { const sc = cur(); return sc && sc.dataLoop; };
