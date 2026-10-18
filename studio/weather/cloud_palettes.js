@@ -20,11 +20,11 @@ W.list=async(category)=>{
  if(!r.ok)throw Error('Palette list failed: HTTP '+r.status);
  return r.json();
 };
-W.save=async({category,productId,name,stops,units='',description='',id=null})=>{
+W.save=async({category,productId,name,stops,units='',description='',continuous=false,id=null})=>{
  const s=await auth();
  const datum={id:category+'/'+(productId||'custom').replace(/[^a-z0-9_-]/g,'-'),category,stops};
  g.WXWeatherPalettes.validate(datum);
- const body={user_id:s.user.id,category,product_id:productId,name:String(name||'My palette').slice(0,120),stops,units,description};
+ const body={user_id:s.user.id,category,product_id:productId,name:String(name||'My palette').slice(0,120),stops,units,description,continuous:continuous===true};
  const h=headers(s,{'Content-Type':'application/json','Prefer':'return=representation'});
  const endpoint=id?'/rest/v1/wx_studio_weather_palettes?id=eq.'+encodeURIComponent(id):'/rest/v1/wx_studio_weather_palettes';
  const r=await fetch(root()+endpoint,{method:id?'PATCH':'POST',headers:h,body:JSON.stringify(body)});
