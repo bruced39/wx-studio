@@ -118,6 +118,14 @@ def convert(args) -> dict:
             frame=processors.decode_mrms(original,bbox,max_pixels=args.max_pixels)
         else:
             frame=processors.decode_level2(original,bbox,moment=args.moment,max_pixels=args.max_pixels)
+    # A stale NOAA mirror or an old S3 object is NOT "live". For a local
+    # previously-downloaded --input, the operator intentionally bypasses this
+    # freshness gate so archival decoding can still be tested.
+    if not args.input:
+        age=(_utcnow()-frame.timestamp).total_seconds()/60.0
+        limit=float(getattr(args,"max_age_minutes",90))
+        if age>limit or age< -10:
+            raise ValueError(f"NOAA observation is {age:.0f} minutes old; refusing to publish it as fresh (maximum {limit:.0f} min)")
     # Timestamp from NOAA file payload, NOT downloader clock or fake frames.
     epoch_ms=int(frame.timestamp.timestamp()*1000)
     filename=f"{epoch_ms}.png"
@@ -178,6 +186,8 @@ def main(argv=None) -> int:
     p.add_argument("--keep",type=int,default=48,help="maximum cached frames for this product")
     p.add_argument("--max-pixels",type=int,default=12_000_000)
     p.add_argument("--max-download-mb",type=int,default=650)
+    p.add_argument("--max-age-minutes",type=int,default=90,
+                   help="refuse stale downloaded source observations; --input bypasses")
     sv=cmd.add_parser("serve",help="Serve generated PNG and manifests from a local HTTP origin")
     sv.add_argument("--root",default="wx_weather_output")
     sv.add_argument("--port",type=int,default=8788)
