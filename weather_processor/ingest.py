@@ -136,7 +136,7 @@ def goes_candidates(noaa: PublicNoaa, product: str, now) -> list[tuple[str, str,
         for item in noaa.list_s3(bucket, prefix):
             key = item["Key"]
             name = key.rsplit("/", 1)[-1]
-            if re.search(rf"ABI-L2-CMIP{code}-M\d{1,2}{channel}_G{sat}_s", name):
+            if re.search(rf"ABI-L2-CMIP{code}-M\d{{1,2}}{channel}_G{sat}_s", name):
                 try:
                     stamp = scan_time(name, "goes")
                     if fresh(stamp, kind="goes", now=now):
