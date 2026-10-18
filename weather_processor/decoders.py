@@ -94,7 +94,7 @@ def geographic_grid(data: np.ndarray, src_transform, src_crs, bbox, resolution_d
     return dest
 
 
-def goes_abi_netcdf(path: Path, channel: str, bbox, *, resolution=None):
+def goes_abi_netcdf(path: Path, channel: str, bbox=None, *, resolution=None):
     """GOES-19/18 ABI L2 CMIP fixed grid -> WGS84; C02 reflectance or C13 IR BT.
 
     Respects per-file fixed-grid projection and each moving mesoscale domain.
@@ -144,6 +144,22 @@ def goes_abi_netcdf(path: Path, channel: str, bbox, *, resolution=None):
                 if np.asarray(ds["y"].values)[0] < np.asarray(ds["y"].values)[-1]:
                     quality = quality[::-1]
                 values = np.where(quality, values, np.nan)
+        # Derive EACH MOVING mesoscale sector's actual scan footprint
+        # from fixed-grid coordinates, never reuse a static CONUS bbox.
+        if bbox is None:
+            inv = Transformer.from_crs(crs, CRS.from_epsg(4326), always_xy=True)
+            boundary_x = np.linspace(float(min(x)), float(max(x)), 36)
+            boundary_y = np.linspace(float(min(y)), float(max(y)), 36)
+            xx, yy = np.meshgrid(boundary_x, boundary_y)
+            lon, lat = inv.transform(xx, yy)
+            mask = np.isfinite(lon) & np.isfinite(lat) & (np.abs(lat) < 84)
+            if not mask.any():
+                raise ValueError("Mesoscale fixed-grid scan has no visible Earth footprint")
+            lon, lat = lon[mask], lat[mask]
+            if float(np.ptp(lon)) > 180:
+                raise ValueError("Antimeridian mesoscale footprint requires separate tiles")
+            bbox = [max(-180, float(np.min(lon))), max(-84, float(np.min(lat))),
+                    min(180, float(np.max(lon))), min(84, float(np.max(lat)))]
         # Reject domains outside the actual sector. This is especially
         # important for one-minute mesoscale boxes that move with events.
         tx = Transformer.from_crs(CRS.from_epsg(4326), crs, always_xy=True)
@@ -163,9 +179,9 @@ def goes_abi_netcdf(path: Path, channel: str, bbox, *, resolution=None):
         out = np.zeros(gray.shape + (4,), dtype=np.uint8)
         out[..., :3] = gray[..., None]
         out[..., 3] = np.where(np.isfinite(product), 255, 0).astype(np.uint8)
-        return Image.fromarray(out, "RGBA")
+        return Image.fromarray(out, "RGBA"), bbox
     # ABI CMI C13 is brightness temperature in kelvin, not "cloud tops".
-    return Image.fromarray(rgba(product - 273.15, palette("satellite-ir-c13")), "RGBA")
+    return Image.fromarray(rgba(product - 273.15, palette("satellite-ir-c13")), "RGBA"), bbox
 
 
 def mrms_grib2_gz(payload: bytes, bbox, *, resolution=0.01):
