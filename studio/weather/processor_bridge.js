@@ -44,7 +44,14 @@
     const ctl=new AbortController();
     const abort=setTimeout(()=>ctl.abort(),12000);
     try{
-      const r=await fetch(endpoint+path,{mode:'cors',signal:ctl.signal,cache:'no-store'});
+      // Cloud-hosted studio browser requests a decoder on the SAME PC.
+      // Current Chromium can require an explicit loopback permission; this
+      // option helps the browser classify the address correctly.
+      const options={mode:'cors',signal:ctl.signal,cache:'no-store'};
+      const hostname=new URL(endpoint).hostname;
+      if(hostname==='localhost'||hostname==='127.0.0.1')
+        options.targetAddressSpace='loopback';
+      const r=await fetch(endpoint+path,options);
       if(!r.ok)throw Error('processor returned '+r.status);
       return await r.json();
     }finally{clearTimeout(abort)}
