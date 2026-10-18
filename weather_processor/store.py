@@ -107,6 +107,7 @@ class FrameStore:
             frames = self.listed(directory.name, now=now)
             if frames and frames[-1]["t"] >= cutoff:
                 active.append({"product": directory.name,
+                               "earliestObservationUtc": frames[0]["t"],
                                "latestObservationUtc": frames[-1]["t"],
                                "frameCount": len(frames),
                                "attribution": frames[-1]["source"]})
