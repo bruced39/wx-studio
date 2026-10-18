@@ -26,7 +26,20 @@
     if(/^nexrad-(reflectivity|velocity)-K[A-Z0-9]{3}$/.test(product))return 'nexrad';
     return null;
   };
-  const MAX_ROWS=180;
+  // The existing loop UI eagerly decodes EVERY listed PNG. Native 0.5 km
+  // satellite frames are enormous: bound resident browser memory, using a
+  // time-spaced subset of REAL observations for longer requested windows.
+  // This preserves real timestamps; it never interpolates fictitious scans.
+  const MAX_ROWS=24;
+  const maxFrames=id=>/C02$/.test(id)?8:/^goes-/.test(id)?12:
+    id==='mrms-reflectivity'?24:/^nexrad-/.test(id)?12:12;
+  const validLengths=product=>{
+    const earliest=Number(product.earliestObservationUtc),
+      latest=Number(product.latestObservationUtc);
+    if(!(earliest>0&&latest>=earliest))return [1];
+    const available=Math.max(0,(latest-earliest)/3600000);
+    return [1,2,4,12].filter(h=>h===1||h<=available+.15);
+  };
   async function readJson(path){
     const ctl=new AbortController();
     const abort=setTimeout(()=>ctl.abort(),12000);
@@ -51,8 +64,14 @@
     const data=await readJson('/manifests/'+encodeURIComponent(product)+'.json');
     if(data.schema!=='wxstudio.frames.v1'||data.product!==product||!Array.isArray(data.frames))return [];
     const cutoff=Date.now()-Math.max(1,Math.min(12,+hours||1))*3600000;
-    const frames=data.frames.map(checkedFrame).filter(Boolean).filter(x=>x.t>=cutoff&&x.t<=Date.now()+600000);
-    return frames.sort((a,b)=>a.t-b.t).slice(-MAX_ROWS);
+    const frames=data.frames.map(checkedFrame).filter(Boolean)
+      .filter(x=>x.t>=cutoff&&x.t<=Date.now()+600000)
+      .sort((a,b)=>a.t-b.t);
+    const limit=Math.min(MAX_ROWS,maxFrames(product));
+    if(frames.length<=limit)return frames;
+    const choice=[];
+    for(let i=0;i<limit;i++)choice.push(frames[Math.round(i*(frames.length-1)/(limit-1))]);
+    return choice;
   }
   async function refresh(){
     if(!endpoint)return;
@@ -60,6 +79,7 @@
       const catalog=await readJson('/catalog');
       if(catalog.schema!=='wxstudio.frames.v1'||!Array.isArray(catalog.products))throw Error('invalid processor catalog');
       const products=catalog.products.map(p=>p.product).filter(p=>idOf(p));
+      const detail=new Map(catalog.products.map(p=>[p.product,p]));
       const version=JSON.stringify(catalog.products.map(p=>[p.product,p.latestObservationUtc,p.frameCount]).sort());
       const changed=version!==lastCatalogVersion;lastCatalogVersion=version;
       BR.products=products;BR.status=products.length?'available':'no-fresh-data';
@@ -85,7 +105,7 @@
         }
       }
       if(goes.length){managedSources.add('goes');
-        D.registerSource({id:'goes',label:'GOES ABI (processed NOAA)',lengths:[1,2,4,12],
+        D.registerSource({id:'goes',label:'GOES ABI (processed NOAA)',lengths:validLengths(detail.get(goes[0])||{}),
           list:({hours})=>manifest(goes.find(x=>x==='goes-east-conus-C02')||goes[0],hours)});
       }
       for(const product of goes){
@@ -96,19 +116,19 @@
           channel=m[3]==='C02'?'Visible 0.5 km':'IR 2 km';
         managedSources.add(product);
         D.registerSource({id:product,label:satellite+' · '+sector+' · '+channel,
-          lengths:[1,2,4,12],category:'satellite',
+          lengths:validLengths(detail.get(product)||{}),category:'satellite',
           list:({hours})=>manifest(product,hours)});
       }
       if(mrms.length){
         managedSources.add('mrms');
-        D.registerSource({id:'mrms',label:'MRMS 1 km reflectivity',lengths:[1,2,4],
+        D.registerSource({id:'mrms',label:'MRMS 1 km reflectivity',lengths:validLengths(detail.get(mrms[0])||{}),
           list:({hours})=>manifest(mrms[0],hours)});
       }
       if(nexrad.length){
         managedSources.add('nexrad');
         const sites=nexrad.map(p=>p.split('-').at(-1)).filter((x,i,a)=>a.indexOf(x)===i)
           .map(id=>({id,label:id}));
-        D.registerSource({id:'nexrad',label:'NEXRAD Level II (processed)',lengths:[1,2,4],
+        D.registerSource({id:'nexrad',label:'NEXRAD Level II (processed)',lengths:validLengths(detail.get(nexrad[0])||{}),
           sites,defaultSite:sites.some(s=>s.id==='KBOX')?'KBOX':sites[0].id,
           list:({site,hours})=>{
             const p=nexrad.find(x=>x==='nexrad-reflectivity-'+(site||'KBOX'));
