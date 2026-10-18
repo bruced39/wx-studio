@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.67` (`VERSION`).
+- **Last reviewed application version:** `0.9.73` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -539,3 +539,16 @@ Files: studio/dataloop.js (new), studio/engine.js, studio/index.html. ChatGPT's 
 4. Never store continuous frame archives in palette Supabase bucket; need separate bounded, cost-approved rendering cache if required.
 
 **References:** https://registry.opendata.aws/noaa-goes/ ; https://registry.opendata.aws/noaa-nexrad/ ; https://mrms.ncep.noaa.gov/data/ ; https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer ; https://gis.ncdc.noaa.gov/arcgis/rest/services/cdo/nexrad/MapServer/0 .
+
+## v0.9.73 — first real NOAA original-file decoder implementation (ChatGPT, 2026-10-18)
+
+Starting latest main: v0.9.72 commit `d45bd350`. User asked WHEN NetCDF, GRIB2 and radar-volume parsing would be implemented, rather than another source catalog. This release commits the first processing-worker implementation now; importantly **it does NOT yet represent NOAA feeds as connected/live inside the cloud editor**.
+
+- NEW `studio/weather/ingest/processors.py`: actual original-file decoders:
+  - GOES-19 East / GOES-18 West ABI L2 CMIP C02 visible (nominal native 0.5 km) or C13 IR (native 2 km) from NetCDF4 using optional xarray/h5netcdf. Computes real GOES CF geostationary projection from perspective height, ellipsoid, longitude and sweep axis; crops raw scan grid to requested ROI, reprojects to WGS84 via rasterio nearest resampling, rejects source/output memory overruns rather than secretly downsampling. C02 grayscale is **NOT** derived GeoColor. IR starter LUT uses Kelvin-to-Celsius; colors are not official/certified tables.
+  - Raw NOAA MRMS 1 km MergedReflectivityQC regular-latlon GRIB2 using optional pygrib/ecCodes, proper source time, native uncropped bin values, bounded ROI and transparent missing/no-echo. Corrected pygrib explicit close() protocol.
+  - Unidata NEXRAD native Level-II WSR-88D lowest sweep PPI gate reflectivity/velocity using optional arm_pyart/scipy/pyproj, true polar gate latlon and mask; scans output region at 250 m sampling with nearest physical gate and distance bound; **NOT** a low-res MRMS replacement, **NOT** 3D CAPPI.
+- NEW `studio/weather/ingest/cli.py`: select actual latest object keys through existing unsigned public S3 GOES/NEXRAD helper and allowed NOAA MRMS endpoint, bounded streaming download, optional predownloaded --input, a freshness check on online NOAA observations, transparent PNG frames with **original file timestamp** and a sorted bounded `wxstudio.frames.v1` manifest compatible with Claude's `WXData` source list. Local loop-file HTTP test server binds 127.0.0.1 by default; **not** a public service.
+- NEW `studio/weather/ingest/requirements-worker.txt`: separate worker-only scientific dependencies. **No change** to Streamlit `requirements.txt`. NEW `PROCESSING.md`: install, CLI examples and what is/is not operational. NEW `tests/test_noaa_ingest.py`: 7 offline unit tests (numpy data validity, null transparency, grid orientation, native-size protection, mocked GRIB opening, S3 selection, immutable observation timestamps, bounded manifest). NEW `.github/workflows/noaa_decoder_tests.yml`: restricted path-triggered tests; does not inject real NOAA keys or install heavy radar library in Streamlit. These tests are **added but their GitHub Actions execution/result not yet confirmed**. Neither real live NOAA file I/O nor graphics alignment proven until dedicated worker is installed and run with real files.
+- **No** edits to Claude's `studio/dataloop.js`, `studio/engine.js`, `studio/index.html`, `studio/ui.js`, or WX Studio's `studio/mapbox.js` rendering/style code. Existing source catalogs, private palette Supabase bucket, cloud user palettes and radar site dots untouched.
+- Follow-up to actually make feeds LIVE: run each decoder against current NOAA sample files, verify imagery/geolocation and time fidelity, deploy a bounded HTTPS/CORS frame origin/scheduler, and register verified manifests with Claude's `WXData.registerSource`. Place frames **below** map labels inside Mapbox (Claude's current canvas overlay covers city text). GeoColor multiband composites, mesoscale-sector extent checks, satellite band 13 enhancement tuning, RTMA variables, forecast model fields remain later work. User will identify RTMA/model fields. NOAA image pixels are not meant to be served indefinitely from private user palette storage.
