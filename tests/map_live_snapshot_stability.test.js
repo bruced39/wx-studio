@@ -60,6 +60,8 @@ test('the editor never displays a thumbnail camera while a snapshot is active',a
  assert.equal(h.MB.liveFrame(edit,camEdit).imageTag,1,
    'hold lasts until Mapbox renders the editor camera');
  assert.equal(h.api.state().hasHold,true);
+ // NOAA tile loading must not keep the correct preview frozen forever.
+ h.D.loaded=()=>false;
  h.D.emit('render');
  assert.equal(h.api.state().hasHold,false);
  assert.equal(h.MB.liveFrame(edit,camEdit).imageTag,1);
