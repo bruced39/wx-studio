@@ -97,6 +97,47 @@ you select their exact requested variables. The Weather Data palettes already
 support local and cloud saved tables; native NOAA source processing may need
 product-specific scalar/color mappings as each additional field comes online.
 
+## If PowerShell reports "Cannot find the ecCodes library"
+
+Before v0.9.95, the Windows launcher invoked `science-env\\python.exe`
+**without activating the conda/micromamba environment**. On Windows, native
+libraries such as ecCodes live in `science-env\\Library\\bin`. The Python
+bindings can be installed yet fail to find the corresponding DLL (GRIB2 decoder).
+This stops the launch before NOAA ingestion starts; it does **not** mean a
+radar download was corrupted or that you must install Docker.
+
+1. Get the latest WX Studio repository ZIP / pull `main` **v0.9.95 or later**
+   into your existing project directory. You can reuse the installed isolated
+   packages at `%LOCALAPPDATA%\\WXStudioNOAA`, which are separate from the ZIP.
+2. Reopen PowerShell in the UPDATED repository folder and run:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\\weather_processor\\start_no_docker_windows.ps1 -Products "mrms-reflectivity"
+   ```
+
+3. The launcher now runs **micromamba run --prefix** for the ecCodes self-check,
+   entire dependency check, and NOAA worker. This activates Conda's native DLL
+   paths without requiring a permanent PATH change. If the DLL/compatible bindings
+   are genuinely missing, it repairs only `eccodes` and `python-eccodes` from
+   conda-forge, then repeats `python -m eccodes selfcheck`. It does NOT wipe
+   `science-env`, install packages globally, or fall back to fake weather.
+4. If it still reports an ecCodes error, run this in PowerShell and provide its output:
+
+   ```powershell
+   $root = Join-Path $env:LOCALAPPDATA 'WXStudioNOAA'
+   & (Join-Path $root 'micromamba.exe') run --prefix (Join-Path $root 'science-env') python -m eccodes selfcheck
+   ```
+
+   The first successful result should report a real ecCodes version.
+   Next, keep the NOAA processor PowerShell window open and inspect
+   `http://127.0.0.1:8080/health` and `http://127.0.0.1:8080/catalog`.
+   An empty catalog initially is normal; the worker still needs to download
+   and decode a recent real NOAA product.
+
+For reference, ECMWF recommends installing the native binary `eccodes`
+AND the matching conda-forge `python-eccodes` bindings. The external
+`science-env` installation is not part of a GitHub ZIP checkout.
+
 ## Privacy, startup and troubleshooting
 
 - The service listens only at **127.0.0.1**, never `0.0.0.0`.
