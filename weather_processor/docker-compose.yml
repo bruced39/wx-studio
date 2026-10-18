@@ -1,0 +1,30 @@
+# Run from repository root:
+# docker compose -f weather_processor/docker-compose.yml up --build
+# Both processes share a persistent local volume, not Supabase Storage.
+services:
+  noaa-api:
+    build:
+      context: ..
+      dockerfile: weather_processor/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      WX_PROCESSOR_DATA_DIR: /data/frames
+    volumes:
+      - wx-native-frames:/data/frames
+    restart: unless-stopped
+  noaa-worker:
+    build:
+      context: ..
+      dockerfile: weather_processor/Dockerfile
+    command: ["python", "-m", "weather_processor.ingest", "--interval", "120"]
+    environment:
+      WX_PROCESSOR_DATA_DIR: /data/frames
+      # A single regional source per family is initial activation, NOT a
+      # claim that all mesoscale/GOES sectors are already ingested.
+      WX_PROCESSOR_PRODUCTS: "mrms-reflectivity,goes-east-conus-C02,nexrad-reflectivity-KBOX"
+    volumes:
+      - wx-native-frames:/data/frames
+    restart: unless-stopped
+volumes:
+  wx-native-frames:
