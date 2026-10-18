@@ -1298,13 +1298,24 @@
     });
   }
   const once = (m, ev) => new Promise(res => m.once(ev, res));
+  // Avoid a permanent "Loading Mapbox map..." screen if a browser blocks
+  // mapbox-gl.js, or a style/map load fails without firing its load event.
+  const withTimeout=(promise,ms,description)=>new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(new Error(description)),ms);
+    Promise.resolve(promise).then(
+      value=>{clearTimeout(timer);resolve(value)},
+      error=>{clearTimeout(timer);reject(error)}
+    );
+  });
   MB.init = function () {
     if (initP) return initP;
     initP = (async () => {
       MB.status = 'loading'; MB.err = '';
       try {
         if (!MB.hasToken()) throw new Error('Add your Mapbox public token (starts with pk.) in Scene → Mapbox settings');
-        await loadLib(); g.mapboxgl.accessToken = MB.token();
+        await withTimeout(loadLib(),20000,
+          'Mapbox GL JS did not download within 20 seconds. Check the connection and refresh.');
+        g.mapboxgl.accessToken = MB.token();
         try { Object.defineProperty(g, 'devicePixelRatio', { configurable: true, get: () => MB.scale }); } catch (e) { /* ignore */ }
         const cw = Math.round(W / MB.scale), ch = Math.round(H / MB.scale);
         host = document.createElement('div'); host.style.cssText = `position:fixed;left:-30000px;top:0;width:${cw}px;height:${ch}px;pointer-events:none;`;
@@ -1323,9 +1334,17 @@
             }
           }catch(err){}
         });
-        await Promise.all([once(D, 'load'), once(P, 'load')]);
+        await withTimeout(Promise.all([once(D, 'load'),once(P, 'load')]),25000,
+          'Mapbox tiles/style did not initialize in 25 seconds. Verify your Mapbox token and refresh.');
         curStyle = 'streets-v12'; curStyleKey='stock|streets-v12'; curCfgKey=null; curProj = 'mercator'; pProj = 'mercator'; MB.status = 'ready';
-      } catch (e) { MB.status = 'error'; MB.err = e.message || String(e); initP = null; throw e; }
+      } catch (e) {
+        MB.status='error';MB.err=e.message||String(e);
+        // A failed first load must not retain orphaned WebGL maps/hosts.
+        try{if(D)D.remove();if(P)P.remove();if(host)host.remove()}catch(ignore){}
+        D=P=host=null;initP=null;
+        console.warn('WX Studio Mapbox initialization:',MB.err);
+        throw e;
+      }
     })();
     return initP;
   };
@@ -1353,7 +1372,16 @@
     if(bg.mbStyle==='broadcast'&&cfgKey!==curCfgKey){addBroadcastCartography(D,bg);curCfgKey=cfgKey;}
     // A style reset removes the image source; reinstall AFTER cartography and
     // BEFORE snapshot so labels remain layered over each NOAA frame.
-    applyWeatherUnderlay(D);
+    // The weather raster is OPTIONAL. A bad/corrupt/demo raster must never
+    // prevent the base map or user labels from rendering after refresh.
+    try{applyWeatherUnderlay(D)}catch(error){
+      console.warn('WX Studio weather layer skipped; base map remains available:',error);
+      try{
+        if(D.getLayer(WX_FRAME_LAYER))D.removeLayer(WX_FRAME_LAYER);
+        if(D.getSource(WX_FRAME_SOURCE))D.removeSource(WX_FRAME_SOURCE);
+        D.__wdWeatherKey='';
+      }catch(ignore){}
+    }
   }
   function settle(m, generation) {
     return new Promise(res => {
