@@ -23,6 +23,7 @@ def test_accepts_all_native_satellite_and_radar_product_types(tmp_path):
     assert api[0] == local_host.sys.executable
     assert api[api.index("--host") + 1] == "127.0.0.1"
     assert "--proxy-headers" not in api
+    assert "weather_processor.local_service:APP" in api
     assert worker[:3] == [local_host.sys.executable, "-m", "weather_processor.ingest"]
     assert worker[worker.index("--products") + 1] == ids
     assert worker[worker.index("--interval") + 1] == "120"
@@ -116,3 +117,30 @@ def test_official_installer_and_native_windows_science_dependencies():
                     "cfgrib", "h5netcdf", "rasterio", "pyproj"]:
         assert package in env
     assert "conda-forge" in env
+
+
+def test_local_browser_private_network_preflight_header():
+    import asyncio
+    import httpx
+    from weather_processor.local_service import APP
+
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=APP),
+                                    base_url="http://127.0.0.1:8080") as client:
+            opts = await client.options("/health", headers={
+                "Origin": "https://wx-studio.streamlit.app",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Private-Network": "true",
+            })
+            assert opts.status_code in (200, 204)
+            assert opts.headers.get("access-control-allow-private-network") == "true"
+            assert "GET" in opts.headers.get("access-control-allow-methods", "")
+            # Without a browser PNA preflight, do not emit the extra header.
+            health = await client.get("/health", headers={
+                "Origin": "https://wx-studio.streamlit.app",
+            })
+            assert health.status_code == 200
+            assert "access-control-allow-private-network" not in health.headers
+            assert health.json()["service"] == "wxstudio-noaa-native"
+
+    asyncio.run(check())
