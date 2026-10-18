@@ -22,11 +22,16 @@ def _version() -> str:
 def build_html() -> str:
     html = (STUDIO / "index.html").read_text(encoding="utf-8").replace("__WX_VERSION__", _version())
 
+    # Cloud Streamlit iframe does not serve relative script URLs. Inline
+    # top-level and nested weather/ scripts in their declared order.
     def inline(m):
-        js = (STUDIO / m.group(1)).read_text(encoding="utf-8").replace("</script", "<\\/script")
+        script = (STUDIO / m.group(1)).resolve()
+        if not script.is_relative_to(STUDIO.resolve()) or not script.is_file():
+            raise ValueError("Unsafe or missing studio script: " + m.group(1))
+        js = script.read_text(encoding="utf-8").replace("</script", "<\\/script")
         return "<script>\n" + js + "\n</script>"
 
-    return re.sub(r'<script src="([\w.\-]+\.js)"></script>', inline, html)
+    return re.sub(r'<script src="([\w.\-]+(?:/[\w.\-]+)*\.js)"></script>', inline, html)
 
 
 if __name__ == "__main__":
