@@ -25,7 +25,7 @@ function harness({catalog=products,timestamps=[]}={}){
   let doc;
   if(url.endsWith('/catalog'))doc={schema:'wxstudio.frames.v1',products:catalog};
   else {
-   const id=/\/manifests\/([a-z0-9-]+)\.json/.exec(url)?.[1];
+   const id=/\/manifests\/([A-Za-z0-9-]+)\.json/.exec(url)?.[1];
    doc={schema:'wxstudio.frames.v1',product:id,frames:frame(id)};
   }
   return {ok:true,json:async()=>doc};
