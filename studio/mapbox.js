@@ -1232,7 +1232,7 @@
   MB.keyOf = keyOf;
 
   /* ---- library + maps ---- */
-  let D = null, P = null, host = null, initP = null, curStyle = null, curStyleKey = null, curCfgKey = null, curProj = null, pKey = null, liveKey = null, renderGeneration = 0;
+  let D = null, P = null, host = null, initP = null, curStyle = null, curStyleKey = null, curCfgKey = null, curProj = null, pProj = null, pKey = null, liveKey = null, renderGeneration = 0;
   // NOAA/weather imagery is a real Mapbox IMAGE SOURCE and RASTER LAYER,
   // not a canvas drawn on top of a completed map. Every road, county/state
   // boundary, coastline, city label and user-created WX Studio annotation
