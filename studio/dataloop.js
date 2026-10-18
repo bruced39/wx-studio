@@ -184,38 +184,76 @@
     const allSources = () => { const out = Object.values(D.sources).map(s => ({ id: s.id, label: s.label, ok: true })); D.planned.forEach(p => { if (!D.sources[p.id]) out.push({ id: p.id, label: p.label + ' (not connected yet)', ok: false }); }); return out; };
 
     function build() {
-      const sc = cur(), dl = sc.dataLoop, on = !!(dl && dl.on); bar.textContent = ''; refs = {};
-      const top = h('div', { className: 'r' });
-      const chk = h('input', { type: 'checkbox', checked: on }); chk.addEventListener('change', () => { if (chk.checked) { sc.dataLoop = Object.assign(D.defaults(), sc.dataLoop || {}, { on: true }); } else if (sc.dataLoop) sc.dataLoop.on = false; save(); build(); });
-      top.append(h('label', {}, chk, h('b', { text: 'Weather data loop' })), h('span', { className: 'st', text: on ? '' : 'Radar / satellite / model loops on a Mapbox map scene' }));
-      if (on && !(sc.bg && sc.bg.type === 'mapbox')) top.append(h('span', { className: 'st', style: 'color:#ffb86b', text: '⚠ needs a Mapbox map scene' }));
-      refs.stamp = h('span', { className: 'sp' }); top.append(refs.stamp); bar.append(top);
-      if (!on) return;
-      const r2 = h('div', { className: 'r' });
-      const step = d => { const rt = rtOf(sc), n = ready(rt).length; if (!n) return; rt.playing = false; dl.idx = (((Math.round(rt.lastIdx) + d) % n) + n) % n; save(); };
-      refs.play = h('button', { className: 'pl', title: 'Play / pause the loop preview', text: '▶' }); refs.play.onclick = () => { const rt = rtOf(sc); rt.playing = !rt.playing; if (rt.playing) dl.idx = rt.lastIdx; };
-      r2.append(h('button', { title: 'Previous frame', text: '‹', on: { click: () => step(-1) } }), refs.play, h('button', { title: 'Next frame', text: '›', on: { click: () => step(1) } }));
-      refs.spd = h('span', { className: 'spd' });
-      const bump = d => { dl.speed = clamp((dl.speed || 10) + d, 1, 30); save(); };
-      r2.append(h('button', { title: 'Slower', text: '−', on: { click: () => bump(-1) } }), refs.spd, h('button', { title: 'Faster', text: '+', on: { click: () => bump(1) } }));
-      refs.prog = h('div', { className: 'prog', title: 'Click or drag to scrub the loop' }, refs.fill = h('i'), refs.knob = h('b'));
-      const scrub = e => { const rt = rtOf(sc), n = ready(rt).length; if (!n) return; const r = refs.prog.getBoundingClientRect(); rt.playing = false; dl.idx = Math.round(clamp((e.clientX - r.left) / r.width, 0, 1) * (n - 1)); };
-      let dn = false; refs.prog.addEventListener('pointerdown', e => { dn = true; refs.prog.setPointerCapture(e.pointerId); scrub(e); }); refs.prog.addEventListener('pointermove', e => { if (dn) scrub(e); }); refs.prog.addEventListener('pointerup', () => { dn = false; save(); });
-      r2.append(refs.prog);
-      const mode = h('select', { title: 'Live now; archive comes later' }, h('option', { value: 'live', text: 'LIVE' }), h('option', { value: 'arch', text: 'ARCHIVED (soon)', disabled: true }));
-      const src = srcInfo(dl.source);
-      const len = h('select', { title: 'How much time the loop covers' }, (src.lengths || [1, 2, 4]).map(x => h('option', { value: x, text: lenLabel(x), selected: +dl.hours === x })));
-      len.onchange = () => { dl.hours = +len.value; save(); };
-      const sel = h('select', { title: 'Data being looped' }, allSources().map(s => h('option', { value: s.id, text: s.label, disabled: !s.ok, selected: dl.source === s.id })));
-      sel.onchange = () => { const ns = srcInfo(sel.value); dl.source = sel.value; dl.site = ns.defaultSite || ''; if (!(ns.lengths || []).includes(+dl.hours)) dl.hours = (ns.lengths || [1])[0]; dl.idx = 0; save(); build(); };
-      r2.append(mode, len, sel);
-      if (src.sites && src.sites.length) { const si = h('select', { title: 'Radar site' }, src.sites.map(x => h('option', { value: x.id, text: x.label, selected: (dl.site || src.defaultSite) === x.id }))); si.onchange = () => { dl.site = si.value; dl.idx = 0; save(); }; r2.append(si); }
-      bar.append(r2);
-      const r3 = h('div', { className: 'r' });
-      const op = h('input', { type: 'range', min: 0.1, max: 1, step: 0.05, value: dl.opacity == null ? 0.85 : dl.opacity, style: 'width:110px' }); op.oninput = () => { dl.opacity = +op.value; }; op.onchange = save;
-      const sb = h('input', { type: 'checkbox', checked: dl.showBar !== false }); sb.onchange = () => { dl.showBar = sb.checked; save(); };
-      refs.msg = h('span', { className: 'st' });
-      r3.append(h('label', {}, 'Opacity', op), h('label', {}, sb, 'Show this bar in the video'), refs.msg); bar.append(r3);
+      const sc=cur(),dl=sc?.dataLoop,on=!!dl?.on,isMap=sc?.bg?.type==='mapbox';
+      bar.textContent='';refs={};
+      bar.hidden=!isMap;
+      if(!isMap)return;
+      if(!on){
+        bar.append(h('button',{className:'loop-toggle',text:'▶ Enable weather data loop',
+          title:'Turn on weather data for this Mapbox scene',
+          on:{click:()=>{sc.dataLoop=Object.assign(D.defaults(),sc.dataLoop||{},{on:true});save();build();}}}));
+        return;
+      }
+      const row=h('div',{className:'dl-row'}),controls=h('div',{className:'dl-ctrl'});
+      const toggle=h('button',{className:'loop-toggle',title:'Disable weather data loop',text:'●',
+        on:{click:()=>{dl.on=false;save();build();}}});
+      const step=d=>{const rt=rtOf(sc),n=ready(rt).length;if(!n)return;
+        rt.playing=false;dl.idx=(((Math.round(rt.lastIdx)+d)%n)+n)%n;save();};
+      refs.play=h('button',{className:'pl',title:'Play / pause loop',text:'▶'});
+      refs.play.onclick=()=>{const rt=rtOf(sc);rt.playing=!rt.playing;if(rt.playing)dl.idx=rt.lastIdx;};
+      refs.spd=h('span',{className:'spd',text:(dl.speed||10)+'x'});
+      const bump=d=>{dl.speed=clamp((dl.speed||10)+d,1,30);save();};
+      controls.append(toggle,
+        h('button',{text:'−',title:'Decrease loop speed',on:{click:()=>bump(-1)}}),
+        refs.play,
+        h('button',{text:'+',title:'Increase loop speed',on:{click:()=>bump(1)}}),
+        refs.spd,
+        h('button',{text:'‹',title:'Previous frame',on:{click:()=>step(-1)}}),
+        h('button',{text:'›',title:'Next frame',on:{click:()=>step(1)}}));
+      row.append(controls);
+      const timeline=h('div',{className:'dl-timeline'});
+      refs.stamp=h('span',{className:'dl-stamp',text:''});
+      refs.fill=h('i');refs.knob=h('b');
+      refs.prog=h('div',{className:'prog',title:'Click or drag to scrub weather frames'},refs.fill,refs.knob);
+      let dn=false;
+      const scrub=e=>{const rt=rtOf(sc),n=ready(rt).length;if(!n)return;
+        const r=refs.prog.getBoundingClientRect();if(!r.width)return;
+        rt.playing=false;dl.idx=Math.round(clamp((e.clientX-r.left)/r.width,0,1)*(n-1));};
+      refs.prog.addEventListener('pointerdown',e=>{dn=true;refs.prog.setPointerCapture(e.pointerId);scrub(e);});
+      refs.prog.addEventListener('pointermove',e=>{if(dn)scrub(e)});
+      refs.prog.addEventListener('pointerup',()=>{dn=false;save()});
+      refs.prog.addEventListener('pointercancel',()=>{dn=false});
+      timeline.append(refs.stamp,refs.prog);row.append(timeline);
+      const options=h('div',{className:'dl-options'});
+      const mode=h('span',{className:'dl-live',text:'LIVE',title:'Live data only for now'});
+      const src=srcInfo(dl.source);
+      const len=h('select',{title:'Weather loop history length'},(src.lengths||[1,2,4]).map(x=>
+        h('option',{value:x,text:lenLabel(x),selected:+dl.hours===x})));
+      len.onchange=()=>{dl.hours=+len.value;save()};
+      const sel=h('select',{className:'dl-source',title:'Weather data being looped'},
+        allSources().map(x=>h('option',{value:x.id,text:x.label,disabled:!x.ok,
+          selected:dl.source===x.id})));
+      sel.onchange=()=>{const ns=srcInfo(sel.value);dl.source=sel.value;dl.site=ns.defaultSite||'';
+        if(!(ns.lengths||[]).includes(+dl.hours))dl.hours=(ns.lengths||[1])[0];
+        dl.idx=0;save();build();};
+      options.append(mode,len,sel);
+      if(src.sites?.length){
+        const site=h('select',{title:'Radar location'},src.sites.map(x=>
+          h('option',{value:x.id,text:x.label,selected:(dl.site||src.defaultSite)===x.id})));
+        site.onchange=()=>{dl.site=site.value;dl.idx=0;save()};
+        options.append(site);
+      }
+      const settings=h('div',{className:'dl-settings',hidden:true});
+      const op=h('input',{type:'range',min:.1,max:1,step:.05,value:dl.opacity==null?.85:dl.opacity});
+      op.oninput=()=>{dl.opacity=+op.value};op.onchange=save;
+      const show=h('input',{type:'checkbox',checked:dl.showBar!==false});
+      show.onchange=()=>{dl.showBar=show.checked;save()};
+      refs.msg=h('span',{className:'st'});
+      settings.append(h('label',{},'Opacity',op),
+        h('label',{},show,'Include bar in video'),refs.msg);
+      const button=h('button',{text:'⚙',title:'Opacity and export bar settings',
+        'aria-label':'Loop settings',on:{click:()=>{settings.hidden=!settings.hidden}}});
+      options.append(button);row.append(options);bar.append(row,settings);
     }
 
     function tick(ts) {
