@@ -79,3 +79,35 @@ test('failed snapshot latches the error and prevents automatic WebGL retries',as
   await assert.rejects(snap({},{}),/render failure/);
   assert.equal(attempts,1);
 });
+
+
+test('projector projection state is declared in strict mode before map startup',()=>{
+  // Reproduces the v0.9.76 Firefox crash: assignment to undeclared variable pProj.
+  const decl=block('  let D = null, P = null,','\n  // NOAA/weather imagery');
+  assert.match(decl,/\bpProj\s*=\s*null\b/,
+    'projector projection variable must be declared with other Mapbox state');
+  const simulate="'use strict';\n"+decl+
+    "\nP=null;pProj='mercator';P={setProjection(pr){this.pr=pr}};"+
+    "const requested='globe';if(pProj!==requested){P.setProjection(requested);pProj=requested;}"+
+    "return [pProj,P.pr];";
+  assert.deepEqual(new Function(simulate)(),['globe','globe']);
+});
+test('Mapbox reset clears projector state even when optional P is unavailable',()=>{
+  const decl=block('  let D = null, P = null,','\n  // NOAA/weather imagery');
+  const reset=block('  MB.reset = function () {','\n  MB.setToken =');
+  const simulate="'use strict';\n"+decl+
+    "\nconst MB={interacting:true,cache:{clear(){this.cleared=true}},last:'previous',"+
+    "status:'ready',err:'previous error',queue:Promise.resolve()};"+
+    "pProj='globe';pKey='camera';curProj='globe';"+
+    "D={remove(){this.removed=true}};P=null;host={remove(){this.removed=true}};\n"+
+    reset+"\nMB.reset();return {pProj,pKey,curProj,D,P,host,initP,MB,renderGeneration};";
+  const result=new Function(simulate)();
+  assert.equal(result.pProj,null);
+  assert.equal(result.pKey,null);
+  assert.equal(result.curProj,null);
+  assert.equal(result.D,null);
+  assert.equal(result.P,null);
+  assert.equal(result.MB.status,'idle');
+  assert.equal(result.MB.err,'');
+  assert.equal(result.renderGeneration,1);
+});
