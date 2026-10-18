@@ -116,6 +116,10 @@
     const frames=rt?.frames?.filter(f=>f.img)||[];
     if(!frames.length){g.MB.setWeatherFrame(null);return false;}
     const idx=D.curIdx(scene,t,opts&&opts.editing),frame=frames[idx];
+    // The old 2D weather draw path used to update lastIdx. The Mapbox
+    // underlay bypasses it, so advance the displayed timestamp/blue knob
+    // explicitly to the exact frame selected for the map and exports.
+    rt.lastIdx=idx;
     if(!frame){g.MB.setWeatherFrame(null);return false;}
     let url=frame.url;
     // The demo loop supplies canvases. Encoding the same image into a
