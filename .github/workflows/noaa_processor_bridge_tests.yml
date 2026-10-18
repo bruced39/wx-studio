@@ -1,0 +1,34 @@
+name: NOAA separate processing service and Mapbox weather tests
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'studio/weather/ingest/**'
+      - 'studio/weather/processor_bridge.js'
+      - 'studio/mapbox.js'
+      - 'studio/engine.js'
+      - 'tests/test_noaa_service.py'
+      - 'tests/weather_underlay.test.js'
+      - '.github/workflows/noaa_processor_bridge_tests.yml'
+  workflow_dispatch:
+jobs:
+  python-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s tests -p test_noaa_service.py -v
+      - run: python -m py_compile studio/weather/ingest/service.py studio/weather/ingest/runner.py studio/weather/ingest/cli.py
+  mapbox-underlays:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/weather_underlay.test.js
+      - run: node --check studio/weather/processor_bridge.js && node --check studio/mapbox.js && node --check studio/engine.js
