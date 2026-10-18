@@ -16,7 +16,9 @@
  */
 (function (g) {
   'use strict';
-  const W = g.WXWeatherWorkspace = { version: 1, capabilities: { layerPosition: false }, ui: null, util: {} };
+  const W = g.WXWeatherWorkspace = { version: 1,
+    capabilities: { layerPosition: !!g.MB?.weatherLayerPositionSupported },
+    ui: null, util: {} };
   const U = W.util;
 
   /* ====================== pure helpers (unit-tested without a browser) ====================== */
@@ -422,9 +424,9 @@
         if (/^demo-/.test(e.productId || '')) throw new Error('Demo patterns are not real products. Choose the weather product this palette belongs to.');
         if (!/^[a-z0-9_-]{1,90}$/i.test(e.productId || '')) throw new Error('Choose the weather product this palette belongs to.');
         ui.pal.busy = true; setMsg('Saving to your cloud palettes…', ''); W.render();
-        const row = await cloud.save({ category: e.category, productId: e.productId, name: e.name, stops, units: e.units || '', id: e.cloudId || null });
+        const row = await cloud.save({ category: e.category, productId: e.productId, name: e.name, stops, units: e.units || '', continuous: e.continuous === true, id: e.cloudId || null });
         if (e.paletteId) delete pal.custom[e.paletteId];
-        const id = registerRow(Object.assign({ continuous: false }, row, { stops: row.stops || stops })); setMsg('Saved “' + e.name + '” to your cloud palettes.' + (e.continuous ? ' (Smooth blending is not stored in the cloud yet, so it reloads as stepped colors.)' : ''), 'ok');
+        const id = registerRow(Object.assign({}, row, { continuous: row.continuous === true, stops: row.stops || stops })); setMsg('Saved “' + e.name + '” to your cloud palettes.', 'ok');
         ui.pal.editor = null; useIfFits(id);
       } else {
         e.stops = stops; if (e.paletteId) delete pal.custom[e.paletteId];
@@ -487,7 +489,7 @@
       ps.append(el('div', { className: 'ws-stop' }, v, c, el('button', { className: 'ws-btn', text: '✕', title: 'Remove this stop', disabled: e.stops.length <= 2, on: { click: () => { e.stops.splice(i, 1); W.render(); } } })));
     });
     ps.append(el('div', { className: 'ws-btns' }, el('button', { className: 'ws-btn', text: '+ Add stop', disabled: e.stops.length >= 256, on: { click: () => { const last = e.stops[e.stops.length - 1]; e.stops.push([(Number(last[0]) || 0) + 5, '#ffffff']); W.render(); } } })));
-    if (e.continuous) ps.append(el('div', { className: 'ws-note warn', text: 'This palette blends smoothly. Cloud storage currently keeps color stops only, so a saved copy reloads as stepped colors.' }));
+    if (e.continuous) ps.append(el('div', { className: 'ws-note', text: 'Smooth color blending is saved with this palette. NOAA frames already colored by the processor will not change until scalar/recolored frames are supported.' }));
     ps.append(el('div', { className: 'ws-btns' }, el('button', { className: 'ws-btn pri', text: e.cloudId ? 'Save changes to cloud' : 'Save to my cloud palettes', disabled: ui.pal.busy, on: { click: () => saveEditor(true) } }), el('button', { className: 'ws-btn', text: 'Use this session only', disabled: ui.pal.busy, on: { click: () => saveEditor(false) } }), el('button', { className: 'ws-btn', text: 'Cancel', on: { click: () => { ui.pal.editor = null; setMsg('', ''); W.render(); } } })));
     box.append(ps); redraw();
   }
