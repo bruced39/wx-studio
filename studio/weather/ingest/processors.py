@@ -202,7 +202,10 @@ def crop_regular_grid(field, lons, lats, bbox:BBox) -> tuple[np.ndarray,BBox]:
 def decode_mrms(path:str|Path,bbox:BBox,*,max_pixels:int=12_000_000)->Frame:
     """Native regular-grid MRMS GRIB2 reflectivity via ecCodes/pygrib."""
     import pygrib
-    with pygrib.open(str(path)) as grbs:
+    # pygrib.open() exposes close(), but is not guaranteed to implement
+    # Python's with-context-manager protocol on every ecCodes wheel.
+    grbs=pygrib.open(str(path))
+    try:
         g=grbs.message(1)
         if g.gridType!="regular_ll":
             raise ValueError(f"MRMS grid type {g.gridType!r} is not regular_ll")
@@ -216,6 +219,8 @@ def decode_mrms(path:str|Path,bbox:BBox,*,max_pixels:int=12_000_000)->Frame:
         if subset.size>max_pixels:
             raise ValueError("MRMS native ROI too large; narrow geographic bbox")
         ts=g.validDate.replace(tzinfo=timezone.utc)
+    finally:
+        grbs.close()
     # Sentinel fill/no-echo values are never painted black across the map.
     valid=np.asarray(np.ma.filled(subset,np.nan),dtype="float32")
     pixels=rgba(subset,RADAR,valid=(valid>-5)&(valid<90),min_echo=-5)
