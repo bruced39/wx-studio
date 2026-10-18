@@ -6,6 +6,9 @@ services:
     build:
       context: ..
       dockerfile: weather_processor/Dockerfile
+    # Override single-host default: the separate noaa-worker service below
+    # already runs ingestion against our shared persistent volume.
+    command: ["uvicorn", "weather_processor.service:APP", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
     ports:
       - "8080:8080"
     environment:
