@@ -105,8 +105,44 @@ const IMAGE_SERVER=C.NOAA.radarHistory;
 const TEST_BBOX=Object.freeze([-82.0,35.5,-64.5,49.0]);
 const TEST_SIZE=Object.freeze([3072,2304]);
 const MS_5MIN=300000;
-const MAX_FRAMES=12;  // Initial one-hour test. Avoid 48 3072px textures in RAM.
+const MAX_FRAMES=12;  // Roughly twelve five-minute scans per hour; keep browser memory bounded.
+const MAX_CATALOG_RECORDS=1000; // ArcGIS ImageServer advertises maxRecordCount=1000.
 const epochTime=t=>Number.isFinite(+t)&&+t>1e12?Number(t):null;
+/* Convert the NOAA raster catalog into actual observation frames.
+ * A single radar acquisition can have MANY distinct second/millisecond
+ * idp_validtime values. Taking the last twelve raw records (old behavior)
+ * repeatedly displayed 1:44 PM and only looped 14–20 minutes while the
+ * menu incorrectly said one hour.
+ * Preserve real NOAA epoch times; never invent or interpolate fake scans.
+ */
+function selectNwsScanTimes(candidates,minTime,maxTime,maxFrames=MAX_FRAMES){
+ const bins=new Map();
+ for(const raw of candidates){
+  const t=epochTime(raw);
+  if(t===null||t<minTime||t>maxTime)continue;
+  const slot=Math.floor(t/MS_5MIN);
+  // One representative NOAA observation per five-minute UTC window.
+  // Prefer the most recent genuine observation within that window.
+  if(!bins.has(slot)||t>bins.get(slot))bins.set(slot,t);
+ }
+ const all=[...bins.values()].sort((a,b)=>a-b);
+ // A scan might fall on opposite sides of a five-minute boundary.
+ // Collapse those near duplicates too, prioritizing newer observations.
+ const spaced=[];
+ for(let i=all.length-1;i>=0;i--)
+  if(!spaced.length||spaced[spaced.length-1]-all[i]>=180000)
+   spaced.push(all[i]);
+ spaced.reverse();
+ if(spaced.length<=maxFrames)return spaced;
+ // When NOAA supplies more than twelve scans, select evenly THROUGH the
+ // entire hour, never just the twelve most-recent raw timestamps.
+ const selected=[];
+ for(let i=0;i<maxFrames;i++){
+  const pos=Math.round(i*(spaced.length-1)/(maxFrames-1));
+  if(selected.at(-1)!==spaced[pos])selected.push(spaced[pos]);
+ }
+ return selected;
+}
 const frameUrl=(epochMs,bbox=TEST_BBOX,size=TEST_SIZE)=>{
  const q=new URLSearchParams({
    bbox:bbox.join(','),bboxSR:'4326',imageSR:'4326',
@@ -140,14 +176,16 @@ async function listNwsMrms({hours=1}={}){
  const query=new URLSearchParams({
   where:'1=1',outFields:'idp_validtime',returnGeometry:'false',
   returnDistinctValues:'true',orderByFields:'idp_validtime DESC',
-  resultRecordCount:'150',f:'json'
+  resultRecordCount:String(MAX_CATALOG_RECORDS),f:'json'
  });
  const catalog=await noaaJson(IMAGE_SERVER+'/query?'+query.toString());
  if(!Array.isArray(catalog.features))throw Error('NOAA MRMS timestamp catalog unavailable');
  const requested=Math.max(1,Math.min(1,+hours||1)); // test phase: exactly 1 hour
  const min=Math.max(start,end-requested*3600000,now-5*3600000);
- const values=[...new Set(catalog.features.map(f=>epochTime(f.attributes?.idp_validtime)).filter(t=>
-  t!==null&&t>=min&&t<=end+MS_5MIN))].sort((a,b)=>a-b).slice(-MAX_FRAMES);
+ const values=selectNwsScanTimes(
+  catalog.features.map(f=>f.attributes?.idp_validtime),
+  min,end+MS_5MIN,MAX_FRAMES
+ );
  if(values.length<2)throw Error('NOAA MRMS returned fewer than two valid timed scans');
  return values.map(t=>({
   t,bbox:TEST_BBOX.slice(),crs:'4326',url:frameUrl(t)
@@ -155,7 +193,8 @@ async function listNwsMrms({hours=1}={}){
 }
 C.mrmsBrowserTest=Object.freeze({
  service:IMAGE_SERVER,bbox:TEST_BBOX,size:TEST_SIZE,
- frameUrl,list:listNwsMrms,note:'NOAA-rendered regional preview, not source-native decoded GRIB2'
+ frameUrl,list:listNwsMrms,selectScanTimes:selectNwsScanTimes,
+ note:'NOAA-rendered regional preview, not source-native decoded GRIB2'
 });
 if(g.WXData&&typeof g.WXData.registerSource==='function'){
  g.WXData.registerSource({
