@@ -67,7 +67,11 @@
       // ONLY register a source when it has actual NOAA-origin manifests.
       const goes=products.filter(p=>idOf(p)==='goes'),mrms=products.filter(p=>idOf(p)==='mrms'),
         nexrad=products.filter(p=>idOf(p)==='nexrad');
-      const present=new Set(products.map(idOf));
+      // Preserve compatibility with old saved scenes ('goes' generic), but
+      // also expose EACH actually decoded GOES-19 East / GOES-18 West sector
+      // and channel as a separate source in Claude's existing dropdown.
+      const present=new Set(products.map(p=>idOf(p)==='goes'?p:idOf(p)));
+      if(goes.length)present.add('goes');
       for(const id of managedSources){
         if(!present.has(id)){delete D.sources[id];managedSources.delete(id);D.onSources?.();}
       }
@@ -83,6 +87,17 @@
       if(goes.length){managedSources.add('goes');
         D.registerSource({id:'goes',label:'GOES ABI (processed NOAA)',lengths:[1,2,4,12],
           list:({hours})=>manifest(goes.find(x=>x==='goes-east-conus-C02')||goes[0],hours)});
+      }
+      for(const product of goes){
+        const m=/^goes-(east|west)-(conus|full|meso1|meso2)-(C02|C13)$/.exec(product);
+        if(!m)continue;
+        const satellite=m[1]==='east'?'GOES-19 East':'GOES-18 West',
+          sector={conus:'CONUS',full:'Full Disk',meso1:'Mesoscale 1',meso2:'Mesoscale 2'}[m[2]],
+          channel=m[3]==='C02'?'Visible 0.5 km':'IR 2 km';
+        managedSources.add(product);
+        D.registerSource({id:product,label:satellite+' · '+sector+' · '+channel,
+          lengths:[1,2,4,12],category:'satellite',
+          list:({hours})=>manifest(product,hours)});
       }
       if(mrms.length){
         managedSources.add('mrms');
