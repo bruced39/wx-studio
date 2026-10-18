@@ -64,7 +64,9 @@
       const url=new URL(frame.url);
       if(url.origin!==new URL(endpoint).origin||url.protocol!=='https:'&&url.hostname!=='localhost'&&url.hostname!=='127.0.0.1')return null;
       if(!/\/frames\/[A-Za-z0-9-]+\/[0-9]{13}\.png$/.test(url.pathname))return null;
-      return {t:frame.t,bbox:frame.bbox,crs:'4326',url:url.href};
+      return {t:frame.t,bbox:frame.bbox,crs:'4326',url:url.href,
+        revision:typeof frame.revision==='string'&&/^[a-z0-9._-]{1,80}$/i.test(frame.revision)
+          ?frame.revision:''};
     }catch(e){return null}
   }
   async function manifest(product,hours){
@@ -175,7 +177,12 @@
     if(!url){g.MB.setWeatherFrame(null);return false;}
     g.MB.setWeatherFrame({url,bbox:frame.bbox,crs:frame.crs||'4326',
       opacity:dl.opacity==null?.85:dl.opacity,
-      id:(dl.source||'')+':'+frame.t+':'+(dl.site||'')});
+      order:dl.order==='above-labels'?'above-labels':'below-labels',
+      // Cache identity includes palette selection, content revision and URL,
+      // so future palette-aware processor frames can be refreshed correctly.
+      // IMPORTANT: this does NOT recolor today's already colored NOAA PNGs.
+      id:[dl.source||'',frame.t,dl.site||'',dl.palette||'',
+        frame.revision||'',url].join(':')});
     return true;
   };
   const oldDraw=D.draw;
