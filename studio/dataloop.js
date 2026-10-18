@@ -278,6 +278,9 @@
       lastT = ts; requestAnimationFrame(tick);
     }
     D.onSources = () => { lastSig = ''; };
+    // Render the single dock immediately when the editor appears; the
+    // animation tick then updates frame timestamps and progress.
+    build();
     requestAnimationFrame(tick); return true;
   }
   function boot() { if (!mountBar()) setTimeout(boot, 300); }
