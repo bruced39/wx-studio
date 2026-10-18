@@ -1,0 +1,24 @@
+# FREE native Windows 64-bit NOAA processor. No Docker, no hosted worker.
+# Keep numerical/scientific dependencies in conda-forge: binary geospatial
+# and ecCodes packages are often fragile when mixed with pip on Windows.
+# Install in an isolated WX Studio-only micromamba prefix; never alter system Python.
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - fastapi>=0.115
+  - uvicorn>=0.30
+  - boto3>=1.34
+  - requests>=2.31
+  - numpy>=1.26,<3
+  - pillow>=10,<13
+  - xarray>=2024.2
+  - h5netcdf>=1.3
+  - h5py>=3.10
+  - rasterio>=1.3
+  - pyproj>=3.6
+  - cfgrib>=0.9.12
+  - eccodes>=1.7
+  - arm_pyart>=2
+  - pytest>=8
+  - httpx>=0.27
