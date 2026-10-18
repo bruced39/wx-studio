@@ -1334,7 +1334,15 @@
         const de = document.createElement('div'), pe = document.createElement('div'); for (const e of [de, pe]) { e.style.cssText = `position:absolute;left:0;top:0;width:${cw}px;height:${ch}px`; host.appendChild(e); } document.body.appendChild(host);
         const c0 = MB.regionCam('newengland');
         D = new g.mapboxgl.Map({ container: de, style: 'mapbox://styles/mapbox/streets-v12', center: c0.c, zoom: c0.z, interactive: false, attributionControl: false, preserveDrawingBuffer: true, fadeDuration: 0, antialias: true, trackResize: false, projection: 'mercator' });
-        P = new g.mapboxgl.Map({ container: pe, style: { version: 8, sources: {}, layers: [] }, center: c0.c, zoom: c0.z, interactive: false, attributionControl: false, trackResize: false, projection: 'mercator' });
+        // The projector is an optional coordinate-conversion helper.
+        // A second GL context may fail on a busy GPU; never discard the
+        // actual weather map because that optional map could not initialize.
+        try{
+          P = new g.mapboxgl.Map({ container: pe, style: { version: 8, sources: {}, layers: [] }, center: c0.c, zoom: c0.z, interactive: false, attributionControl: false, trackResize: false, projection: 'mercator' });
+        }catch(projectorError){
+          P=null;
+          console.warn('WX Studio optional Mapbox projector unavailable:',projectorError);
+        }
         D.on('error', e => { const m = e && e.error && e.error.message; if (m && /401|403|token|Unauthorized/i.test(m)) { MB.err = 'Mapbox rejected the token (' + m + ')'; MB.status = 'error'; } });
         D.on('moveend',()=>refreshDynamicOverlays(D));
         D.on('sourcedata',e=>{
