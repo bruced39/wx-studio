@@ -85,7 +85,7 @@
     if (!BR) return { state: 'missing', pill: 'notconnected', title: 'Not connected', short: 'Not loaded', detail: 'The cloud processor module is not loaded.' };
     const when = BR.lastCheck ? ' · checked ' + new Date(BR.lastCheck).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
     switch (BR.status) {
-      case 'available': return { state: 'online', pill: 'connected', title: 'Connected', short: (BR.products || []).length + ' live NOAA product' + ((BR.products || []).length === 1 ? '' : 's'), detail: (BR.products || []).length + ' decoded NOAA product' + ((BR.products || []).length === 1 ? '' : 's') + ' available' + when };
+      case 'available': return { state: 'online', pill: 'connected', title: 'Connected', short: (BR.products || []).length + ' NOAA product' + ((BR.products || []).length === 1 ? '' : 's') + ' listed', detail: (BR.products || []).length + ' NOAA product' + ((BR.products || []).length === 1 ? '' : 's') + ' listed by the processor' + when };
       case 'no-fresh-data': return { state: 'nofresh', pill: 'experimental', title: 'No fresh data', short: 'Reachable, no current observations', detail: 'The processor answered but has no current NOAA observations yet' + when };
       case 'checking': return { state: 'checking', pill: 'notconnected', title: 'Checking…', short: 'Contacting processor…', detail: 'Contacting the cloud processor' };
       case 'unavailable': return { state: 'unavailable', pill: 'notconnected', title: 'Not connected', short: 'Processor unreachable', detail: 'The processor could not be reached' + (BR.error ? ' (' + BR.error + ')' : '') + when };
@@ -93,13 +93,141 @@
     }
   };
 
+  /* ====================== data-source diagnostics: pure logic (unit-tested, no DOM) ======================
+   * One question answered per source: "can I trust this on air?"  LIVE is shown ONLY when a real frame from the processor
+   * has been downloaded AND decoded (by the Verify check, or by the active weather loop itself) and is recent enough. */
+  const SAT_ID = /^goes-(east|west)-(conus|full|meso1|meso2)-(C02|C13)$/;
+  const SECT = { conus: 'CONUS', full: 'Full Disk', meso1: 'Mesoscale 1', meso2: 'Mesoscale 2' };
+  U.SAT_PRODUCTS = []; ['east', 'west'].forEach(s => ['conus', 'full', 'meso1', 'meso2'].forEach(x => ['C02', 'C13'].forEach(c => U.SAT_PRODUCTS.push('goes-' + s + '-' + x + '-' + c))));
+  U.STATE_LABEL = { live: 'LIVE · verified', connected: 'Connected · not verified', stale: 'Stale', waiting: 'Waiting', unavailable: 'Unavailable', notconnected: 'Not connected', experimental: 'Experimental preview', demo: 'Demo · synthetic' };
+  /* short words for the dock badge and the exported bar (long words would collide with the next label) */
+  U.BADGE = { live: 'LIVE', connected: 'UNVERIFIED', stale: 'STALE', waiting: 'WAITING', unavailable: 'UNAVAILABLE', notconnected: 'OFFLINE', experimental: 'PREVIEW', demo: 'DEMO' };
+  U.BADGE_COLOR = { live: '#ff5d5d', demo: '#b9a4ff', experimental: '#f5be4e', stale: '#f5be4e', waiting: '#8fb4ff', unavailable: '#ff9b9b', connected: '#9fb3cf', notconnected: '#8397b3' };
+  /* Which family a processor product id belongs to, and a readable name. Unknown ids are never invented: they come from /catalog. */
+  U.parseProduct = function (pid) {
+    pid = String(pid || ''); let m = SAT_ID.exec(pid);
+    if (m) return { family: 'satellite', kind: 'goes', sector: m[2], label: (m[1] === 'east' ? 'GOES-19 East' : 'GOES-18 West') + ' · ' + SECT[m[2]] + ' · ' + (m[3] === 'C02' ? 'Visible 0.5 km' : 'Clean IR 2 km') };
+    if (pid === 'mrms-reflectivity') return { family: 'radar', kind: 'mrms', label: 'MRMS reflectivity · 1 km national mosaic' };
+    m = /^nexrad-(reflectivity|velocity)-(K[A-Z0-9]{3})$/.exec(pid); if (m) return { family: 'radar', kind: 'nexrad', site: m[2], label: 'NEXRAD ' + m[2] + ' · ' + (m[1] === 'reflectivity' ? 'base reflectivity' : 'radial velocity') + ' · Level II' };
+    if (/^rtma/i.test(pid)) return { family: 'rtma', kind: 'rtma', label: pid };
+    if (/^(model|forecast|gfs|nam|hrrr|nbm|rap|href|ecmwf)/i.test(pid)) return { family: 'models', kind: 'model', label: pid };
+    return { family: 'other', kind: 'other', label: pid };
+  };
+  /* How old (minutes) the newest observation may be before it is called Stale: roughly 3x the product's normal scan interval (+ latency).
+   * The processor itself drops anything older than 50 minutes from /catalog. */
+  U.freshWindowMin = function (pid) {
+    const i = U.parseProduct(pid);
+    if (i.kind === 'mrms') return 15; if (i.kind === 'nexrad') return 20;
+    if (i.kind === 'goes') return i.sector === 'full' ? 30 : i.sector === 'conus' ? 20 : 10;
+    return 30;
+  };
+  U.fmtAge = function (ms) {
+    if (!Number.isFinite(ms)) return 'unknown'; const m = Math.round(ms / 60000); if (m < 1) return 'just now'; if (m < 90) return m + ' min ago';
+    const h = Math.floor(m / 60); return h + ' h ' + (m % 60) + ' min ago';
+  };
+  /* input: { proc:{configured,local,reach:'ok'|'fail'|'unknown',error,healthStatus}, meta:{latest,earliest,count}|null (as listed by /catalog),
+   *          registered, verify:{ok,t,error}|null, loop:{n,newest,status,error}|null, dropped, windowMin, now } */
+  U.sourceState = function (i) {
+    const now = i.now == null ? Date.now() : i.now, P = i.proc || {}, win = i.windowMin || 30;
+    const out = (state, why, extra) => Object.assign({ state, label: U.STATE_LABEL[state], why: why || '', windowMin: win, ageMin: null, verified: false }, extra);
+    if (!P.configured) return out('notconnected', 'No NOAA processor is enabled, so there is no data source for this product.');
+    if (P.reach === 'fail') return P.local
+      ? out('waiting', 'The local NOAA processor is not answering' + (P.error ? ' (' + P.error + ')' : '') + '. Start it, then run diagnostics again.', { label: 'Waiting for local processor' })
+      : out('unavailable', 'The NOAA processor cannot be reached' + (P.error ? ' (' + P.error + ')' : '') + '.');
+    if (P.reach !== 'ok') return out('waiting', 'Contacting the processor…', { label: 'Checking…' });
+    const v = i.verify, lp = i.loop, meta = i.meta;
+    if (v && v.ok === false) return out('unavailable', 'Frame check failed: ' + v.error);
+    if (lp && lp.status === 'error') return out('unavailable', lp.error || 'The weather loop could not load frames.');
+    const cand = [v && v.ok ? v.t : null, lp && lp.n > 0 ? lp.newest : null].filter(Number.isFinite), vt = cand.length ? Math.max.apply(null, cand) : null;
+    if (vt == null && lp && lp.status === 'loading') return out('connected', 'Downloading and decoding frames…', { label: 'Loading frames' });
+    if (!meta && vt == null) {
+      if (i.dropped) return out('stale', 'This product was listed earlier, but no new observation has arrived for over 50 minutes.');
+      return out('waiting', P.healthStatus === 'waiting-for-real-noaa-frames'
+        ? 'The processor is running but has not published fresh decoded observations yet (first downloads can take several minutes).'
+        : 'The processor has no fresh observation for this product yet (not downloaded or decoded, or NOAA has not published one).', { label: 'Waiting for NOAA frames' });
+    }
+    const newest = vt != null ? vt : meta.latest, age = (now - newest) / 60000, listedAge = meta ? (now - meta.latest) / 60000 : null;
+    if (vt != null) {
+      if (age <= win) return out('live', 'The newest frame was downloaded and decoded successfully and is recent.', { verified: true, ageMin: age });
+      if (listedAge != null && listedAge <= win) return out('connected', 'A newer observation is listed than the one checked (' + Math.round(age) + ' min old). Press Verify frame.', { ageMin: listedAge });
+      return out('stale', 'The newest decoded frame is ' + Math.round(age) + ' min old (fresh window ' + win + ' min).', { ageMin: age });
+    }
+    return age <= win
+      ? out('connected', 'Listed by the processor with a recent observation. No frame has been downloaded and checked yet — press Verify frame.', { ageMin: age })
+      : out('stale', 'The newest listed observation is ' + Math.round(age) + ' min old (fresh window ' + win + ' min).', { ageMin: age });
+  };
+  /* input: { endpoint, bridgeStatus, bridgeError, health:{ok,status,freshProducts,error}|null, catalog:{ok,products,error}|null } */
+  U.processorState = function (i) {
+    const ep = i.endpoint || '', local = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(ep), h = i.health, c = i.catalog;
+    let reach = 'unknown', err = '';
+    const out = (state, pill, title, short, detail) => ({ state, pill, title, short, detail, err, mode: !ep ? 'none' : local ? 'local' : 'hosted', local });
+    if (!ep) return out('notconfigured', 'notconnected', 'Not connected', 'No processor enabled', 'No NOAA processor is enabled. Demo patterns work without one; for real NOAA data, start the free local processor (see "Connect local NOAA processor") and tick its checkbox in the Streamlit sidebar.');
+    if (h || c) { reach = (h && h.ok) || (c && c.ok) ? 'ok' : 'fail'; err = (h && h.error) || (c && c.error) || ''; }
+    else if (i.bridgeStatus === 'unavailable') { reach = 'fail'; err = i.bridgeError || ''; }
+    else if (i.bridgeStatus === 'available' || i.bridgeStatus === 'no-fresh-data') reach = 'ok';
+    if (reach === 'unknown') return out('checking', 'waiting', 'Checking…', 'Contacting processor…', 'Contacting ' + ep + ' …');
+    if (reach === 'fail') return local
+      ? out('waiting-local', 'waiting', 'Waiting for local processor', 'Waiting for local processor', 'Cannot reach ' + ep + (err ? ' (' + err + ')' : '') + '. Start the processor on this computer (see "Connect local NOAA processor"), then press Run diagnostics.')
+      : out('unavailable', 'unavailable', 'Unavailable', 'Processor unreachable', 'Cannot reach the NOAA processor at ' + ep + (err ? ' (' + err + ')' : '') + '.');
+    if (c && c.ok === false && c.error) return out('unavailable', 'unavailable', 'Unavailable', 'Processor error', 'The processor answered, but its catalog could not be used: ' + c.error + '.');
+    const n = c && c.ok ? c.products.length : (i.bridgeStatus === 'available' ? null : 0);
+    if (n === 0 || (h && h.ok && h.status === 'waiting-for-real-noaa-frames' && !n)) return out('waiting', 'waiting', 'Waiting for NOAA frames', 'Waiting for NOAA frames', 'The processor is running, but it has not published fresh decoded NOAA observations yet. First downloads can take several minutes; check "docker logs -f wxstudio-noaa-local".');
+    return out('online', 'connected', 'Connected', n == null ? 'Processor online' : n + ' product' + (n === 1 ? '' : 's') + ' listed', (n == null ? 'The processor is online' : n + ' product' + (n === 1 ? ' is' : 's are') + ' listed with fresh observations') + '. A product counts as LIVE only after its newest frame has been downloaded and decoded (Verify frame, or the active weather loop).');
+  };
+  /* Plain-text report to paste into a chat or an issue. */
+  U.buildReport = function (m) {
+    const L = [], t = x => Number.isFinite(x) ? new Date(x).toISOString().replace(/\.\d+Z$/, 'Z') : 'n/a';
+    L.push('WX Studio data diagnostics' + (m.version ? ' · v' + m.version : '') + ' · ' + t(m.at));
+    L.push('Processor: ' + (m.proc.endpoint || 'none') + ' (' + m.proc.mode + ') — ' + m.proc.title + ' — ' + m.proc.detail);
+    if (m.health) L.push('/health: ' + (m.health.ok ? 'ok · status=' + m.health.status + ' · freshProducts=' + m.health.freshProducts : 'FAILED · ' + m.health.error));
+    if (m.catalog) L.push('/catalog: ' + (m.catalog.ok ? m.catalog.products.length + ' product(s)' : 'FAILED · ' + m.catalog.error));
+    (m.rows || []).forEach(r => {
+      if (r.state === 'notconnected' && !r.meta) return;
+      let line = '- ' + r.pid + ' [' + r.label + ']';
+      if (r.meta) line += ' · newest ' + t(r.meta.latest) + ' · ' + r.meta.count + ' frame(s)';
+      if (r.verify && r.verify.ok) line += ' · verified ' + r.verify.w + 'x' + r.verify.h + ' ' + Math.round(r.verify.bytes / 1024) + ' KB';
+      if (r.why && /unavailable|stale|waiting/.test(r.state)) line += ' · ' + r.why;
+      L.push(line);
+    });
+    return L.join('\n');
+  };
+  /* ---- shaping raw processor replies (the processor is a separate program; never trust its shape) ---- */
+  U.parseHealth = function (d, ms) {
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return { ok: false, error: 'unexpected /health reply' };
+    return { ok: true, status: String(d.status || ''), freshProducts: Number.isFinite(d.freshProducts) ? d.freshProducts : null, service: String(d.service || ''), ms: ms || 0 };
+  };
+  U.parseCatalog = function (d) {
+    if (!d || d.schema !== 'wxstudio.frames.v1' || !Array.isArray(d.products)) return { ok: false, error: 'unexpected /catalog format' };
+    const products = [], bad = [];
+    d.products.forEach(p => {
+      const latest = Number(p && p.latestObservationUtc), earliest = Number(p && p.earliestObservationUtc), count = Number(p && p.frameCount);
+      if (!p || typeof p.product !== 'string' || !(latest > 0)) { bad.push(String(p && p.product || '?')); return; }
+      products.push({ pid: p.product, latest, earliest: earliest > 0 ? earliest : latest, count: Number.isFinite(count) && count >= 0 ? count : 0, attribution: typeof p.attribution === 'string' ? p.attribution : '' });
+    });
+    return { ok: true, products, bad };
+  };
+  /* Which processor product a weather-loop source id refers to (null when it is not a processor product). */
+  U.loopProduct = function (dl, products) {
+    if (!dl) return null; const id = dl.source; products = products || [];
+    if (U.SAT_PRODUCTS.indexOf(id) >= 0) return id;
+    if (id === 'mrms') return 'mrms-reflectivity';
+    if (id === 'nexrad') return 'nexrad-reflectivity-' + (dl.site || 'KBOX');
+    if (id === 'goes') return products.indexOf('goes-east-conus-C02') >= 0 ? 'goes-east-conus-C02' : (products.find(x => SAT_ID.test(x)) || null);
+    return null;
+  };
+  U.procInput = function (pm, health) {
+    return { configured: pm.state !== 'notconfigured', local: !!pm.local, error: pm.err || '', healthStatus: health && health.ok ? health.status : '',
+      reach: { online: 'ok', waiting: 'ok', 'waiting-local': 'fail', unavailable: 'fail' }[pm.state] || 'unknown' };
+  };
+
   const D = g.WXData;
   if (!D || typeof document === 'undefined') return;
 
   /* ====================== state ====================== */
   const KEY = 'wxws.sections.v1';
-  const defaults = { layer: true, satellite: false, radar: false, rtma: false, models: false, palettes: false, status: false, demo: false };
-  const ui = W.ui = { open: false, sections: Object.assign({}, defaults), sat: {}, grp: {}, filter: '', cloudIds: {}, pal: { editor: null, msg: '', kind: '', busy: false, confirm: '' } };
+  const defaults = { layer: true, satellite: false, radar: false, rtma: false, models: false, palettes: false, status: false, connect: false, demo: false };
+  const ui = W.ui = { open: false, sections: Object.assign({}, defaults), sat: {}, grp: {}, filter: '', cloudIds: {}, pal: { editor: null, msg: '', kind: '', busy: false, confirm: '' }, diag: { busy: false, at: 0, health: null, catalog: null, verify: {}, verifying: {}, seen: {}, dropped: {}, msg: '', report: '' } };
+  const dg = ui.diag;
   try { Object.assign(ui.sections, JSON.parse(g.localStorage.getItem(KEY) || '{}')); } catch (e) { /* storage may be blocked: sections just start collapsed */ }
   const remember = () => { try { g.localStorage.setItem(KEY, JSON.stringify(ui.sections)); } catch (e) { /* ignore */ } };
 
@@ -225,6 +353,30 @@
 #wxws .ws-stack button{padding:0 7px;line-height:20px}
 #wxws .ws-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px;margin-top:6px}
 #wxws .ws-kv span:nth-child(odd){color:#7f95b4}
+#wxws .ws-pill.waiting{background:#14284a;color:#8fb4ff;border-color:#2f4f8a}
+#wxws .ws-pill.unavailable,#wxws .ws-pill.st-unavailable{background:#3a1717;color:#ff9b9b;border-color:#7a2a2a}
+#wxws .ws-pill.st-live{background:#0f3b24;color:#5ee69a;border-color:#1f7a49}
+#wxws .ws-pill.st-connected{background:#15233a;color:#9fb8e0;border-color:#344d75}
+#wxws .ws-pill.st-stale{background:#42300a;color:#f5be4e;border-color:#8a6416}
+#wxws .ws-pill.st-waiting{background:#14284a;color:#8fb4ff;border-color:#2f4f8a}
+#wxws .ws-pill.st-notconnected{background:#18222f;color:#8397b3;border-color:#2c3b50}
+#wxws .ws-pill.st-experimental{background:#42300a;color:#f5be4e;border-color:#8a6416}
+#wxws .ws-pill.st-demo{background:#2a1f4d;color:#b9a4ff;border-color:#5b47a8}
+#wxws .ws-drow{margin:3px 0;padding:7px 9px;background:#0d1729;border:1px solid #243349;border-radius:7px}
+#wxws .ws-drow.live{border-color:#1f7a49}
+#wxws .ws-drow .hd{display:flex;align-items:center;gap:8px}
+#wxws .ws-drow .hd b{flex:1;min-width:0;font-weight:600}
+#wxws .ws-drow .mt{margin-top:3px;color:#8da2bf;font-size:11.5px}
+#wxws .ws-drow .mt.bad{color:#f2a0a0}
+#wxws .ws-drow .mt.warn{color:#f2b64a}
+#wxws .ws-drow .ws-btns{margin:5px 0 0}
+#wxws .ws-drow .ws-btn{padding:3px 8px;font-size:12px}
+#wxws .ws-code{display:flex;align-items:flex-start;gap:6px;margin:5px 0}
+#wxws .ws-code code{flex:1;min-width:0;display:block;padding:6px 8px;background:#060d19;border:1px solid #243349;border-radius:6px;color:#cfe0fa;font:12px/1.35 Consolas,Menlo,monospace;white-space:pre-wrap;word-break:break-all}
+#wxws ol.ws-steps{margin:6px 0;padding-left:20px;color:#c3d3ea}
+#wxws ol.ws-steps li{margin:6px 0}
+#wxws textarea.ws-report{width:100%;min-height:120px;background:#060d19;color:#cfe0fa;border:1px solid #243349;border-radius:6px;font:11.5px/1.35 Consolas,Menlo,monospace}
+#wxws .ws-grp .ct{margin-left:auto;color:#8da2bf;font-size:11px}
 @media (max-width:640px){#stageWrap #wxws{left:8px;width:auto}}`;
     document.head.appendChild(s);
   }
@@ -265,6 +417,98 @@
   /* the bridge also registers a generic 'goes' alias for old saved scenes; hide it once the specific sectors exist so nothing is listed twice */
   const legacyAlias = id => id === 'goes' && Object.keys(D.sources).some(k => /^goes-/.test(k));
   const SAT_SHORT = { abi_c02: 'Visible 0.5 km', abi_c13: 'Clean IR 2 km', abi_multichannel: 'GeoColor RGB', abi_cloud_top_temp: 'Cloud-top temp', abi_cloud_top_height: 'Cloud-top height' };
+
+  /* ====================== data-source diagnostics (runtime) ======================
+   * Read-only GET probes of the processor's own /health, /catalog and /manifests; nothing is written anywhere and no
+   * credentials are involved. Everything shown comes from what the processor really answered. */
+  const bridgeEp = () => (BR() && BR().endpoint) || '';
+  const isLocalUrl = u => /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(u || '');
+  const friendly = e => { const m = String((e && e.message) || e); if (e && e.name === 'AbortError') return 'timed out after 12 s'; if (/failed to fetch|networkerror|load failed|network request failed/i.test(m)) return 'no response (not running, wrong address, or blocked by the browser)'; return m; };
+  async function getRaw(url, as) {
+    const ep = bridgeEp(), ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 12000), t0 = performance.now();
+    try {
+      const o = { mode: 'cors', signal: ctl.signal, cache: 'no-store' }; if (isLocalUrl(ep)) o.targetAddressSpace = 'loopback';
+      const r = await fetch(url, o); if (!r.ok) throw new Error('HTTP ' + r.status);
+      return { ok: true, data: as === 'blob' ? await r.blob() : await r.json(), ms: Math.round(performance.now() - t0) };
+    } catch (e) { return { ok: false, error: friendly(e) }; } finally { clearTimeout(to); }
+  }
+  const procModel = () => { const b = BR() || {}; return U.processorState({ endpoint: b.endpoint || '', bridgeStatus: b.status, bridgeError: b.error, health: dg.health, catalog: dg.catalog }); };
+  const metaMap = () => { const m = {}; if (dg.catalog && dg.catalog.ok) dg.catalog.products.forEach(x => { m[x.pid] = x; }); return m; };
+  const fmtZ = t => new Date(t).toISOString().slice(11, 16) + 'Z';
+  function loopFor(pid) {
+    const sc = cur(), dl = sc && sc.dataLoop; if (!dl || !dl.on) return null;
+    const b = BR(); if (U.loopProduct(dl, (b && b.products) || []) !== pid) return null;
+    const def = D.sources[dl.source]; if (!def || def.demo || def.nativeData === false) return null;
+    const r = rtOf(sc); if (!r) return null; const fr = readyFrames(r);
+    return { n: fr.length, newest: fr.reduce((a, f) => Math.max(a, f.t || 0), 0) || null, status: r.status, error: r.status === 'error' ? (r.msg || '') : '' };
+  }
+  function evalPid(pid) {
+    const pm = procModel(), pin = U.procInput(pm, dg.health), lp = loopFor(pid);
+    if (!dg.catalog && !dg.health && !(lp && lp.n)) pin.reach = pin.reach === 'ok' ? 'unknown' : pin.reach;   // not asked yet: say "checking", never guess
+    return U.sourceState({ proc: pin, meta: metaMap()[pid] || null, verify: dg.verify[pid] || null, loop: lp, dropped: !!dg.dropped[pid], windowMin: U.freshWindowMin(pid) });
+  }
+  /* state of whatever the active scene's weather layer shows: used for the dock badge and the exported bar */
+  function layerState(dl) {
+    if (!dl || !dl.on) return null; const def = D.sources[dl.source];
+    if (!def) return { state: 'notconnected', why: 'This source is not connected.' };
+    if (def.demo) return { state: 'demo', why: 'Synthetic test pattern — not NOAA data.' };
+    if (def.nativeData === false) return { state: 'experimental', why: 'NOAA-rendered preview pulled directly by the browser — not decoded source data.' };
+    const b = BR(), pid = U.loopProduct(dl, (b && b.products) || []);
+    if (!pid) return { state: 'connected', why: 'Registered by the data service, but not a verifiable NOAA processor product.' };
+    return evalPid(pid);
+  }
+  async function runDiag(opts) {
+    opts = opts || {}; const ep = bridgeEp(); if (dg.busy) return;
+    if (!ep) { dg.health = dg.catalog = null; dg.at = Date.now(); if (!opts.quiet) W.render(); return; }
+    dg.busy = true; if (!opts.quiet) W.render();
+    try {
+      const [h, c] = await Promise.all([getRaw(ep + '/health'), getRaw(ep + '/catalog')]);
+      dg.health = h.ok ? U.parseHealth(h.data, h.ms) : { ok: false, error: h.error };
+      dg.catalog = c.ok ? U.parseCatalog(c.data) : { ok: false, error: c.error };
+      if (dg.catalog.ok) {
+        const now = {}; dg.catalog.products.forEach(x => { now[x.pid] = 1; });
+        Object.keys(dg.seen).forEach(k => { if (!now[k]) dg.dropped[k] = true; });
+        Object.keys(now).forEach(k => { dg.seen[k] = 1; delete dg.dropped[k]; });
+      }
+      dg.at = Date.now();
+      if (opts.manual && BR() && BR().refresh) { try { await BR().refresh(); } catch (e) { /* its own status reports it */ } }
+    } finally { dg.busy = false; }
+    W.render();
+  }
+  async function verifyFrame(pid) {
+    const ep = bridgeEp(); if (!ep || dg.verifying[pid]) return; dg.verifying[pid] = true; W.render();
+    let res;
+    try {
+      const m = await getRaw(ep + '/manifests/' + encodeURIComponent(pid) + '.json'); if (!m.ok) throw new Error('manifest: ' + m.error);
+      const d = m.data; if (!d || d.schema !== 'wxstudio.frames.v1' || d.product !== pid || !Array.isArray(d.frames)) throw new Error('the manifest has an unexpected format');
+      const fr = d.frames.filter(f => f && Number.isFinite(f.t) && typeof f.url === 'string').sort((a, b) => b.t - a.t)[0]; if (!fr) throw new Error('the manifest lists no frames');
+      const u = new URL(fr.url, ep + '/'); if (u.origin !== new URL(ep).origin) throw new Error('the frame address points to a different server');
+      const f = await getRaw(u.href, 'blob'); if (!f.ok) throw new Error('frame: ' + f.error);
+      let w = 0, h = 0;
+      if (typeof createImageBitmap === 'function') { const bm = await createImageBitmap(f.data); w = bm.width; h = bm.height; if (bm.close) bm.close(); }
+      else { const url = URL.createObjectURL(f.data); try { const im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('the image could not be decoded')); i.src = url; }); w = im.naturalWidth; h = im.naturalHeight; } finally { URL.revokeObjectURL(url); } }
+      if (!(w > 0 && h > 0)) throw new Error('the image decoded to an empty picture');
+      res = { ok: true, t: fr.t, w, h, bytes: f.data.size, at: Date.now() };
+    } catch (e) { res = { ok: false, error: friendly(e), at: Date.now() }; }
+    dg.verify[pid] = res; delete dg.verifying[pid]; W.render();
+  }
+  function rowsForReport() {
+    const out = [], seen = {}, add = pid => { if (seen[pid]) return; seen[pid] = 1; const st = evalPid(pid), meta = metaMap()[pid] || null; out.push({ pid, state: st.state, label: st.label, why: st.why, meta, verify: dg.verify[pid] || null }); };
+    U.SAT_PRODUCTS.forEach(add); add('mrms-reflectivity'); Object.keys(metaMap()).forEach(add); return out;
+  }
+  function makeReport() {
+    const pm = procModel();
+    return U.buildReport({ at: Date.now(), version: (g.WX_VERSION || (g.WX && g.WX.VERSION) || ''), proc: { endpoint: bridgeEp(), mode: pm.mode, title: pm.title, detail: pm.detail }, health: dg.health, catalog: dg.catalog, rows: rowsForReport() });
+  }
+  async function copyText(text) {
+    try { if (g.navigator && g.navigator.clipboard && g.navigator.clipboard.writeText) { await g.navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through */ }
+    try { const t = el('textarea', { value: text, style: 'position:fixed;left:-9999px;top:0' }); document.body.append(t); t.select(); const ok = document.execCommand && document.execCommand('copy'); t.remove(); return !!ok; } catch (e) { return false; }
+  }
+  /* strip + section header text */
+  function overall() {
+    const pm = procModel(), live = rowsForReport().filter(r => r.state === 'live').length;
+    return { pm, live, short: pm.state === 'online' ? pm.short + (live ? ' · ' + live + ' verified live' : ' · none verified yet') : pm.short };
+  }
 
   /* ====================== sections ====================== */
   function secLayer(box) {
@@ -328,7 +572,7 @@
     const known = /^goes-(east|west)-(conus|full|meso1|meso2)-(C02|C13)$/;
     const extra = Object.keys(D.sources).filter(id => D.classify(id).category === 'satellite' && !known.test(id) && !legacyAlias(id));
     if (extra.length) { box.append(el('div', { className: 'ws-sub', text: 'Other registered satellite sources' })); extra.forEach(id => box.append(srcRow({ name: D.displayName(id), sub: 'registered by the data service', status: stt(id), selected: !!dl && dl.source === id, pick: () => pick(id) }))); }
-    box.append(el('div', { className: 'ws-note', text: 'Grey dots are catalog products that are not connected yet. Green means the cloud processor is serving real decoded NOAA frames for it.' }));
+    box.append(el('div', { className: 'ws-note', text: 'Grey dots are catalog products that are not connected yet. Green means the NOAA processor lists a fresh observation for it — open Data Source Status to verify the frames.' }));
   }
 
   function secRadar(box, dl) {
@@ -369,19 +613,112 @@
     ['demo', 'demo-ir', 'demo-rgb'].forEach(id => { const d = D.sources[id]; if (d) box.append(srcRow({ name: d.label, sub: d.kind === 'rgb' ? 'finished RGB image, no color table' : d.kind === 'ir' ? 'recolorable infrared grid' : 'recolorable reflectivity grid', status: 'demo', selected: !!dl && dl.source === id, pick: () => pick(id) })); });
   }
 
+  /* the same honest state words as the rows above, for a registered source id */
+  function statePill(id) {
+    const k = stt(id); if (k === 'demo' || k === 'experimental') return el('span', { className: 'ws-pill st-' + k, text: U.STATE_LABEL[k] });
+    const b = BR(), pid = U.loopProduct({ source: id }, (b && b.products) || []); if (!pid) return pill(k);
+    const st = evalPid(pid); return el('span', { className: 'ws-pill st-' + st.state, text: st.label });
+  }
   function secStatus(box) {
-    const b = BR(), s = U.bridgeSummary(b);
-    box.append(el('div', { className: 'ws-card' }, el('div', { className: 'nm' }, el('b', { text: 'NOAA cloud processor' }), el('span', { className: 'ws-pill ' + s.pill, text: s.title })), el('div', { className: 'ws-live', text: s.detail }),
-      el('div', { className: 'ws-btns' }, el('button', { className: 'ws-btn', text: 'Check now', disabled: !b || !b.endpoint, title: b && b.endpoint ? 'Ask the cloud processor what it has' : 'No processor address is configured', on: { click: async () => { try { await b.refresh(); } catch (e) { /* shown by status */ } W.render(); } } }))));
-    if (b && b.products && b.products.length) box.append(el('div', { className: 'ws-note', text: 'Decoded products: ' + b.products.join(', ') }));
-    box.append(el('div', { className: 'ws-sub', text: 'What each kind of source means' }));
-    const ids = Object.keys(D.sources), n = k => ids.filter(id => D.classify(id).status === k).length;
+    secDiag(box);
+    box.append(el('div', { className: 'ws-sub', text: 'What the labels mean' }));
     const kv = el('div', { className: 'ws-kv' });
-    [['Connected', n('connected') + ' — real decoded NOAA frames from the cloud processor'], ['Experimental', n('experimental') + ' — NOAA-rendered preview pulled directly by the browser; not source-native'], ['Demo', n('demo') + ' — synthetic test patterns, never NOAA data'], ['Not connected', 'Everything else in the menus: catalog entries waiting for the cloud processor']].forEach(([k, v]) => kv.append(el('span', { text: k }), el('span', { text: v })));
+    [['LIVE · verified', 'A real frame was downloaded and decoded from the NOAA processor, and its observation is recent.'], ['Connected · not verified', 'The processor lists a recent observation, but no frame has been downloaded and checked yet.'], ['Stale', 'The newest observation is older than the product’s fresh window.'], ['Waiting', 'The processor is not answering, or has not published fresh NOAA frames yet.'], ['Unavailable', 'The processor or a frame check reported an error.'], ['Experimental', 'NOAA-rendered preview fetched by the browser; not decoded source data.'], ['Demo', 'Synthetic test pattern, never NOAA data.'], ['Not connected', 'No processor is enabled, or the product is not offered yet.']].forEach(([k, v]) => kv.append(el('span', { text: k }), el('span', { text: v })));
     box.append(kv);
     box.append(el('div', { className: 'ws-sub', text: 'Registered sources' }));
-    ids.forEach(id => box.append(el('div', { className: 'ws-row', style: 'cursor:default' }, el('span', { className: 'm' }, el('b', { text: D.displayName(id) }), el('i', { text: id })), pill(stt(id)))));
+    Object.keys(D.sources).forEach(id => box.append(el('div', { className: 'ws-row', style: 'cursor:default' }, el('span', { className: 'm' }, el('b', { text: D.displayName(id) }), el('i', { text: id })), statePill(id))));
     box.append(el('div', { className: 'ws-note', text: 'Palettes: built-in starters work offline. Your cloud palettes need a sign-in (Map Style → Saved Styles).' }));
+  }
+  /* ---------- data source status / diagnostics ---------- */
+  function grpOpen(key, dflt) { return ui.grp[key] == null ? dflt : !!ui.grp[key]; }
+  function diagRow(pid, o) {
+    o = o || {}; const st = evalPid(pid), meta = metaMap()[pid], v = dg.verify[pid], lp = loopFor(pid), pm = procModel();
+    const row = el('div', { className: 'ws-drow ' + st.state, attrs: { 'data-pid': pid, 'data-state': st.state } });
+    row.append(el('div', { className: 'hd' }, el('b', { text: o.name || U.parseProduct(pid).label }), el('span', { className: 'ws-pill st-' + st.state, text: st.label })));
+    if (meta) row.append(el('div', { className: 'mt', text: 'Newest ' + fmtZ(meta.latest) + ' · ' + U.fmtAge(Date.now() - meta.latest) + ' · ' + meta.count + ' frame' + (meta.count === 1 ? '' : 's') + ' available' }));
+    if (v && v.ok) row.append(el('div', { className: 'mt', text: 'Frame check passed: ' + v.w + '×' + v.h + ' px image, ' + Math.round(v.bytes / 1024) + ' KB, observed ' + fmtZ(v.t) }));
+    if (lp && lp.n) row.append(el('div', { className: 'mt', text: 'Weather loop: ' + lp.n + ' frame' + (lp.n === 1 ? '' : 's') + ' downloaded and decoded' }));
+    if (/^(connected|stale|unavailable)$/.test(st.state) && st.why) row.append(el('div', { className: 'mt ' + (st.state === 'unavailable' ? 'bad' : st.state === 'stale' ? 'warn' : ''), text: st.why }));
+    const btns = el('div', { className: 'ws-btns' });
+    if (meta && pm.state !== 'unavailable' && pm.state !== 'waiting-local') btns.append(el('button', { className: 'ws-btn', text: dg.verifying[pid] ? 'Checking…' : (v ? 'Check again' : 'Verify frame'), disabled: !!dg.verifying[pid], title: 'Download the newest frame and confirm it decodes as an image', on: { click: () => verifyFrame(pid) } }));
+    const reg = o.reg && D.sources[o.reg] ? o.reg : null;
+    if (reg && !legacyAlias(reg)) { const dl = curDl(); btns.append(el('button', { className: 'ws-btn', text: dl && dl.source === reg && (reg !== 'nexrad' || !o.site || dl.site === o.site) ? 'In use' : 'Use', disabled: !!dl && dl.source === reg && (reg !== 'nexrad' || !o.site || dl.site === o.site), on: { click: () => { pick(reg, o.site ? { site: o.site } : undefined); W.render(); } } })); }
+    if (btns.childNodes.length) row.append(btns);
+    return row;
+  }
+  function diagGroup(key, title, rows, dflt) {
+    const open = grpOpen(key, dflt), g1 = el('div', { className: 'ws-grp' }, el('button', { attrs: { 'aria-expanded': String(open) }, on: { click: () => { ui.grp[key] = !open; W.render(); } } }, el('span', { text: open ? '▾' : '▸' }), el('span', { text: title }), el('span', { className: 'ct', text: rows.length + (rows.length === 1 ? ' source' : ' sources') })));
+    if (open) rows.forEach(r => g1.append(r)); return g1;
+  }
+  function secDiag(box) {
+    const pm = procModel(), ep = bridgeEp(), m = metaMap();
+    // ---- processor card ----
+    const hlth = !ep ? 'not checked — no processor enabled' : dg.health ? (dg.health.ok ? '✓ answered · status “' + dg.health.status + '”' + (dg.health.freshProducts != null ? ' · ' + dg.health.freshProducts + ' fresh product' + (dg.health.freshProducts === 1 ? '' : 's') : '') + (dg.health.ms ? ' · ' + dg.health.ms + ' ms' : '') : '✗ ' + dg.health.error) : 'not checked yet';
+    const ctlg = !ep ? 'not checked — no processor enabled' : dg.catalog ? (dg.catalog.ok ? '✓ ' + dg.catalog.products.length + ' product' + (dg.catalog.products.length === 1 ? '' : 's') + ' with a fresh observation (the processor lists only observations under 50 minutes old)' : '✗ ' + dg.catalog.error) : 'not checked yet';
+    const card = el('div', { className: 'ws-card', attrs: { 'data-diag': 'processor', 'data-state': pm.state } },
+      el('div', { className: 'nm' }, el('b', { text: 'NOAA processor' }), el('span', { className: 'ws-pill ' + pm.pill, text: pm.title })),
+      el('div', { className: 'ws-note', style: 'margin:6px 0 2px', text: pm.detail }));
+    const kv = el('div', { className: 'ws-kv' });
+    [['Address', ep ? ep + (pm.mode === 'local' ? '  (this computer)' : '  (hosted)') : 'none'], ['/health', hlth], ['/catalog', ctlg], ['Last check', dg.at ? new Date(dg.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : 'never']].forEach(([k, v]) => kv.append(el('span', { text: k }), el('span', { text: v, style: 'word-break:break-word' })));
+    card.append(kv);
+    card.append(el('div', { className: 'ws-btns' },
+      el('button', { className: 'ws-btn pri', text: dg.busy ? 'Checking…' : 'Run diagnostics', disabled: dg.busy || !ep, title: ep ? 'Ask the processor what it has right now' : 'No processor is enabled', on: { click: () => runDiag({ manual: true }) } }),
+      el('button', { className: 'ws-btn', text: 'Copy report', title: 'Copy these results as text to send to someone', on: { click: async () => { const t = makeReport(); dg.report = t; dg.msg = (await copyText(t)) ? 'Report copied.' : 'Copy was blocked — select the text below.'; W.render(); } } }),
+      el('button', { className: 'ws-btn', text: 'How to connect', on: { click: () => { ui.sections.connect = true; remember(); W.render(); scrollTo('connect'); } } })));
+    if (dg.msg) card.append(el('div', { className: 'ws-note', text: dg.msg, attrs: { role: 'status' } }));
+    if (dg.report) card.append(el('textarea', { className: 'ws-report', readOnly: true, value: dg.report, attrs: { 'aria-label': 'Diagnostics report' } }));
+    box.append(card);
+    // ---- satellite ----
+    box.append(el('div', { className: 'ws-sub', text: 'Satellite · GOES' }));
+    const cur0 = curDl();
+    ['east', 'west'].forEach(sat => {
+      const pids = U.SAT_PRODUCTS.filter(x => x.indexOf('goes-' + sat + '-') === 0), any = pids.some(x => m[x]) || (cur0 && pids.indexOf(cur0.source) >= 0);
+      const rows = pids.map(pid => { const i = U.parseProduct(pid); return diagRow(pid, { name: i.label.replace(/^GOES-\d+ (East|West) · /, ''), reg: pid }); });
+      box.append(diagGroup('diag-' + sat, sat === 'east' ? 'GOES-19 East' : 'GOES-18 West', rows, any));
+    });
+    // ---- radar ----
+    box.append(el('div', { className: 'ws-sub', text: 'Radar' }));
+    const site = (cur0 && cur0.source === 'nexrad' && cur0.site) || (RS() && RS().selected) || 'KBOX', rids = ['mrms-reflectivity', 'nexrad-reflectivity-' + site, 'nexrad-velocity-' + site];
+    Object.keys(m).filter(k => U.parseProduct(k).kind === 'nexrad' && rids.indexOf(k) < 0).sort().forEach(k => rids.push(k));
+    const radarRows = rids.map(pid => { const i = U.parseProduct(pid); return diagRow(pid, { reg: i.kind === 'mrms' ? 'mrms' : (/velocity/.test(pid) ? null : 'nexrad'), site: i.site }); });
+    box.append(diagGroup('diag-radar', 'MRMS mosaic and NEXRAD site ' + site, radarRows, true));
+    // ---- anything else the processor reports ----
+    const other = Object.keys(m).filter(k => { const f = U.parseProduct(k).family; return f !== 'satellite' && f !== 'radar'; }).sort();
+    if (other.length) { box.append(el('div', { className: 'ws-sub', text: 'Other products the processor lists' })); other.forEach(k => box.append(diagRow(k, { reg: D.sources[k] ? k : null }))); box.append(el('div', { className: 'ws-note', text: 'These are listed by the processor but this interface has no viewer for them yet.' })); }
+    // ---- previews and demo (never NOAA decoded data) ----
+    const ids = Object.keys(D.sources), exp = ids.filter(id => stt(id) === 'experimental'), demo = ids.filter(id => stt(id) === 'demo');
+    if (exp.length || demo.length) {
+      box.append(el('div', { className: 'ws-sub', text: 'Not decoded NOAA observations' }));
+      const mk = (id, state, why) => { const dl = curDl(); return el('div', { className: 'ws-drow ' + state, attrs: { 'data-pid': id, 'data-state': state } }, el('div', { className: 'hd' }, el('b', { text: D.displayName(id) }), el('span', { className: 'ws-pill st-' + state, text: U.STATE_LABEL[state] })), el('div', { className: 'mt', text: why }), el('div', { className: 'ws-btns' }, el('button', { className: 'ws-btn', text: dl && dl.source === id ? 'In use' : 'Use', disabled: !!dl && dl.source === id, on: { click: () => { pick(id); W.render(); } } }))); };
+      exp.forEach(id => box.append(mk(id, 'experimental', 'NOAA-rendered picture fetched directly by the browser. Real imagery, but not decoded source data, and it is never labeled LIVE.')));
+      demo.forEach(id => box.append(mk(id, 'demo', 'Synthetic test pattern for trying the bar, palettes and export. It is NOT weather data.')));
+    }
+    // ---- future products ----
+    box.append(el('div', { className: 'ws-sub', text: 'Planned products' }));
+    [['rtma', 'RTMA analysis', 'rtma'], ['models', 'Forecast models', 'models']].forEach(([fam, name]) => {
+      const lst = Object.keys(m).filter(k => U.parseProduct(k).family === fam), reg = ids.filter(id => !D.sources[id].demo && (D.sources[id].category === fam || U.parseProduct(id).family === fam));
+      box.append(el('div', { className: 'ws-drow notconnected', attrs: { 'data-future': fam } }, el('div', { className: 'hd' }, el('b', { text: name }), el('span', { className: 'ws-pill st-notconnected', text: lst.length || reg.length ? 'Listed' : 'Not connected' })),
+        el('div', { className: 'mt', text: lst.length || reg.length ? (lst.length + reg.length) + ' entr' + (lst.length + reg.length === 1 ? 'y' : 'ies') + ' appeared; choose them under the ' + (fam === 'rtma' ? 'RTMA' : 'Forecast Models') + ' section.' : 'No feed is enabled and no product is listed. This row fills in automatically once the processor lists real ' + name + ' products.' })));
+    });
+  }
+
+  function cmd(text) { return el('div', { className: 'ws-code' }, el('code', { text }), el('button', { className: 'ws-btn', text: 'Copy', on: { click: async e => { const b = e.currentTarget, ok = await copyText(text); b.textContent = ok ? 'Copied' : 'Select'; setTimeout(() => { b.textContent = 'Copy'; }, 1500); } } })); }
+  function secConnect(box) {
+    const pm = procModel(), ep = bridgeEp();
+    box.append(el('div', { className: 'ws-note', text: 'Real NOAA satellite and radar come from a small free program that downloads and decodes NOAA data. It can run on this Windows computer (no paid server). Demo patterns work without it.' }));
+    box.append(el('div', { className: 'ws-card', attrs: { 'data-diag': 'connect-status' } }, el('div', { className: 'nm' }, el('b', { text: 'This studio is pointed at' }), el('span', { className: 'ws-pill ' + pm.pill, text: pm.title })), el('div', { className: 'ws-note', style: 'margin:6px 0 0', text: ep ? ep + (pm.mode === 'local' ? ' — the NOAA processor on this computer' : ' — a hosted NOAA processor') : 'nothing yet (step 5 below turns it on)' })));
+    const li = (...k) => el('li', null, ...k);
+    box.append(el('ol', { className: 'ws-steps' },
+      li('Install ', el('b', { text: 'Docker Desktop' }), ' (free for personal use) and start it; wait until its engine says it is running.'),
+      li('Keep a copy of the ', el('b', { text: 'bruced39/wx-studio' }), ' folder on this computer (git clone or ZIP). Docker builds from it.'),
+      li('In PowerShell, inside that folder, start the processor (the first start downloads and builds, so it takes a while):', cmd('powershell -ExecutionPolicy Bypass -File .\\weather_processor\\start_local_windows.ps1'), el('span', { className: 'ws-note', text: 'Short on memory? Try one product first: add  -Products "mrms-reflectivity"' })),
+      li('Check it on the same computer: open ', el('a', { href: 'http://127.0.0.1:8080/health', target: '_blank', rel: 'noopener', text: 'http://127.0.0.1:8080/health' }), ' — at first it says “waiting-for-real-noaa-frames”, then “ready” once real NOAA scans are decoded. Then open ', el('a', { href: 'http://127.0.0.1:8080/catalog', target: '_blank', rel: 'noopener', text: '/catalog' }), ' — it lists each product with its newest observation time.'),
+      li('In this Streamlit app, open the sidebar and tick ', el('b', { text: 'Use free local NOAA processor on this computer' }), '. The page reloads.'),
+      li('If the browser asks to allow access to local devices or the local network, allow it for this site. Then press ', el('b', { text: 'Run diagnostics' }), ' in Data Source Status.')));
+    box.append(el('div', { className: 'ws-sub', text: 'Handy commands' }), cmd('docker logs -f wxstudio-noaa-local'), cmd('docker stop wxstudio-noaa-local'), cmd('docker start wxstudio-noaa-local'));
+    box.append(el('div', { className: 'ws-note', text: 'The website itself never contacts your computer — your browser does. The computer must stay on for live data. A source shows LIVE only after a real frame has been downloaded and decoded, and is recent.' }));
+    box.append(el('div', { className: 'ws-note warn', text: 'Not verified yet by us: running the processor on your Windows PC, and your browser’s permission for loopback access from the hosted page. If it is blocked, Data Source Status will say “no response”.' }));
+    box.append(el('div', { className: 'ws-btns' }, el('button', { className: 'ws-btn pri', text: 'Run diagnostics', disabled: !ep || dg.busy, title: ep ? '' : 'Enable the processor first (step 5)', on: { click: () => runDiag({ manual: true }) } })));
   }
 
   /* ---------- palettes ---------- */
@@ -539,15 +876,15 @@
     const ids = Object.keys(D.sources), conn = f => ids.filter(id => f(id) && stt(id) === 'connected').length, exp = ids.filter(id => stt(id) === 'experimental').length;
     const sat = conn(id => D.classify(id).category === 'satellite' && !legacyAlias(id)), rad = conn(id => id === 'mrms' || id === 'nexrad');
     const word = (n, e) => n ? n + ' connected' : (e ? 'experimental' : 'Not connected');
-    return { satellite: word(sat), radar: word(rad, exp), rtma: 'Not connected', models: 'Not connected', palettes: P() ? P().list().length + ' palettes' : '', status: U.bridgeSummary(BR()).title };
+    return { satellite: word(sat), radar: word(rad, exp), rtma: 'Not connected', models: 'Not connected', palettes: P() ? P().list().length + ' palettes' : '', status: overall().short };
   }
   W.render = function () {
     const p = ensurePanel(); if (!p) return;
     p.hidden = !ui.open; if (!ui.open) return;
-    const keep = scroller ? scroller.scrollTop : 0, dl = curDl(), sum = summaries(), s = U.bridgeSummary(BR());
+    const keep = scroller ? scroller.scrollTop : 0, dl = curDl(), sum = summaries(), ov = overall();
     p.textContent = '';
     p.append(el('div', { className: 'ws-head' }, el('b', { text: 'Weather Data' }), el('button', { className: 'ws-x', text: '×', title: 'Close (Esc)', attrs: { 'aria-label': 'Close weather data' }, on: { click: () => W.close() } })));
-    p.append(el('div', { className: 'ws-cloud' }, el('span', { text: 'NOAA cloud processor' }), el('span', { className: 't', text: s.short, title: s.detail }), el('span', { className: 'ws-pill ' + s.pill, text: s.title })));
+    p.append(el('div', { className: 'ws-cloud', attrs: { 'data-state': ov.pm.state } }, el('span', { text: 'NOAA processor' }), el('span', { className: 't', text: ov.short, title: ov.pm.detail }), el('span', { className: 'ws-pill ' + ov.pm.pill, text: ov.pm.title })));
     scroller = el('div', { className: 'ws-scroll' });
     scroller.append(section('layer', 'Weather layer', dl ? D.displayName(dl.source, dl) : 'off', b => secLayer(b)),
       section('satellite', 'Satellite', sum.satellite, b => secSatellite(b, dl)),
@@ -555,7 +892,8 @@
       section('rtma', 'RTMA', sum.rtma, b => secPending(b, dl, 'rtma')),
       section('models', 'Forecast Models', sum.models, b => secPending(b, dl, 'models')),
       section('palettes', 'Weather Color Palettes', sum.palettes, b => secPalettes(b, dl)),
-      section('status', 'Cloud & data status', sum.status, b => secStatus(b)),
+      section('status', 'Data Source Status', sum.status, b => secStatus(b)),
+      section('connect', 'Connect local NOAA processor', '', b => secConnect(b)),
       section('demo', 'Demo test patterns', 'not weather data', b => secDemo(b, dl)));
     p.append(scroller); scroller.scrollTop = keep; lastSig = signature(); W.live();
   };
@@ -575,7 +913,7 @@
   };
   function signature() {
     const sc = cur(), dl = sc && sc.dataLoop, r = rtOf(sc), b = BR();
-    return JSON.stringify([WX_si(), dl && [dl.on, dl.source, dl.site, dl.hours, dl.palette, dl.order], r && [r.status, r.total], Object.keys(D.sources).map(id => id + ':' + stt(id)).join(), b && [b.status, (b.products || []).length, b.lastCheck], RS() && RS().selected, P() ? P().list().length : 0, sc && sc.bg && sc.bg.type]);
+    return JSON.stringify([WX_si(), dl && [dl.on, dl.source, dl.site, dl.hours, dl.palette, dl.order], r && [r.status, r.total], Object.keys(D.sources).map(id => id + ':' + stt(id)).join(), b && [b.status, (b.products || []).length, b.lastCheck], RS() && RS().selected, P() ? P().list().length : 0, sc && sc.bg && sc.bg.type, dg.at, dg.busy, dg.msg, Object.keys(dg.verify).map(k => k + (dg.verify[k].at || 0)).join(), Object.keys(dg.verifying).join(), Math.floor(Date.now() / 60000), rtOf(sc) && readyFrames(rtOf(sc)).length]);
   }
   const WX_si = () => (g.WX && g.WX.S ? g.WX.S.si : -1);
   let lastSig = '';
@@ -592,8 +930,43 @@
   W.open = function (tab, pal) {
     ui.open = true; const sec = pal ? 'palettes' : SECTION_OF[tab]; if (sec) { ui.sections[sec] = true; remember(); }
     W.render(); if (pal) scrollTo('palettes');
+    if (bridgeEp() && Date.now() - dg.at > 15000) runDiag({ quiet: true });
   };
   W.close = function () { ui.open = false; if (panel) panel.hidden = true; };
+  setInterval(function () { try { if (ui.open && bridgeEp() && !dg.busy) runDiag({ quiet: true }); } catch (e) { /* never disturb the editor */ } }, 60000);
+
+  /* ====================== honest LIVE labels ======================
+   * dataloop.js draws a fixed "LIVE" badge (dock) and "LIVE" text (exported bar) for every source. Until that file can be
+   * changed, relabel from here: the badge says what has actually been verified for the active source. */
+  function dockCss() {
+    if (document.getElementById('wxwsDockCss')) return;
+    const st = document.createElement('style'); st.id = 'wxwsDockCss';
+    st.textContent = Object.keys(U.BADGE_COLOR).map(k => '#stageWrap #dlBar .dl-live[data-wxs="' + k + '"]{color:' + U.BADGE_COLOR[k] + '}').join('\n') + '\n#stageWrap #dlBar .dl-live[data-wxs]:not([data-wxs="live"])::before{display:none}';
+    document.head.append(st);
+  }
+  function relabelDock() {
+    const n = document.querySelector('#dlBar .dl-live'); if (!n) return;
+    const sc = cur(), ls = layerState(sc && sc.dataLoop); if (!ls) return;
+    const w = U.BADGE[ls.state] || 'LIVE', tip = U.STATE_LABEL[ls.state] + (ls.why ? ' — ' + ls.why : '');
+    if (n.textContent !== w) n.textContent = w; if (n.getAttribute('data-wxs') !== ls.state) n.setAttribute('data-wxs', ls.state); if (n.title !== tip) n.title = tip;
+  }
+  if (!D.drawBar || !D.drawBar.wxHonest) {
+    const orig = D.drawBar;
+    if (typeof orig === 'function') {
+      D.drawBar = function (c, scene) {
+        let ls = null; try { ls = layerState(scene && scene.dataLoop); } catch (e) { /* draw as before */ }
+        if (!ls || ls.state === 'live' || !c || typeof c.fillText !== 'function') return orig.apply(this, arguments);
+        const own = Object.prototype.hasOwnProperty.call(c, 'fillText'), prev = c.fillText, word = U.BADGE[ls.state] || 'LIVE';
+        c.fillText = function (txt, x, y) {
+          if (txt === 'LIVE') { const keep = c.fillStyle; c.fillStyle = U.BADGE_COLOR[ls.state] || keep; prev.call(c, word, x, y, 90); c.fillStyle = keep; return; }
+          return prev.apply(c, arguments);
+        };
+        try { return orig.apply(this, arguments); } finally { if (own) c.fillText = prev; else delete c.fillText; }
+      };
+      D.drawBar.wxHonest = true;
+    }
+  }
+  W.diag = { state: dg, run: runDiag, verify: verifyFrame, layerState, evalPid, report: makeReport, relabelDock };
 
   document.addEventListener('pointerdown', e => {
     if (!ui.open || !panel) return; const t = e.target;
@@ -612,5 +985,7 @@
     };
     D.closeMenu = function () { W.close(); try { origClose && origClose.apply(D, arguments); } catch (e) { /* ignore */ } };
     D.openMenu.workspace = true; W.original = { openMenu: origOpen, closeMenu: origClose };
+    try { dockCss(); const sw = document.getElementById('stageWrap'); if (sw && g.MutationObserver) new MutationObserver(function () { try { relabelDock(); } catch (e) { /* ignore */ } }).observe(sw, { childList: true, subtree: true }); relabelDock(); } catch (e) { /* the dock keeps its own label */ }
+    setInterval(function () { try { relabelDock(); } catch (e) { /* ignore */ } }, 1000);
   }, 150);
 })(typeof window !== 'undefined' ? window : globalThis);

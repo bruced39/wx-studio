@@ -59,8 +59,8 @@ test('bridgeSummary never says Connected unless the processor has fresh products
   assert.equal(s({ status: 'unavailable', error: 'x' }).title, 'Not connected');
   assert.match(s({ status: 'unavailable', error: 'processor returned 503' }).detail, /503/);
   const empty = s({ status: 'no-fresh-data', products: [] }); assert.equal(empty.title, 'No fresh data'); assert.notEqual(empty.pill, 'connected');
-  const ok = s({ status: 'available', products: ['a', 'b'], lastCheck: 0 }); assert.equal(ok.pill, 'connected'); assert.match(ok.short, /2 live NOAA products/);
-  assert.match(s({ status: 'available', products: ['a'] }).short, /1 live NOAA product$/);
+  const ok = s({ status: 'available', products: ['a', 'b'], lastCheck: 0 }); assert.equal(ok.pill, 'connected'); assert.match(ok.short, /2 NOAA products listed/);
+  assert.match(s({ status: 'available', products: ['a'] }).short, /1 NOAA product listed$/);
 });
 test('slug is safe for file names and ids', () => {
   assert.equal(U.slug('Boston IR!!'), 'boston-ir'); assert.equal(U.slug(''), 'palette'); assert.ok(U.slug('x'.repeat(200)).length <= 40);
