@@ -1,0 +1,53 @@
+{
+  "id": "radar/velocity",
+  "name": "Velocity diverging starter",
+  "units": "m/s",
+  "continuous": true,
+  "provenance": "WX Studio editable starter. Nyquist/dealiasing not performed.",
+  "stops": [
+    [
+      -60,
+      "#052b7a"
+    ],
+    [
+      -45,
+      "#075db2"
+    ],
+    [
+      -30,
+      "#0096c7"
+    ],
+    [
+      -15,
+      "#2bc4bd"
+    ],
+    [
+      -4,
+      "#97e0ca"
+    ],
+    [
+      0,
+      "#777777"
+    ],
+    [
+      4,
+      "#d6cf96"
+    ],
+    [
+      15,
+      "#df9b2f"
+    ],
+    [
+      30,
+      "#cc5021"
+    ],
+    [
+      45,
+      "#a60000"
+    ],
+    [
+      60,
+      "#62000f"
+    ]
+  ]
+}
