@@ -52,9 +52,8 @@ class NOAAProcessorTests(unittest.TestCase):
             longitudeOfLastGridPointInDegrees=291
             validDate=datetime(2026,10,18,13,0)
         class Gribs:
-            def __enter__(self): return self
-            def __exit__(self,*_): return False
             def message(self,n): self.last=n;return Msg()
+            def close(self): self.closed=True
         stub=SimpleNamespace(open=lambda p:Gribs())
         with patch.dict(sys.modules,{"pygrib":stub}):
             frame=processors.decode_mrms("mock.grib2",(-71,41,-69,43))
