@@ -19,6 +19,7 @@
   }catch(e){}
   const BR=g.WXWeatherProcessorBridge={endpoint,status:endpoint?'checking':'not-configured',
     products:[],error:'',lastCheck:0};
+  let lastCatalogVersion='',managedSources=new Set();
   const idOf=product=>{
     if(/^goes-(east|west)-(conus|full|meso1|meso2)-C(?:02|13)$/.test(product))return 'goes';
     if(product==='mrms-reflectivity')return 'mrms';
@@ -59,27 +60,44 @@
       const catalog=await readJson('/catalog');
       if(catalog.schema!=='wxstudio.frames.v1'||!Array.isArray(catalog.products))throw Error('invalid processor catalog');
       const products=catalog.products.map(p=>p.product).filter(p=>idOf(p));
+      const version=JSON.stringify(catalog.products.map(p=>[p.product,p.latestObservationUtc,p.frameCount]).sort());
+      const changed=version!==lastCatalogVersion;lastCatalogVersion=version;
       BR.products=products;BR.status=products.length?'available':'no-fresh-data';
       BR.error='';BR.lastCheck=Date.now();
       // ONLY register a source when it has actual NOAA-origin manifests.
       const goes=products.filter(p=>idOf(p)==='goes'),mrms=products.filter(p=>idOf(p)==='mrms'),
         nexrad=products.filter(p=>idOf(p)==='nexrad');
-      if(goes.length){
+      const present=new Set(products.map(idOf));
+      for(const id of managedSources){
+        if(!present.has(id)){delete D.sources[id];managedSources.delete(id);D.onSources?.();}
+      }
+      if(changed){
+        // An open scene must load newly published NOAA frames, not keep
+        // the promise cached for the previous product snapshot forever.
+        for(const scene of g.WX?.S?.show?.scenes||[]){
+          if(!scene?.dataLoop?.on)continue;
+          const rt=D.state.get(scene);
+          if(rt){rt.key='';rt.promise=null;rt.gen++;}
+        }
+      }
+      if(goes.length){managedSources.add('goes');
         D.registerSource({id:'goes',label:'GOES ABI (processed NOAA)',lengths:[1,2,4,12],
           list:({hours})=>manifest(goes.find(x=>x==='goes-east-conus-C02')||goes[0],hours)});
       }
       if(mrms.length){
+        managedSources.add('mrms');
         D.registerSource({id:'mrms',label:'MRMS 1 km reflectivity',lengths:[1,2,4],
           list:({hours})=>manifest(mrms[0],hours)});
       }
       if(nexrad.length){
+        managedSources.add('nexrad');
         const sites=nexrad.map(p=>p.split('-').at(-1)).filter((x,i,a)=>a.indexOf(x)===i)
           .map(id=>({id,label:id}));
         D.registerSource({id:'nexrad',label:'NEXRAD Level II (processed)',lengths:[1,2,4],
           sites,defaultSite:sites.some(s=>s.id==='KBOX')?'KBOX':sites[0].id,
           list:({site,hours})=>{
-            const p=nexrad.find(x=>x==='nexrad-reflectivity-'+(site||'KBOX'))||nexrad[0];
-            return manifest(p,hours);
+            const p=nexrad.find(x=>x==='nexrad-reflectivity-'+(site||'KBOX'));
+            return p?manifest(p,hours):Promise.resolve([]);
           }});
       }
     }catch(e){BR.status='unavailable';BR.error=String(e?.message||e)}
