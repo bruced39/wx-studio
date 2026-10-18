@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-16 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.79` (`VERSION`).
+- **Last reviewed application version:** `0.9.80` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -626,3 +626,14 @@ User confirmed Mapbox finally loads in browser (v0.9.77). Asked whether to conne
 - RTMA, model fields, proper multichannel GeoColor, progressive full-resolution tiling, live cloud palette synchronization, and operational hosting remain FUTURE; they are not silently activated by this commit. User will select RTMA/model variables. NOAA free data does not imply that running a processor server has no cost.
 - **Source changed:** new `weather_processor/*`, `studio/weather/processor_bridge.js`, `wxbuild.py`, new tests, `VERSION`, this `AI_HANDOFF.md`, and `studio/weather/README.md`. Preserved all label settings, Claude's data loop and weather toolbar, users' cloud presets/assets, Mapbox renderer, scenes and file handling. Recheck main before guarded, nonforce publish; rebase if Claude advanced.
 
+
+## v0.9.80 — GitHub Actions proof of real highest-resolution NOAA decoders (ChatGPT, 2026-10-18)
+
+**Goal:** User specifically chose **prove real source-native NOAA data on GitHub FIRST**, and then decide whether a free always-on processor host is necessary. Do NOT activate real feeds based only on mock tests. The core scientific decoder/source code was already released in v0.9.79; this change DOES NOT duplicate it or put expensive scientific libraries inside Streamlit.
+
+- Added `.github/workflows/noaa_native_acceptance.yml`: isolated Python 3.11 Ubuntu GH Actions scientific job, installs ecCodes and independent `weather_processor/requirements.txt`, runs `tests/test_weather_processor.py` and new acceptance unit tests, THEN attempts real fresh **MRMS GRIB2, GOES-19 East ABI C02 0.5km-class reflectance, GOES-19 East C13 2km thermal IR, and NEXRAD Level II KBOX**. A push to main affecting weather_processor starts a one-shot run; `workflow_dispatch` can select up to eight separate East/West Full/CONUS/Meso1/Meso2 C02/C13, MRMS, and site Level-II products. ~40-minute max runner, no perpetual polling, no tokens or new service. GITHUB ACTIONS USAGE QUOTAS MAY APPLY.
+- New `weather_processor/validate_live.py`: actual `ingest_product` native decoder execution per source; **fail closed** if no fresh NOAA file decodes, CRC/PNG invalid, observation timestamp mismatches, bounding box invalid, or attribution absent. Real output PNGs, metadata and `noaa-proof/acceptance-report.json` are archived under one short-lived GH Actions artifact (retention 3 days). No demo pixels substituted, no fabricated timestamps. Honest failure still creates a detailed report if setup succeeds. Full-disk C02 is intentionally only a high-resolution *regional crop*, not full-disk ultra-HD tiles or artificial GeoColor.
+- New `tests/test_weather_processor_acceptance.py` verifies actual PNG/metadata/time contract, failed or corrupt frames aren't promoted to PASSED, rejecting unsupported source names, and valid source reports; no outbound NOAA requests during unit tests. New `weather_processor/GITHUB_PROOF.md` documents exact workflow steps, science and sampling limits, choosing additional GOES-18 West and mesoscale sectors, output evidence, and the decision gate for any future always-on host.
+- **Absolutely not touched:** `studio/dataloop.js`, `studio/engine.js`, `studio/index.html`, `studio/ui.js`, `studio/mapbox.js`, weather palettes, sites, cloud bucket, labels, RTMA/model selections, Claude's scene/loop/bar work. New workflow and independent processor tests only; `VERSION` and this handoff updated.
+- **Safety/QA:** GitHub runner and actual NOAA internet access cannot be reproduced inside this chat's offline container; after publication, inspect the *actual Actions run* for green/red jobs, native proof PNGs and per-source results before calling any source validated/live. GH Actions is NOT a public HTTPS endpoint or a substitute for an always-on processing server. The user has not selected RTMA datasets or model fields yet.
+- Starting main `eba48af`, v0.9.79, verified before work. Guarded non-force publish onto unchanged main ONLY; Claude often pushes concurrently, so recheck main before updating main. No unrelated files in repo root.
