@@ -56,7 +56,7 @@
     try{
       const url=new URL(frame.url);
       if(url.origin!==new URL(endpoint).origin||url.protocol!=='https:'&&url.hostname!=='localhost'&&url.hostname!=='127.0.0.1')return null;
-      if(!/\/frames\/[a-z0-9-]+\/[0-9]{13}\.png$/.test(url.pathname))return null;
+      if(!/\/frames\/[A-Za-z0-9-]+\/[0-9]{13}\.png$/.test(url.pathname))return null;
       return {t:frame.t,bbox:frame.bbox,crs:'4326',url:url.href};
     }catch(e){return null}
   }
