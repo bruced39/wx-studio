@@ -68,10 +68,28 @@ if (-not (Test-Path -LiteralPath $Python)) {
     throw 'The NOAA scientific environment did not create python.exe.'
 }
 
+# IMPORTANT on Windows: direct science-env\\python.exe omits Conda's
+# Library\\bin DLL search path, even when every package installed correctly.
+# Running via micromamba activates the environment for native ecCodes/HDF5
+# and gives worker child processes the same DLL and activation settings.
+# Reuse existing downloaded packages; do NOT delete science-env.
 Push-Location $RepoRoot
 try {
+    Write-Host 'Checking the native NOAA science environment with micromamba activation...'
+    & $Micromamba run --prefix $EnvDir python -m eccodes selfcheck
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'ecCodes did not load. Repairing only the native ecCodes library and Python bindings from conda-forge...'
+        & $Micromamba install --yes --prefix $EnvDir --channel conda-forge eccodes python-eccodes
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not repair ecCodes in the existing science environment. NOAA not started.'
+        }
+        & $Micromamba run --prefix $EnvDir python -m eccodes selfcheck
+        if ($LASTEXITCODE -ne 0) {
+            throw 'ecCodes still cannot load after the targeted repair. NOAA not started. Share the selfcheck output.'
+        }
+    }
     # Fail closed if packages are missing: no partial/fake live sources.
-    & $Python -c "import fastapi, uvicorn, boto3, xarray, h5netcdf, rasterio, pyproj, cfgrib, eccodes, pyart; print('Scientific dependency check: OK')"
+    & $Micromamba run --prefix $EnvDir python -c "import fastapi, uvicorn, boto3, xarray, h5netcdf, rasterio, pyproj, cfgrib, eccodes, pyart; print('Scientific dependency check: OK')"
     if ($LASTEXITCODE -ne 0) { throw 'The scientific dependencies are incomplete. NOAA not started.' }
     Write-Host ''
     Write-Host 'WX Studio native NOAA is now starting on THIS PC only (127.0.0.1).'
@@ -82,7 +100,7 @@ try {
     Write-Host 'Leave this window running. Press Ctrl+C to stop both API and NOAA ingest.'
     Write-Host 'In WX Studio, check the Streamlit sidebar: Use free local NOAA processor on this computer.'
     Write-Host ''
-    & $Python -m weather_processor.local_host --port $Port --interval $IntervalSeconds --products $Products --data-dir $Frames
+    & $Micromamba run --prefix $EnvDir python -m weather_processor.local_host --port $Port --interval $IntervalSeconds --products $Products --data-dir $Frames
     if ($LASTEXITCODE -ne 0) {
         throw "Local NOAA processor stopped with exit code $LASTEXITCODE. Check the log output above."
     }
