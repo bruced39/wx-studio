@@ -23,7 +23,8 @@ with st.sidebar:
         "Use free local NOAA processor on this computer",
         value=False,
         help="Connect the studio browser to the NOAA decoder running on this PC at 127.0.0.1:8080. "
-             "Start the decoder with weather_processor/start_local_windows.ps1 first. "
+             "Start it first using weather_processor/start_no_docker_windows.ps1 "
+             "(no Docker) or start_local_windows.ps1 (Docker). "
              "Browser access to localhost may require permission.",
     )
 
