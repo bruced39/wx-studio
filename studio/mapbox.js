@@ -1297,7 +1297,15 @@
       const s = document.createElement('script'); s.src = `https://api.mapbox.com/mapbox-gl-js/${VER}/mapbox-gl.js`; s.onload = res; s.onerror = () => rej(new Error('Could not load Mapbox GL JS (needs internet)')); document.head.appendChild(s);
     });
   }
-  const once = (m, ev) => new Promise(res => m.once(ev, res));
+  // Mapbox 'load' can fire before a listener is installed, particularly for
+  // the tiny style-less projection map. Never wait for a missed event.
+  const once = (m, ev) => new Promise((res,rej) => {
+    try {
+      if(ev==='load'&&m.loaded?.())return res();
+      if(ev==='style.load'&&m.isStyleLoaded?.())return res();
+      m.once(ev,res);
+    }catch(e){rej(e)}
+  });
   // Avoid a permanent "Loading Mapbox map..." screen if a browser blocks
   // mapbox-gl.js, or a style/map load fails without firing its load event.
   const withTimeout=(promise,ms,description)=>new Promise((resolve,reject)=>{
@@ -1308,6 +1316,10 @@
     );
   });
   MB.init = function () {
+    // A failed init must remain failed until a deliberate reset/reload.
+    // Otherwise the editor's 30fps preview retries GL creation immediately,
+    // hiding the error and drawing 'Loading Mapbox map…' forever.
+    if(MB.status==='error')return Promise.reject(new Error(MB.err||'Mapbox could not initialize'));
     if (initP) return initP;
     initP = (async () => {
       MB.status = 'loading'; MB.err = '';
@@ -1334,8 +1346,12 @@
             }
           }catch(err){}
         });
-        await withTimeout(Promise.all([once(D, 'load'),once(P, 'load')]),25000,
-          'Mapbox tiles/style did not initialize in 25 seconds. Verify your Mapbox token and refresh.');
+        // The visible background uses D. A second blank projector (P) is
+        // only for coordinate transforms and must NEVER gate D's readiness.
+        // Its empty style can miss its 'load' event on some browsers.
+        await withTimeout(once(D,'load'),25000,
+          'Mapbox base map did not load within 25 seconds. Check the Mapbox token, network and browser WebGL; then refresh.');
+        if(MB.status==='error')throw new Error(MB.err||'Mapbox token was rejected');
         curStyle = 'streets-v12'; curStyleKey='stock|streets-v12'; curCfgKey=null; curProj = 'mercator'; pProj = 'mercator'; MB.status = 'ready';
       } catch (e) {
         MB.status='error';MB.err=e.message||String(e);
@@ -1366,7 +1382,14 @@
   }
   async function setup(bg) {
     MB.ensureConfig(bg);const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
-    if(styleKey!==curStyleKey){D.setStyle('mapbox://styles/mapbox/'+st);await once(D,'style.load');curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;D.__wdOriginalZoomRanges={};D.__wdOriginalRasterVisibility={};D.__wdOriginalOverviewFilters={};D.__wdOriginalRoadTextSizes={};}
+    if(styleKey!==curStyleKey){
+      D.setStyle('mapbox://styles/mapbox/'+st);
+      await withTimeout(once(D,'style.load'),12000,
+        'Mapbox did not load the selected map style within 12 seconds. Check the Mapbox connection and refresh.');
+      curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;
+      D.__wdOriginalZoomRanges={};D.__wdOriginalRasterVisibility={};
+      D.__wdOriginalOverviewFilters={};D.__wdOriginalRoadTextSizes={};
+    }
     if(pr!==curProj){D.setProjection(pr);curProj=pr;}
     fog(bg);applyTerrain(D,bg);
     if(bg.mbStyle==='broadcast'&&cfgKey!==curCfgKey){addBroadcastCartography(D,bg);curCfgKey=cfgKey;}
@@ -1383,19 +1406,44 @@
       }catch(ignore){}
     }
   }
-  function settle(m, generation) {
-    return new Promise(res => {
-      let ok = 0; const t0 = performance.now();
-      const step = () => {
-        if (generation !== renderGeneration || MB.interacting) return res(false);
-        if (performance.now() - t0 > 20000) return res(true);
-        m.triggerRepaint();
-        m.once('render', () => {
-          if (generation !== renderGeneration || MB.interacting) return res(false);
-          let done = false; try { done = m.loaded() && !m.isMoving(); } catch (e) { done = true; }
-          if (done) { ok++; if (ok >= 2) return res(true); } else ok = 0;
-          setTimeout(step, 16);
-        });
+  // Bounded even when a GPU/context failure suppresses the Mapbox 'render'
+  // event completely. The previous 20s timeout was INSIDE that event and
+  // therefore never fired, leaving the entire snap queue permanently busy.
+  function settle(m,generation){
+    return new Promise((resolve,reject)=>{
+      let active=true,ok=0,sawRender=false,stepTimer=null;
+      const done=(value,error)=>{
+        if(!active)return;active=false;
+        clearTimeout(wallTimer);clearTimeout(stepTimer);
+        try{m.off('render',onRender)}catch(ignore){}
+        if(error)reject(error);else resolve(value);
+      };
+      const wallTimer=setTimeout(()=>{
+        if(generation!==renderGeneration||MB.interacting)return done(false);
+        // Rendered some tiles? Prefer the existing picture to a permanent
+        // loading screen. A completely silent GPU gets an explicit error.
+        if(sawRender)return done(true);
+        done(false,new Error('Mapbox did not render a frame within 14 seconds. Check browser WebGL/GPU acceleration and refresh.'));
+      },14000);
+      const onRender=()=>{
+        if(!active)return;
+        sawRender=true;
+        if(generation!==renderGeneration||MB.interacting)return done(false);
+        let ready=false;
+        try{ready=m.loaded()&&!m.isMoving()}catch(ignore){}
+        if(ready&&++ok>=2)return done(true);
+        if(!ready)ok=0;
+        stepTimer=setTimeout(step,40);
+      };
+      const step=()=>{
+        if(!active)return;
+        if(generation!==renderGeneration||MB.interacting)return done(false);
+        try{
+          // Register before repaint, so a fast mock or synchronous callback
+          // cannot disappear between repaint and listener installation.
+          m.once('render',onRender);
+          m.triggerRepaint();
+        }catch(e){done(false,e)}
       };
       step();
     });
@@ -1441,24 +1489,43 @@
   async function doSnap(bg, cam, key) {
     await MB.init(); if (MB.cache.has(key)) return MB.cache.get(key);
     if(MB.interacting)return null;
-    await setup(bg); const k = norm(cam), generation=renderGeneration;
+    await withTimeout(setup(bg),17000,
+      'Mapbox map style configuration stalled. Refresh to retry; your scene and map settings are saved.');
+    const k = norm(cam), generation=renderGeneration;
     D.jumpTo({ center: k.c, zoom: k.z, bearing: k.b, pitch: k.p }); liveKey=null;
     const settled=await settle(D,generation);
     if(!settled||generation!==renderGeneration||MB.interacting)return null;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.getContext('2d').drawImage(D.getCanvas(), 0, 0, W, H);
     MB.cache.set(key, cv); if (MB.cache.size > 14) MB.cache.delete(MB.cache.keys().next().value); MB.last = cv; return cv;
   }
-  MB.snap = function (bg, cam) { const key = keyOf(bg, cam), b = cloneBg(bg); if (MB.cache.has(key)) return Promise.resolve(MB.cache.get(key)); const p = MB.queue.then(() => doSnap(b, cam, key)); MB.queue = p.catch(() => { }); return p; };
+  MB.snap = function(bg,cam){
+    if(MB.status==='error')return Promise.reject(new Error(MB.err||'Mapbox failed'));
+    const key=keyOf(bg,cam),b=cloneBg(bg);
+    if(MB.cache.has(key))return Promise.resolve(MB.cache.get(key));
+    const p=MB.queue.then(()=>doSnap(b,cam,key)).catch(error=>{
+      // A fatal style/render exception must be visible to the user, not
+      // swallowed by pump() and instantly retried every editor frame.
+      if(MB.status!=='error'){
+        MB.err=error?.message||String(error);
+        MB.status='error';
+        console.warn('WX Studio Mapbox frame:',MB.err);
+      }
+      throw error;
+    });
+    MB.queue=p.catch(()=>{});
+    return p;
+  };
 
   /* Live editor preview: while the user is moving the camera, use Mapbox's
      current WebGL canvas directly instead of waiting for settled snapshots. */
   let busy = false, want = null;
   function pump() {
-    if (busy || !want || MB.interacting) return;
+    if (busy || !want || MB.interacting || MB.status==='error') return;
     busy = true; const w = want; want = null;
     MB.snap(w.bg, w.cam).catch(() => { }).then(() => { busy = false; if (MB.onUpdate) MB.onUpdate(); pump(); });
   }
   MB.liveFrame = function(bg,cam){
+    if(MB.status==='error')return MB.last;
     if(!MB.hasToken())return null;
     const live=liveCanvas(bg,cam);
     if(live)return live;
@@ -1467,6 +1534,7 @@
     return MB.last;
   };
   MB.frame = function (bg, cam) {
+    if(MB.status==='error')return MB.last;
     if (!MB.hasToken()) return null;
     const key = keyOf(bg, cam), c = MB.cache.get(key); if (c) return c;
     want = { bg: cloneBg(bg), cam: norm(cam) }; pump();
