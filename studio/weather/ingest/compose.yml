@@ -1,0 +1,30 @@
+# docker compose -f studio/weather/ingest/compose.yml up --build -d
+# HTTPS reverse proxy and a public domain are needed for the Streamlit browser.
+# Port 8788 is deliberately bound to localhost, NOT to a public interface.
+services:
+  publisher:
+    build:
+      context: ../../..
+      dockerfile: studio/weather/ingest/Dockerfile
+    command: ["python","-m","studio.weather.ingest.service","--root","/data/frames","--host","0.0.0.0"]
+    ports: ["127.0.0.1:8788:8788"]
+    environment:
+      WX_WEATHER_PUBLIC_BASE_URL: "${WX_WEATHER_PUBLIC_BASE_URL:-}"
+      WX_WEATHER_CORS_ORIGIN: "${WX_WEATHER_CORS_ORIGIN:-*}"
+    volumes: ["noaa_frames:/data/frames:ro"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://127.0.0.1:8788/health',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  decoder:
+    build:
+      context: ../../..
+      dockerfile: studio/weather/ingest/Dockerfile
+    command: ["python","-m","studio.weather.ingest.runner","--root","/data/frames","--interval-seconds","300","--keep","180"]
+    volumes: ["noaa_frames:/data/frames"]
+    restart: unless-stopped
+    mem_limit: 6g
+volumes:
+  noaa_frames: {}
