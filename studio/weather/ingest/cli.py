@@ -56,7 +56,7 @@ def select_latest(source: str, *, satellite="east", sector="conus",
         return f"https://{bucket}.s3.amazonaws.com/{max(keys)}"
     if source=="nexrad":
         site=site.upper()
-        if not re.fullmatch(r"K[A-Z0-9]{3}",site):
+        if not re.fullmatch(r"K[A-Z0-9]{3}",site) or site=="KBOS":
             raise ValueError("Use actual NEXRAD station ID e.g. KBOX, not airport KBOS")
         keys=[]
         for hours_back in range(3):
