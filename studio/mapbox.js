@@ -1302,7 +1302,7 @@
   const once = (m, ev) => new Promise((res,rej) => {
     try {
       if(ev==='load'&&m.loaded?.())return res();
-      if(ev==='style.load'&&m.isStyleLoaded?.())return res();
+      // Do not short-circuit style.load: it can still refer to the OLD style.
       m.once(ev,res);
     }catch(e){rej(e)}
   });
