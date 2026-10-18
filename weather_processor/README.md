@@ -1,5 +1,7 @@
 # WX Studio — source-native NOAA scientific processor (implementation stage)
 
+**FREE LOCAL WINDOWS OPTION:** You do NOT need paid cloud hosting to process NOAA data. Run the existing processor on your own Windows PC, bind to 127.0.0.1 only, and let your WX Studio browser fetch the frames directly. Setup: [LOCAL_FREE_WINDOWS.md](LOCAL_FREE_WINDOWS.md). Actual live NOAA ingest still needs a real local Docker run to confirm. All hosted deployment guidance below is OPTIONAL.
+
 This is a **separate server + ingest worker**. It implements decoding of real
 NOAA **ABI Level-2 CMIP NetCDF4**, **MRMS GRIB2.gz**, and **NEXRAD Level II
 polar volumes**, rather than treating NOAA pre-rendered ImageServer PNGs as
