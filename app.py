@@ -64,4 +64,19 @@ if _cloud:
     # Prevent accidental </script> escaping from embedded configuration.
     _cloud_json = json.dumps(_cloud).replace("<", "\\u003c")
     _inject += "<script>window.WX_CLOUD_CONFIG=" + _cloud_json + ";</script>"
+# Optional PUBLIC URL of the independent NOAA processing service. The
+# scientific stack stays off Streamlit. No service credentials are injected.
+def _processor_url() -> str:
+    try:
+        value = str(st.secrets.get("WX_WEATHER_PROCESSOR_URL", "")).strip().rstrip("/")
+    except Exception:
+        return ""
+    if value.startswith("https://") or value.startswith("http://localhost:") or value.startswith("http://127.0.0.1:"):
+        return value
+    return ""
+
+_processor = _processor_url()
+if _processor:
+    _inject += "<script>window.WX_WEATHER_PROCESSOR_URL=" + json.dumps(_processor).replace("<", "\\u003c") + ";</script>"
+
 components.html(_inject + _html(), height=height, scrolling=False)
