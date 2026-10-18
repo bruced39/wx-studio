@@ -8,6 +8,7 @@ Each overlay always carries the observation timestamp from its source.
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import math
 import tempfile
@@ -193,8 +194,10 @@ def mrms_grib2_gz(payload: bytes, bbox, *, resolution=0.01):
     with tempfile.TemporaryDirectory(prefix="wx_mrms_") as tmp:
         path = Path(tmp) / "scan.grib2"
         with path.open("wb") as out:
-            # Use stdlib gzip and a strict decompression cap against damaged files.
-            uncompressed = gzip.decompress(payload)
+            # Bounded streaming decompression prevents a damaged or hostile
+            # response from allocating unlimited memory before size checks.
+            with gzip.GzipFile(fileobj=io.BytesIO(payload), mode="rb") as gz:
+                uncompressed = gz.read(120_000_001)
             if len(uncompressed) > 120_000_000 or uncompressed[:4] != b"GRIB":
                 raise ValueError("MRMS payload not a reasonable GRIB2 field")
             out.write(uncompressed)
