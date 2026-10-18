@@ -91,7 +91,28 @@
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
-  function drawThumb(i) { const sc = S.show.scenes[i], cv = document.querySelector(`.sc[data-i="${i}"] canvas`); if (!cv) return; try { E.renderScene(tbc, S.show, sc, Math.min(2.5, sc.duration), { editing: true, camT: 0, thumb: true }); const c = cv.getContext('2d'); c.drawImage(tb, 0, 0, cv.width, cv.height); } catch (e) { /* ignore */ } }
+  // The live editor and thumbnails share ONE Mapbox GL renderer. In the
+  // active Mapbox scene, the already-rendered 2D editor stage is the
+  // authoritative thumbnail image. Never call E.renderScene from that
+  // thumbnail: it queues another Mapbox snapshot/camera jump and may race
+  // the live preview. Other scenes retain their existing thumbnail path.
+  function copyActiveMapThumb() {
+    if(S.mode!=='edit'||S.show?.scenes?.[S.si]?.bg?.type!=='mapbox')return false;
+    const cv=document.querySelector(`.sc[data-i="${S.si}"] canvas`);
+    if(!cv||!stage||!stage.width||!stage.height)return false;
+    try{cv.getContext('2d').drawImage(stage,0,0,cv.width,cv.height);return true;}
+    catch(e){return false;}
+  }
+  function drawThumb(i) {
+    const sc=S.show.scenes[i],cv=document.querySelector(`.sc[data-i="${i}"] canvas`);
+    if(!cv)return;
+    if(i===S.si&&sc.bg.type==='mapbox'&&copyActiveMapThumb())return;
+    try{
+      E.renderScene(tbc,S.show,sc,Math.min(2.5,sc.duration),
+        {editing:true,camT:0,thumb:true});
+      cv.getContext('2d').drawImage(tb,0,0,cv.width,cv.height);
+    }catch(e){/* Thumbnail failure cannot disrupt editor. */}
+  }
   function thumbSoon(all) { clearTimeout(tk); tk = setTimeout(() => { if (all) S.show.scenes.forEach((_, i) => drawThumb(i)); else drawThumb(S.si); }, 450); }
   E.onAsset = () => thumbSoon(true);
 
@@ -311,13 +332,23 @@
   }
 
   /* ---------- render loop ---------- */
-  let last = 0;
+  let last = 0,lastActiveMapThumbPaint=0;
   function loop(ts) {
     requestAnimationFrame(loop); const liveMapScene=cur&&cur().bg&&cur().bg.type==='mapbox'; const frameMs=(liveMapScene&&(g.MB.interacting||S.mode!=='edit'))?15:30; if (ts - last < frameMs) return; last = ts;
     try {
       // Keep the zoom text synchronized independently of expensive map frames.
       updateZoomBadge();
-      if (S.mode === 'edit') { E.renderScene(sctx, S.show, cur(), clock(), { editing: true, camT: editT(), liveMap: true }); drawOverlay(); }
+      if (S.mode === 'edit') {
+        E.renderScene(sctx, S.show, cur(), clock(),
+          {editing:true,camT:editT(),liveMap:true});
+        // Keep the active map thumbnail current by copying the FINISHED
+        // editor stage, not by rendering a second Mapbox camera. This is
+        // intentionally independent of asynchronous MB.onUpdate events.
+        if(liveMapScene&&ts-lastActiveMapThumbPaint>1100){
+          copyActiveMapThumb();lastActiveMapThumbPaint=ts;
+        }
+        drawOverlay();
+      }
       else {
         if (S.mode === 'play' && S.play) { S.T = S.play.a + (clock() - S.play.t0); if (S.T >= S.play.b) { S.T = S.play.b - 0.001; E.renderShow(sctx, S.show, S.T, { liveMap: true }); stopPlay(); return; } }
         E.renderShow(sctx, S.show, S.T, { liveMap: true }); octx.clearRect(0, 0, W, H); updateTransport();
@@ -1781,7 +1812,12 @@
       toast(loadedDefault?'Last show restored with saved default Satellite map':'Last show restored; Satellite selected');
       E.preload(S.show).then(()=>thumbSoon(true));
     }
-    g.MB.onUpdate = () => thumbSoon(true); if (!g.MB.hasToken() && S.show.scenes.some(x => x.bg.type === 'mapbox')) setTimeout(mapboxSettings, 600); if (S.show.scenes.some(x => x.bg.type === 'mapbox') && g.MB.hasToken()) g.MB.init().then(() => thumbSoon(true)).catch(() => { }); g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
+    // The editor already paints its current Mapbox frame continuously.
+    // Do NOT call thumbSoon() from Mapbox snapshot completion: thumbnails
+    // themselves call Mapbox, causing a self-sustaining snapshot loop and
+    // repeated full-screen "Loading Mapbox map…" flashes while idle.
+    g.MB.onUpdate = null;
+    if (!g.MB.hasToken() && S.show.scenes.some(x => x.bg.type === 'mapbox')) setTimeout(mapboxSettings, 600); if (S.show.scenes.some(x => x.bg.type === 'mapbox') && g.MB.hasToken()) g.MB.init().then(() => thumbSoon(true)).catch(() => { }); g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
     if (document.fonts) { ['700 40px "Roboto Condensed"', '800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
     requestAnimationFrame(loop);
   }
