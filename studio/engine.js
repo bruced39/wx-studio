@@ -576,6 +576,11 @@
     opts = opts || {}; const editing = !!opts.editing, ct = opts.camT != null ? opts.camT : t, xf = E.xf(scene, ct);
     c.save(); c.clearRect(0, 0, W, H);
     const guard = (fn) => { try { fn(); } catch (err) { c.restore(); c.save(); E.lastErr = err; if (E.onDrawError) E.onDrawError(err); } };
+    // Select decoded frame BEFORE drawing Mapbox. It is inserted as a
+    // raster layer inside Mapbox, below all label/line overlays. WXData.draw
+    // must never paint over city names on the completed 2D canvas.
+    if(g.WXData?.useMapboxUnderlay)
+      guard(() => g.WXData.useMapboxUnderlay(scene,t,opts));
     guard(() => drawBackground(c, show, scene, t, ct, opts));
     if (scene.dataLoop && scene.dataLoop.on && g.WXData) guard(() => g.WXData.draw(c, scene, t, opts, xf));
     scene.objects.forEach(o => { if (!o.hidden) guard(() => drawObjectAnimated(c, o, scene, xf, t, show, editing)); });
@@ -619,7 +624,15 @@
     let i = 0; while (i + 1 < st.length && T >= st[i + 1]) i++;
     const sc = show.scenes[i], t = T - st[i], tr = sc.transition || { type: 'cut', dur: 0 }, need = [];
     if (i > 0 && tr.type !== 'cut' && t < tr.dur) { need.push([show.scenes[i - 1], show.scenes[i - 1].duration + t]); need.push([sc, t]); } else need.push([sc, t]);
-    for (const [s, tt] of need) { if (hasMb && s.bg.type === 'mapbox') await g.MB.snap(s.bg, E.viewAt(s, tt)); if (s.bg.type === 'video') await E.seekVideo(s.bg, tt); if (hasData && s.dataLoop && s.dataLoop.on) await g.WXData.ensure(s); }
+    for (const [s, tt] of need) {
+      // Load a REAL image frame first, then render the Mapbox raster below
+      // labels. Previously Mapbox snapped before data was loaded, and the
+      // data was pasted ON TOP of text during export.
+      if (hasData && s.dataLoop && s.dataLoop.on) await g.WXData.ensure(s);
+      if (g.WXData?.useMapboxUnderlay)g.WXData.useMapboxUnderlay(s,tt,{editing:false});
+      if (hasMb && s.bg.type === 'mapbox') await g.MB.snap(s.bg, E.viewAt(s, tt));
+      if (s.bg.type === 'video') await E.seekVideo(s.bg, tt);
+    }
   };
   E.renderShow = function (c, show, T, opts) {
     const st = E.starts(show), tot = E.total(show); T = clamp(T, 0, Math.max(0, tot - 0.0001));
