@@ -1,0 +1,65 @@
+name: NOAA native-resolution decoder proof
+
+# A PASS means actual fresh NOAA raw scientific files were decoded.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'weather_processor/**'
+      - 'tests/test_weather_processor.py'
+      - 'tests/test_weather_processor_acceptance.py'
+      - '.github/workflows/noaa_native_acceptance.yml'
+  workflow_dispatch:
+    inputs:
+      products:
+        description: '1-8 comma-separated source-native NOAA products to prove'
+        required: true
+        default: 'mrms-reflectivity,goes-east-conus-C02,goes-east-conus-C13,nexrad-reflectivity-KBOX'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noaa-native-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-decoder-tests-and-real-noaa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      WX_MAX_SOURCE_BYTES: '250000000'
+      WX_NOAA_ACCEPTANCE_PRODUCTS: ${{ inputs.products || 'mrms-reflectivity,goes-east-conus-C02,goes-east-conus-C13,nexrad-reflectivity-KBOX' }}
+    steps:
+      - name: Checkout latest verified source
+        uses: actions/checkout@v4
+      - name: Python 3.11 scientific runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install NOAA GRIB2 decoding system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libeccodes0 libeccodes-data libgomp1
+      - name: Install isolated decoder requirements (never into Streamlit)
+        run: |
+          python -m pip install --disable-pip-version-check --upgrade pip
+          python -m pip install --disable-pip-version-check -r weather_processor/requirements.txt
+      - name: Verify decoding, geometry, timestamp, store and API contracts
+        run: |
+          python -m pytest -q tests/test_weather_processor.py tests/test_weather_processor_acceptance.py
+          python -m compileall -q weather_processor
+      - name: Fetch and decode REAL NOAA GRIB2, NetCDF4 and Level II scans
+        run: |
+          python -m weather_processor.validate_live \
+            --products "$WX_NOAA_ACCEPTANCE_PRODUCTS" \
+            --output noaa-proof
+      - name: Archive scientific verification and PNG evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: noaa-native-proof-${{ github.run_id }}
+          path: noaa-proof/
+          if-no-files-found: warn
+          retention-days: 3
