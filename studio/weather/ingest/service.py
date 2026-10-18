@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
-PRODUCT = re.compile(r"^[a-z0-9][a-z0-9-]{1,99}$")
+PRODUCT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{1,99}$")
 STAMP = re.compile(r"^[0-9]{13}\.png$")
 SCHEMA = "wxstudio.frames.v1"
 MAX_FRAMES = 180
@@ -121,11 +121,11 @@ def make_handler(root: Path, *, public_base="", allowed_origin="*", max_age_minu
                 return self.send_json(obj, head_only)
             if path == "/catalog":
                 return self.send_json(catalog(root, base, max_age_minutes=max_age_minutes), head_only)
-            match = re.fullmatch(r"/manifests/([a-z0-9-]{2,100})\.json", path)
+            match = re.fullmatch(r"/manifests/([A-Za-z0-9-]{2,100})\.json", path)
             if match:
                 obj = frames_for(root, match[1], base, max_age_minutes=max_age_minutes)
                 return self.send_json(obj, head_only, status=200 if obj else 404)
-            match = re.fullmatch(r"/frames/([a-z0-9-]{2,100})/([0-9]{13}\.png)", path)
+            match = re.fullmatch(r"/frames/([A-Za-z0-9-]{2,100})/([0-9]{13}\.png)", path)
             if match:
                 product, filename = match.groups()
                 source = frames_for(root, product, base, max_age_minutes=max_age_minutes)
