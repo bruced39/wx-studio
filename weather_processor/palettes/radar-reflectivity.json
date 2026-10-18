@@ -1,0 +1,69 @@
+{
+  "id": "radar/reflectivity",
+  "name": "Broadcast starter reflectivity",
+  "units": "dBZ",
+  "continuous": false,
+  "provenance": "WX Studio existing editable broadcast-starting legend; not an official NOAA certified palette",
+  "stops": [
+    [
+      5,
+      "#04e9e7"
+    ],
+    [
+      10,
+      "#019ff4"
+    ],
+    [
+      15,
+      "#0300f4"
+    ],
+    [
+      20,
+      "#02fd02"
+    ],
+    [
+      25,
+      "#01c501"
+    ],
+    [
+      30,
+      "#008e00"
+    ],
+    [
+      35,
+      "#fdf802"
+    ],
+    [
+      40,
+      "#e5bc00"
+    ],
+    [
+      45,
+      "#fd9500"
+    ],
+    [
+      50,
+      "#fd0000"
+    ],
+    [
+      55,
+      "#d40000"
+    ],
+    [
+      60,
+      "#bc0000"
+    ],
+    [
+      65,
+      "#f800fd"
+    ],
+    [
+      70,
+      "#9854c6"
+    ],
+    [
+      75,
+      "#ffffff"
+    ]
+  ]
+}
