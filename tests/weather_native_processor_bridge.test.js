@@ -7,6 +7,11 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../studio/weather/processor_bridge.js'),'utf8');
 const NOW=Date.now();
+// The processor filters frames against Date.now() at list time. Freeze that
+// clock for this isolated unit harness: the first real observation is exactly
+// 1 hour old, which could otherwise age past the requested 1-hour cutoff
+// between test setup and the async manifest request.
+class FixedDate extends Date { static now(){return NOW;} }
 const products=[
  {product:'goes-east-conus-C02',earliestObservationUtc:NOW-3600000,latestObservationUtc:NOW-120000,frameCount:15},
  {product:'goes-west-meso1-C02',earliestObservationUtc:NOW-3600000,latestObservationUtc:NOW-60000,frameCount:12},
@@ -31,7 +36,7 @@ function harness({catalog=products,timestamps=[]}={}){
   return {ok:true,json:async()=>doc};
  }
  const env={WX_WEATHER_PROCESSOR_URL:'https://processor.example',WXData:D,
-  fetch,Date,URL,AbortController,setTimeout,clearTimeout,
+  fetch,Date:FixedDate,URL,AbortController,setTimeout,clearTimeout,
   setInterval(){return 0},console,WeakMap,Promise};
  env.window=env;
  vm.runInNewContext(source,env);
