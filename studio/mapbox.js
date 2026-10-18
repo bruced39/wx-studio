@@ -1380,7 +1380,7 @@
     })();
     return initP;
   };
-  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); MB.last = null; MB.status = 'idle'; MB.err = ''; MB.queue = Promise.resolve(); };
+  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); MB.last=null;MB.lastKey=null; snapshotBusy=false;previewHold=null;previewRestorePending=false;previewRestoreKey=null; MB.status='idle'; MB.err = ''; MB.queue = Promise.resolve(); };
   MB.setToken = function (t) { ls.set('wx.mapbox.token', String(t || '').trim()); MB.reset(); };
   MB.setScale = function (s) { MB.scale = s; ls.set('wx.mapbox.scale', String(s)); MB.reset(); };
 
@@ -1472,6 +1472,47 @@
     return styleKey===curStyleKey && pr===curProj && (bg.mbStyle!=='broadcast'||cfgKey===curCfgKey);
   }
 
+  // The WebGL map used by the live editor is ALSO used for hidden
+  // thumbnail/export snapshots. Hold the last correct editor frame while
+  // another snapshot temporarily jumps that shared canvas to a different
+  // camera. A 'render' event at the requested editor camera releases it.
+  let snapshotBusy=false,previewHold=null,previewRestorePending=false,previewRestoreKey=null;
+  function holdEditorFrame(){
+    if(previewHold||!D||!liveKey||MB.status!=='ready')return;
+    try{
+      const canvas=D.getCanvas();
+      if(!canvas||!canvas.width||!canvas.height)return;
+      const held=document.createElement('canvas');
+      held.width=W;held.height=H;
+      held.getContext('2d').drawImage(canvas,0,0,W,H);
+      previewHold=held;
+    }catch(e){console.warn('WX Studio stable editor frame unavailable',e)}
+  }
+  function onEditorFrameRendered(){
+    if(snapshotBusy||!previewRestorePending||!previewRestoreKey||!D)return;
+    try{if(!D.loaded()||D.isMoving())return}catch(e){return}
+    previewHold=null;previewRestorePending=false;previewRestoreKey=null;
+    try{D.off('render',onEditorFrameRendered)}catch(e){}
+    if(MB.onUpdate)MB.onUpdate();
+  }
+  function stableEditorFrame(bg,cam){
+    if(snapshotBusy)return previewHold;
+    if(previewRestorePending&&previewHold){
+      if(!visualConfigReady(bg))return previewHold;
+      const k=norm(cam),key=[k.c[0].toFixed(6),k.c[1].toFixed(6),
+        k.z.toFixed(4),k.b.toFixed(3),k.p.toFixed(3)].join('|');
+      if(key!==previewRestoreKey){
+        try{D.off('render',onEditorFrameRendered)}catch(e){}
+        D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
+        liveKey=key;previewRestoreKey=key;
+        D.on('render',onEditorFrameRendered);
+        D.triggerRepaint();
+      }
+      return previewHold;
+    }
+    return liveCanvas(bg,cam);
+  }
+
   function liveCanvas(bg,cam){
     if(!visualConfigReady(bg)){
       // A boundary slider can change cfgKey while the next Mapbox style
@@ -1503,16 +1544,30 @@
 
   MB.queue = Promise.resolve();
   async function doSnap(bg, cam, key) {
-    await MB.init(); if (MB.cache.has(key)) return MB.cache.get(key);
+    await MB.init();if(MB.cache.has(key))return MB.cache.get(key);
     if(MB.interacting)return null;
-    await withTimeout(setup(bg),17000,
-      'Mapbox map style configuration stalled. Refresh to retry; your scene and map settings are saved.');
-    const k = norm(cam), generation=renderGeneration;
-    D.jumpTo({ center: k.c, zoom: k.z, bearing: k.b, pitch: k.p }); liveKey=null;
-    const settled=await settle(D,generation);
-    if(!settled||generation!==renderGeneration||MB.interacting)return null;
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.getContext('2d').drawImage(D.getCanvas(), 0, 0, W, H);
-    MB.cache.set(key, cv); if (MB.cache.size > 14) MB.cache.delete(MB.cache.keys().next().value); MB.last = cv; return cv;
+    // Capture before BOTH style changes and camera jumps.
+    holdEditorFrame();
+    snapshotBusy=true;
+    try{
+      await withTimeout(setup(bg),17000,
+        'Mapbox map style configuration stalled. Refresh to retry; your scene and map settings are saved.');
+      const k=norm(cam),generation=renderGeneration;
+      D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});liveKey=null;
+      const ready=await settle(D,generation);
+      if(!ready||generation!==renderGeneration||MB.interacting)return null;
+      const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+      cv.getContext('2d').drawImage(D.getCanvas(),0,0,W,H);
+      MB.cache.set(key,cv);
+      if(MB.cache.size>14)MB.cache.delete(MB.cache.keys().next().value);
+      MB.last=cv;MB.lastKey=key;
+      return cv;
+    }finally{
+      snapshotBusy=false;
+      if(previewHold){
+        previewRestorePending=true;previewRestoreKey=null;liveKey=null;
+      }
+    }
   }
   MB.snap = function(bg,cam){
     if(MB.status==='error')return Promise.reject(new Error(MB.err||'Mapbox failed'));
@@ -1540,21 +1595,32 @@
     busy = true; const w = want; want = null;
     MB.snap(w.bg, w.cam).catch(() => { }).then(() => { busy = false; if (MB.onUpdate) MB.onUpdate(); pump(); });
   }
-  MB.liveFrame = function(bg,cam){
-    if(MB.status==='error')return MB.last;
+  MB.liveFrame=function(bg,cam){
     if(!MB.hasToken())return null;
-    const live=liveCanvas(bg,cam);
+    const key=keyOf(bg,cam),cached=MB.cache.get(key);
+    // Snapshot cameras must never be drawn in the live scene. MB.last
+    // can belong to ANOTHER scene/zoom, so only accept exact-key snapshots.
+    if(snapshotBusy)return previewHold||cached||null;
+    if(previewRestorePending&&previewHold){
+      if(!visualConfigReady(bg)){
+        want={bg:cloneBg(bg),cam:norm(cam)};pump();
+      }
+      return stableEditorFrame(bg,cam)||cached||null;
+    }
+    if(MB.status==='error')return cached||(MB.lastKey===key?MB.last:null);
+    const live=stableEditorFrame(bg,cam);
     if(live)return live;
-    const key=keyOf(bg,cam),c=MB.cache.get(key); if(c)return c;
+    if(cached)return cached;
     want={bg:cloneBg(bg),cam:norm(cam)};pump();
-    return MB.last;
+    return MB.lastKey===key?MB.last:null;
   };
-  MB.frame = function (bg, cam) {
-    if(MB.status==='error')return MB.last;
-    if (!MB.hasToken()) return null;
-    const key = keyOf(bg, cam), c = MB.cache.get(key); if (c) return c;
-    want = { bg: cloneBg(bg), cam: norm(cam) }; pump();
-    return MB.last;
+  MB.frame=function(bg,cam){
+    const key=keyOf(bg,cam),cached=MB.cache.get(key);
+    if(cached)return cached;
+    if(MB.status==='error'||!MB.hasToken())
+      return MB.lastKey===key?MB.last:null;
+    want={bg:cloneBg(bg),cam:norm(cam)};pump();
+    return MB.lastKey===key?MB.last:null;
   };
 
   /* ---- lng/lat <-> 1920x1080 screen pixels ---- */
