@@ -44,6 +44,69 @@ The MCMIP multichannel GeoColor recipe, cloud-top temperature/height native
 retrievals, RTMA fields, and models are NOT yet connected; the user will choose
 RTMA products and numerical models separately.
 
+## One-host native NOAA activation (v0.9.86)
+
+The scientific processor can now be started on **one Docker host** instead of
+requiring two independent services with shared cross-service volumes. This is
+especially useful for cloud providers that expose just one web service and
+one persistent disk. The default Docker image starts:
+- the existing read-only FastAPI /catalog + timestamped PNG service; and
+- the existing raw NOAA NetCDF/GRIB2/NEXRAD volume ingest worker.
+
+Both run in separate OS processes **inside one container**, controlled by
+`weather_processor/single_host.py`. If one crashes, its sibling shuts down
+too so the host can restart cleanly. A graceful shutdown stops both. There
+is **no demo-data substitution** when NOAA is unavailable: /health returns
+`waiting-for-real-noaa-frames` until an actual recent raw NOAA scan is
+successfully decoded and saved.
+
+From the repository root, on a machine with Docker:
+
+```bash
+docker build -f weather_processor/Dockerfile -t wxstudio-noaa-native .
+docker volume create wxstudio-noaa-frames
+docker run --rm -p 8080:8080 \
+  -v wxstudio-noaa-frames:/data/frames \
+  -e WX_PROCESSOR_PRODUCTS=mrms-reflectivity,goes-east-conus-C02,nexrad-reflectivity-KBOX \
+  wxstudio-noaa-native
+```
+
+`PORT` and `WX_PROCESSOR_INTERVAL_SECONDS` (60–3600, default 120) are
+configurable; the host should mount persistent storage at **/data/frames**.
+Don't run both the single-host launcher and another worker against the same
+volume. The existing `docker-compose.yml` explicitly starts the API on its
+own and the ingest worker as a separate service, so its original behavior
+remains unchanged.
+
+**Deployment prerequisite:** A public HTTPS Docker host with sufficient RAM
+(4+ GB is an initial minimum, more for multiple 0.5-km ABI sectors, and a
+persisted volume) is still needed. NOAA's underlying observation files are
+free/open data but CPU, storage, memory, egress and web hosting may cost
+money. No host is provisioned or charged by this code change. A 512 MB
+sleeping/free web instance should not be presented as a reliable source-
+native satellite/radar service.
+
+Once deployed, test `/health` and `/catalog` first. The catalog **MUST
+contain actual fresh NOAA decoded products**, otherwise don't set
+`WX_WEATHER_PROCESSOR_URL` or claim production operation. Then test
+`/manifests/mrms-reflectivity.json` and one actual `/frames/...` URL
+before adding `WX_WEATHER_PROCESSOR_URL = "https://..."` to Streamlit
+secrets. For full-resolution source acceptance, confirm actual scan
+timestamps and pixels from raw downloaded files, not the rendered
+NWS ArcGIS MRMS image-preview source.
+
+Run isolated zero-network startup tests with:
+
+```bash
+python -m pytest tests/test_weather_processor_single_host.py -q
+```
+
+The source-native NOAA scientific decoders and their fixtures remain in
+`tests/test_weather_processor.py`. CI/in-memory tests cannot verify actual
+NOAA network access, the native science files, or the user's browser imagery.
+The current browser MRMS ImageServer preview remains available separately
+until a real native worker is running.
+
 ## Running the processor
 
 A Linux host (preferably x86_64, with 4+ cores, enough RAM and persistent
@@ -56,7 +119,7 @@ Run from the **repository root**:
 
     docker compose -f weather_processor/docker-compose.yml up --build
 
-It runs two containers sharing a persistent Docker volume:
+The original Compose workflow runs two containers sharing a persistent Docker volume:
 - noaa-worker: polls fixed public NOAA sources, downloads bounded raw files,
   decodes real observations, atomically publishes PNG+metadata and prunes data
   older than 12 hours.
