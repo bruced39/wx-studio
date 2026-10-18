@@ -69,3 +69,83 @@ test('all scripts pass JavaScript parse without window or DOM execution',()=>{
  for(const f of ['sources.js','palettes.js','cloud_palettes.js','nexrad_sites.js'])
   assert.doesNotThrow(()=>new Function(fs.readFileSync(path.join(root,f),'utf8')));
 });
+
+test('MRMS preview selects NOAA observation scans across the hour, not repeated catalog timestamps',async()=>{
+ const code=fs.readFileSync(path.join(root,'sources.js'),'utf8');
+ const NOW=Date.UTC(2026,9,18,18,0,0);
+ class FixedDate extends Date {static now(){return NOW;}}
+ const actual=[];
+ for(let i=0;i<=12;i++){
+  const scan=NOW-i*300000;
+  // NOAA ArcGIS may expose multiple distinct seconds within the SAME scan.
+  // v0.9.84 selected the last twelve catalog rows, making 1:44 repeat.
+  for(const offset of [11000,25000,40000])actual.push(scan+offset);
+ }
+ const catalog=actual.slice().sort((a,b)=>b-a);
+ const urls=[],window={};
+ const fetch=async url=>{
+  urls.push(String(url));
+  if(String(url).includes('?f=pjson'))return {ok:true,json:async()=>({
+   timeInfo:{timeExtent:[NOW-4*3600000,NOW+40000]}
+  })};
+  const count=+(new URL(String(url)).searchParams.get('resultRecordCount')||150);
+  return {ok:true,json:async()=>({
+   features:catalog.slice(0,count).map(t=>({attributes:{idp_validtime:t}}))
+  })};
+ };
+ new Function('window','globalThis','fetch','Date','AbortController',
+  'setTimeout','clearTimeout',code)(
+   window,window,fetch,FixedDate,AbortController,setTimeout,clearTimeout);
+ const source=window.WXWeatherSources.mrmsBrowserTest;
+ const frames=await source.list({hours:1});
+ assert.equal(frames.length,12,'twelve or fewer genuine five-minute observations');
+ assert.ok(frames.every((f,i)=>i===0||f.t>frames[i-1].t),
+  'scan time MUST increase chronologically during each pass');
+ assert.equal(new Set(frames.map(f=>Math.floor(f.t/300000))).size,frames.length,
+  'never show multiple frames for the same five-minute scan slot');
+ assert.ok(frames.at(-1).t-frames[0].t>=50*60000,
+  'hour selection must cover at least ~50 minutes when NOAA supplies it');
+ assert.ok(frames.every(f=>actual.includes(f.t)),
+  'only timestamps returned by NOAA are permissible; no fake observations');
+ assert.ok(urls.some(u=>u.includes('resultRecordCount=1000')),
+  'catalog request must look beyond the nearest 12/150 time records');
+ assert.ok(frames.every(f=>f.url.includes('time='+f.t)),
+  'displayed timestamp must equal the actual requested NOAA image time');
+});
+
+test('MRMS scan picker collapses minutes and never pads a short NOAA history with fake frames',()=>{
+ const code=fs.readFileSync(path.join(root,'sources.js'),'utf8');
+ const window={};new Function('window','globalThis',code)(window,window);
+ const select=window.WXWeatherSources.mrmsBrowserTest.selectScanTimes;
+ const end=Date.UTC(2026,9,18,18,0);
+ const raw=[];
+ for(let m=0;m<=15;m+=5)
+  for(const seconds of [3,18,47])raw.push(end-m*60000+seconds*1000);
+ const picked=select(raw,end-3600000,end+60000,12);
+ assert.equal(picked.length,4,'multiple raster records per scan must collapse');
+ assert.equal(new Set(picked.map(t=>Math.floor(t/60000))).size,4);
+ assert.equal(picked.at(-1)-picked[0],15*60000);
+ assert.ok(picked.every(t=>raw.includes(t)),'only real observation times selected');
+});
+
+test('weather playback timestamp warns when only a short portion of requested radar hour loaded',()=>{
+ const script=fs.readFileSync(path.join(__dirname,'../studio/dataloop.js'),'utf8');
+ const win={};new Function('window','globalThis',script)(win,win);
+ const D=win.WXData;
+ D.registerSource({id:'mrms',label:'NOAA MRMS Northeast preview',nativeData:false,
+  list:async()=>[]});
+ const END=Date.UTC(2026,9,18,18,0);
+ const scene={dataLoop:{on:true,source:'mrms',hours:1,speed:5,idx:0}};
+ const frames=[15,10,5,0].map(x=>({t:END-x*60000,img:{width:1,height:1}}));
+ D.state.set(scene,{frames,lastIdx:2,total:4,loaded:4,status:'ready'});
+ const l=D.barLabels(scene);
+ assert.equal(l.historyShort,true);
+ assert.equal(l.availableMinutes,15);
+ assert.match(l.stamp,/15m available/);
+ assert.equal(l.requestedMinutes,60);
+ const full=Array.from({length:12},(_,i)=>({t:END-(11-i)*5*60000,img:{}}));
+ D.state.set(scene,{frames:full,lastIdx:7,total:12,loaded:12,status:'ready'});
+ const ok=D.barLabels(scene);
+ assert.equal(ok.historyShort,false);
+ assert.doesNotMatch(ok.stamp,/available/);
+});
