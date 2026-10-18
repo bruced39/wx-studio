@@ -47,7 +47,7 @@ def configuration(*, port: int = 8080, interval: int = 120,
 
 def child_commands(cfg: dict) -> tuple[list[str], list[str]]:
     """Always bind only to loopback, not the Windows LAN or public internet."""
-    api = [sys.executable, "-m", "uvicorn", "weather_processor.service:APP",
+    api = [sys.executable, "-m", "uvicorn", "weather_processor.local_service:APP",
            "--host", "127.0.0.1", "--port", str(cfg["port"])]
     ingest = [sys.executable, "-m", "weather_processor.ingest", "--interval",
               str(cfg["interval"]), "--products", cfg["products"]]
