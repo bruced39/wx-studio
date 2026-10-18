@@ -47,6 +47,46 @@ multi-hour weather-data archives.** Frequent imagery would consume Supabase
 storage/bandwidth, and users haven't approved a higher cost. Use source-side
 public data plus a properly budgeted cache/processor for rendered frames.
 
+## First direct NOAA frame adapter — MRMS Northeast test (v0.9.78)
+
+`studio/weather/sources.js` now registers a **real but experimental**
+`WXData` source named **NOAA MRMS · Northeast (test)**. It is shown in the
+Weather data loop source menu after the existing script loads; no changes to
+Claude's `studio/dataloop.js`, `studio/engine.js`, `studio/index.html`, or
+the working Mapbox renderer are required.
+
+- Origin: NOAA/NWS `radar_base_reflectivity_time` ImageServer (public,
+  time-enabled **MRMS** composited radar). It supplies server-rendered
+  transparent radar images (PNG32), **not raw source reflectivity/dBZ**.
+  Palette recoloring is therefore unavailable on this browser test source.
+- Every frame timestamp is read from NOAA's actual image catalog using
+  `ImageServer/query`, and the live service's `timeInfo.timeExtent` is
+  checked first. Duplicate and out-of-window timestamps are removed; stale
+  imagery or a blocked/CORS response gives an explicit error rather than
+  inventing playback frames.
+- Test footprint is **Northeast** `[-82,35.5,-64.5,49]` in WGS84; each
+  transparent image is requested at **3072 × 2304** pixels, a regional high
+  detail visual integration test (not an all-CONUS or source-native 1-km
+  archive). Fixed high-quality geography reduces bandwidth and avoids
+  pretending an entire country's radar can be shown at regional resolution
+  in one image. Only **1-hour** selectable (up to 12 observed image timestamps).
+- Use a map scene, enable the weather data loop bar, select **NOAA MRMS ·
+  Northeast (test)**, choose 1 Hr, and view the Northeast region with the
+  loop opacity around 85%. New MRMS frames are obtained when that source is
+  initialized for the session; refresh the browser to fetch newer frames
+  during this first trial. Automatic rolling reload and adaptive tiling are
+  follow-up improvements.
+- QA: six mocked Node-compatible test cases in
+  `tests/weather_mrms_browser_source.test.js` pass. The native NOAA metadata
+  was verified through NOAA's public ArcGIS REST endpoint, **but CORS and
+  actual transparent PNG playback in the user's browser remain unverified**.
+  Do NOT describe this source as fully live/production until their test.
+- The existing `studio/weather/processor_bridge.js` is unchanged. If a
+  true processed/raw MRMS provider later registers the `mrms` id, it can
+  supersede this preview; NEXRAD Level II and GOES source families remain
+  decoder-dependent. For full native fidelity use raw NOAA files, server-side
+  processing/tiles and a time-aware regional tile cache.
+
 ## Real feeds: adapter contract
 
 In `studio/dataloop.js`, use `WXData.registerSource({ id, label, lengths,
@@ -89,5 +129,8 @@ preview imagery and imply it's native high-resolution data.
 - https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity/MapServer
 - https://gis.ncdc.noaa.gov/arcgis/rest/services/cdo/nexrad/MapServer/0
 
-All imagery/frame connections still require a real decoder, projection,
-cache/expiry logic, NOAA attribution and operational browser validation.
+All *native/derived* NOAA NetCDF, GRIB2 and Level II products still
+require real decoding, reprojection, cache/expiry logic, NOAA attribution
+and operational browser validation. The initial NWS MRMS browser preview
+uses NOAA's own time-enabled image rendering without a local decoder; it
+is not a substitute for the planned source-native data pipeline.
