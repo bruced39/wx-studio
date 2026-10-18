@@ -272,7 +272,21 @@
   D.barLabels = function (scene) {
     const dl = dlOf(scene), rt = rtOf(scene), fr = ready(rt), f = fr[clamp(rt.lastIdx, 0, Math.max(0, fr.length - 1))], si = srcInfo(dl.source);
     const site = dl.source === 'nexrad' ? (dl.site || si.defaultSite || 'KBOX') : '';
-    return { stamp: f ? D.fmtStamp(f.t) : '', len: lenLabel(dl.hours), src: (dl.source === 'nexrad' ? 'NEXRAD' : D.displayName(dl.source, dl)) + (site ? ' ' + site : ''), loadedFrac: rt.total ? rt.loaded / rt.total : 0, pos: fr.length > 1 ? clamp(rt.lastIdx, 0, fr.length - 1) / (fr.length - 1) : 0 };
+    // Distinguish REQUESTED loop length from ACTUAL successfully loaded NOAA
+    // observation history. A one-hour selection must not silently present
+    // only fourteen minutes as if a full hour of radar were available.
+    const preview=dl.source==='mrms' && D.sources.mrms?.nativeData===false;
+    const actualMin=fr.length>1?Math.max(0,Math.round((fr.at(-1).t-fr[0].t)/60000)):0;
+    const short=preview && rt.status==='ready' && fr.length>1
+      && actualMin < Math.max(0,(+dl.hours||1)*60-10);
+    const historyNote=short?' · '+actualMin+'m available':'';
+    return { stamp: f ? D.fmtStamp(f.t)+historyNote : '',
+      requestedMinutes:(+dl.hours||1)*60, availableMinutes:actualMin,
+      historyShort:short,
+      len: lenLabel(dl.hours),
+      src: (dl.source === 'nexrad' ? 'NEXRAD' : D.displayName(dl.source, dl)) + (site ? ' ' + site : ''),
+      loadedFrac: rt.total ? rt.loaded / rt.total : 0,
+      pos: fr.length > 1 ? clamp(rt.lastIdx, 0, fr.length - 1) / (fr.length - 1) : 0 };
   };
 
   /* ---------- in-video playback bar (canvas) ---------- */
