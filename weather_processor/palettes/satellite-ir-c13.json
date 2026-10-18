@@ -1,0 +1,61 @@
+{
+  "id": "satellite/ir-enhanced",
+  "name": "ABI C13 infrared BT starter",
+  "units": "°C",
+  "continuous": true,
+  "provenance": "WX Studio editable ABI brightness-temperature starter, not a physical cloud-top temperature retrieval.",
+  "stops": [
+    [
+      -95,
+      "#ffffff"
+    ],
+    [
+      -85,
+      "#d5b9ff"
+    ],
+    [
+      -75,
+      "#8653cc"
+    ],
+    [
+      -65,
+      "#ed494f"
+    ],
+    [
+      -55,
+      "#f89c3c"
+    ],
+    [
+      -45,
+      "#faec69"
+    ],
+    [
+      -35,
+      "#59c37c"
+    ],
+    [
+      -25,
+      "#44bfd5"
+    ],
+    [
+      -15,
+      "#5775d8"
+    ],
+    [
+      -5,
+      "#848e9d"
+    ],
+    [
+      5,
+      "#9aa0a6"
+    ],
+    [
+      20,
+      "#303842"
+    ],
+    [
+      40,
+      "#0b1020"
+    ]
+  ]
+}
