@@ -134,3 +134,7 @@ require real decoding, reprojection, cache/expiry logic, NOAA attribution
 and operational browser validation. The initial NWS MRMS browser preview
 uses NOAA's own time-enabled image rendering without a local decoder; it
 is not a substitute for the planned source-native data pipeline.
+
+## Native NetCDF4/GRIB2/Level II stage (v0.9.79)
+
+The separate **`weather_processor/`** package contains the first actual NOAA ABI Level 2 C02/C13 NetCDF, raw MRMS GRIB2.gz, and native NEXRAD Level II decoders, plus bounded read-only CORS frame manifests. See [processor deployment/limitations](../../weather_processor/README.md). This scientific stack is intentionally NOT installed in Streamlit. Source registration through `studio/weather/processor_bridge.js` is conditional on real decoded, current NOAA frames from a separately hosted `WX_WEATHER_PROCESSOR_URL`. It is **not yet deployed or operationally validated**, unlike the existing lower-level NWS rendered MRMS browser test. Existing cloud palettes and NEXRAD site dots stay intact. The HTML bundler `wxbuild.py` now inlines the weather/* modules into Streamlit iframe.
