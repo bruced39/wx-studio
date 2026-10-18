@@ -94,19 +94,33 @@ test('projector projection state is declared in strict mode before map startup',
 });
 test('Mapbox reset clears projector state even when optional P is unavailable',()=>{
   const decl=block('  let D = null, P = null,','\n  // NOAA/weather imagery');
+  // v0.9.90 added these live-preview variables in a later declaration.
+  // Simulate the REAL reset closure, not an incomplete copy that raises
+  // ReferenceError even though all four bindings exist in production.
+  const previewDecl=block(
+    '  let snapshotBusy=false,previewHold=null,previewRestorePending=false,previewRestoreKey=null;',
+    '\n  function holdEditorFrame(');
   const reset=block('  MB.reset = function () {','\n  MB.setToken =');
-  const simulate="'use strict';\n"+decl+
+  const simulate="'use strict';\n"+decl+"\n"+previewDecl+
     "\nconst MB={interacting:true,cache:{clear(){this.cleared=true}},last:'previous',"+
-    "status:'ready',err:'previous error',queue:Promise.resolve()};"+
+    "lastKey:'old frame',status:'ready',err:'previous error',queue:Promise.resolve()};"+
     "pProj='globe';pKey='camera';curProj='globe';"+
+    "snapshotBusy=true;previewHold='old editor frame';"+
+    "previewRestorePending=true;previewRestoreKey='old camera';"+
     "D={remove(){this.removed=true}};P=null;host={remove(){this.removed=true}};\n"+
-    reset+"\nMB.reset();return {pProj,pKey,curProj,D,P,host,initP,MB,renderGeneration};";
+    reset+"\nMB.reset();return {pProj,pKey,curProj,D,P,host,initP,MB,renderGeneration,"+
+    "snapshotBusy,previewHold,previewRestorePending,previewRestoreKey};";
   const result=new Function(simulate)();
   assert.equal(result.pProj,null);
   assert.equal(result.pKey,null);
   assert.equal(result.curProj,null);
   assert.equal(result.D,null);
   assert.equal(result.P,null);
+  assert.equal(result.snapshotBusy,false);
+  assert.equal(result.previewHold,null);
+  assert.equal(result.previewRestorePending,false);
+  assert.equal(result.previewRestoreKey,null);
+  assert.equal(result.MB.lastKey,null);
   assert.equal(result.MB.status,'idle');
   assert.equal(result.MB.err,'');
   assert.equal(result.renderGeneration,1);
