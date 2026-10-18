@@ -118,7 +118,14 @@
     const idx=D.curIdx(scene,t,opts&&opts.editing),frame=frames[idx];
     if(!frame){g.MB.setWeatherFrame(null);return false;}
     let url=frame.url;
-    if(!url&&frame.img?.toDataURL)url=frame.img.toDataURL('image/png');
+    // The demo loop supplies canvases. Encoding the same image into a
+    // base64 PNG on EVERY 30fps editor redraw can starve Mapbox startup.
+    // Each loaded frame is immutable for one provider response: encode once.
+    if(!url&&frame.img?.toDataURL){
+      if(!frame._wxUnderlayDataURL)
+        frame._wxUnderlayDataURL=frame.img.toDataURL('image/png');
+      url=frame._wxUnderlayDataURL;
+    }
     if(!url){g.MB.setWeatherFrame(null);return false;}
     g.MB.setWeatherFrame({url,bbox:frame.bbox,crs:frame.crs||'4326',
       opacity:dl.opacity==null?.85:dl.opacity,
