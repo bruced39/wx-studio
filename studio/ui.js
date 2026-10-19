@@ -27,7 +27,16 @@
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
   function ensureBG(sh) { if (g.WX_BGDEFAULT && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bgdefault')) { sh.assets = sh.assets || {}; sh.assets.bgdefault = g.WX_BGDEFAULT; } if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } }
   const libHas = (k, v) => { try { return bgList.some(b => b.asset === k && b.data === v); } catch (e) { return false; } };
-  function autosave() { try { localStorage.setItem(KEY, JSON.stringify(S.show, (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v)); } catch (e) { /* quota or blocked */ } }
+  /* v0.10.0: autosave reports its outcome. A failed write (storage full or blocked) used to be swallowed silently. */
+  function saveStatus(ok, why) {
+    const el = $('#saveState'); if (!el) return;
+    if (ok) { const d = new Date(); el.textContent = 'Saved ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); el.style.color = '#7f93ad'; el.style.cursor = ''; el.title = 'Autosaved in this browser. Use Save to keep a copy as a file.'; el.onclick = null; el.dataset.state = 'saved'; saveStatus.warned = false; }
+    else { el.textContent = '⚠ Not saved'; el.style.color = '#ff6b6b'; el.style.cursor = 'pointer'; el.title = 'Autosave failed: ' + why + ' Click to download a copy of your show now.'; el.onclick = () => $('#bSave').click(); el.dataset.state = 'failed'; if (!saveStatus.warned) { saveStatus.warned = true; toast('Autosave failed – ' + why + ' Use Save to keep your work.'); } }
+  }
+  function autosave() {
+    try { localStorage.setItem(KEY, JSON.stringify(S.show, (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v)); saveStatus(true); }
+    catch (e) { saveStatus(false, e && e.name === 'QuotaExceededError' ? 'this browser’s storage is full.' : 'this browser is blocking storage.'); }
+  }
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
   function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
   function builtInDefaultMapBg(){
@@ -1744,20 +1753,57 @@
       g.MB.init().then(() => toast('Mapbox ready')).catch(e => toast(e.message)).then(() => { commit(); refreshAll(); }); } } })]);
   }
   $('#b7').onclick = sevenDay; $('#bTpl').onclick = templatesDialog;
+  /* ---------- video export dialog (v0.10.0): X / Facebook / Custom presets, preflight checklist, file check ---------- */
+  const EXP_KEY = 'wx.export.v1', EXP_DEF = { preset: 'x', size: '1920x1080', mbps: '10' };
+  function expPrefs() { try { return Object.assign({}, EXP_DEF, JSON.parse(localStorage.getItem(EXP_KEY) || '{}')); } catch (e) { return Object.assign({}, EXP_DEF); } }
+  function expSave(p) { try { localStorage.setItem(EXP_KEY, JSON.stringify(p)); } catch (e) { /* ignore */ } }
+  function expBtnTitle() { const p = expPrefs(), st = g.Exporter.presetSettings(p.preset, { size: p.size, mbps: p.mbps }); const b = $('#bExport'); if (b) b.title = `Export a finished MP4 – last used: ${st.title}`; }
   async function exportDialog() {
-    const ac = new AbortController(), bar = h('i'), msg = h('div', { className: 'hint', text: '' }), res = h('div');
-    const size = h('select', {}, [['1920x1080', '1920×1080 (Full HD)'], ['1280x720', '1280×720 (smaller file)']].map(o => h('option', { value: o[0], text: o[1] }))), br = h('select', {}, [['10', 'Standard quality (10 Mbps)'], ['16', 'High quality (16 Mbps)'], ['6', 'Small file (6 Mbps)']].map(o => h('option', { value: o[0], text: o[1] })));
-    const tot = E.total(S.show), go = h('button', { className: 'pri', text: 'Start export' });
-    const info = h('div', { className: 'hint', text: `${tot.toFixed(1)} seconds · ${g.Exporter.supportsWebCodecs() ? 'H.264 MP4 export is available in this browser.' : 'This browser lacks WebCodecs; a real-time WebM will be made instead (use Chrome or Edge for MP4).'}` });
-    go.onclick = async () => {
-      go.disabled = true; const [w, hh] = size.value.split('x').map(Number); stopPlay(); msg.textContent = 'Rendering…'; res.innerHTML = '';
+    const X = g.Exporter, ac = new AbortController(), bar = h('i'), msg = h('div', { className: 'hint', text: '' }), res = h('div'), pf = h('div', { className: 'expcheck' }), sum = h('div', { className: 'hint' });
+    const prefs = expPrefs(); if (!['x', 'facebook', 'custom'].includes(prefs.preset)) prefs.preset = 'x';
+    const size = h('select', {}, X.CUSTOM_SIZES.map(o => h('option', { value: o[0], text: o[1], selected: o[0] === prefs.size }))), br = h('select', {}, X.CUSTOM_QUALITY.map(o => h('option', { value: o[0], text: o[1], selected: o[0] === String(prefs.mbps) })));
+    const customRows = h('div', {}, fld('Size', size), fld('Quality', br)), tot = E.total(S.show), go = h('button', { className: 'pri', text: 'Start export' }), test = h('button', { text: 'Test export (2 s)', title: 'Makes a 2-second test video to check this browser can encode and play MP4' });
+    let busy = false, token = 0, cur = null;
+    const btns = X.PRESETS.map(p => ({ id: p.id, label: p.label })).concat([{ id: 'custom', label: 'Custom' }]).map(o => h('button', { text: o.label, 'data-preset': o.id, style: 'flex:1;padding:10px 6px;font-weight:700', on: { click: () => { if (busy) return; prefs.preset = o.id; expSave(prefs); sync(); } } }));
+    const settings = () => X.presetSettings(prefs.preset, { size: prefs.size, mbps: prefs.mbps });
+    const ICON = { ok: ['✓', '#4cd08a'], info: ['ℹ', '#7fb2e6'], warn: ['⚠', '#ffc24a'], error: ['✖', '#ff6b6b'] };
+    async function refreshChecks() {
+      const my = ++token, st = settings(); pf.innerHTML = ''; pf.append(h('div', { className: 'hint', text: 'Checking…' })); go.disabled = true;
+      let items; try { items = X.preflightItems(await X.gatherFacts(S.show, st), st, tot); } catch (e) { items = [{ level: 'warn', text: 'Could not run the checks: ' + (e && e.message || e) }]; }
+      if (my !== token) return; cur = items; pf.innerHTML = '';
+      items.forEach(it => pf.append(h('div', { style: 'display:flex;gap:8px;margin:3px 0;font-size:13px;line-height:1.35' }, h('span', { text: ICON[it.level][0], style: 'color:' + ICON[it.level][1] + ';font-weight:700;width:14px;flex:none' }), h('span', { text: it.text }))));
+      go.disabled = busy || !X.canExport(items);
+      if (!X.canExport(items) && items.some(i => /H\.264|encode MP4/.test(i.text) && i.level === 'error')) offerWebM();
+    }
+    function offerWebM() { if (res.querySelector('.webmoffer')) return; res.append(h('div', { className: 'webmoffer hint', style: 'margin-top:8px' }, 'If you only need a quick draft to look at, this browser can record a WebM. It is not suitable for posting to X or Facebook. ', h('button', { text: 'Make a WebM draft', on: { click: () => run(true) } }))); }
+    function sync() {
+      btns.forEach(b => b.className = b.dataset.preset === prefs.preset ? 'pri' : '');
+      customRows.style.display = prefs.preset === 'custom' ? '' : 'none'; const st = settings();
+      sum.textContent = `${st.width}×${st.height} · ${st.fps} fps · ${(st.bitrate / 1e6)} Mbps · H.264 MP4 · ${X.fmtDuration(tot)} (${tot.toFixed(1)} s)`; expBtnTitle(); refreshChecks();
+    }
+    size.onchange = () => { prefs.size = size.value; expSave(prefs); sync(); }; br.onchange = () => { prefs.mbps = br.value; expSave(prefs); sync(); };
+    async function run(draft) {
+      busy = true; go.disabled = true; test.disabled = true; const st = settings(); stopPlay(); msg.textContent = 'Rendering…'; msg.style.color = ''; res.innerHTML = ''; bar.style.width = '0%';
       try {
-        const r = await g.Exporter.run(S.show, { width: w, height: hh, bitrate: +br.value * 1e6, fps: 30, signal: ac.signal, onProgress: p => { bar.style.width = (p * 100).toFixed(0) + '%'; msg.textContent = `Rendering… ${(p * 100).toFixed(0)}%`; } });
-        const url = URL.createObjectURL(r.blob), name = (S.show.name || 'weather').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + '.' + r.ext;
-        msg.textContent = `Done – ${(r.blob.size / 1048576).toFixed(1)} MB. ${r.note}`; saveFile(r.blob, name); msg.textContent += ' Saved to your Downloads folder.'; res.append(h('video', { src: url, controls: true, style: 'width:100%;max-width:640px;border-radius:8px;margin-top:8px' }), h('div', { className: 'mb' }, h('a', { href: url, download: name }, h('button', { text: 'Download again' }))));
-      } catch (e) { msg.textContent = 'Export failed: ' + (e && e.message || e); } go.disabled = false;
+        const r = await X.run(S.show, { width: st.width, height: st.height, bitrate: st.bitrate, fps: st.fps, signal: ac.signal, allowWebM: !!draft, onProgress: p => { bar.style.width = (p * 100).toFixed(0) + '%'; msg.textContent = `Rendering… ${(p * 100).toFixed(0)}%`; } });
+        const url = URL.createObjectURL(r.blob), name = (S.show.name || 'weather').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + (r.kind === 'mp4' ? '_' + st.id : '_draft') + '.' + r.ext;
+        msg.textContent = `Done – ${(r.blob.size / 1048576).toFixed(1)} MB. ${r.note}`; saveFile(r.blob, name); msg.textContent += ' Saved to your Downloads folder.';
+        const chk = h('div', { className: 'hint', text: r.kind === 'mp4' ? 'Checking the finished file…' : 'This is a draft recording – not checked.' }); res.append(chk, h('video', { src: url, controls: true, style: 'width:100%;max-width:640px;border-radius:8px;margin-top:8px' }), h('div', { className: 'mb' }, h('a', { href: url, download: name }, h('button', { text: 'Download again' }))));
+        if (r.kind === 'mp4') { const v = await X.verify(r.blob, { width: r.width, height: r.height, duration: r.seconds, fps: r.fps }); chk.textContent = v.text; chk.style.color = v.status === 'verified' ? '#4cd08a' : v.status === 'failed' ? '#ff6b6b' : '#ffc24a'; chk.dataset.status = v.status; }
+        else { chk.style.color = '#ffc24a'; }
+      } catch (e) {
+        if (e && e.code === 'NO_H264') { msg.textContent = e.message; msg.style.color = '#ff6b6b'; offerWebM(); } else if (e && e.message === 'cancelled') msg.textContent = 'Export cancelled.'; else { msg.textContent = 'Export failed: ' + (e && e.message || e); msg.style.color = '#ff6b6b'; }
+      }
+      busy = false; test.disabled = false; go.disabled = cur ? !X.canExport(cur) : false;
+    }
+    go.onclick = () => run(false);
+    test.onclick = async () => {
+      busy = true; go.disabled = true; test.disabled = true; msg.textContent = 'Running a 2-second test export…'; msg.style.color = ''; res.innerHTML = '';
+      const r = await X.selfTest(p => { bar.style.width = (p * 100).toFixed(0) + '%'; }); msg.textContent = r.text; msg.style.color = r.ok ? '#4cd08a' : '#ff6b6b'; if (r.code === 'NO_H264') offerWebM();
+      busy = false; test.disabled = false; go.disabled = cur ? !X.canExport(cur) : false;
     };
-    modal('Export video', h('div', {}, fld('Size', size), fld('Quality', br), info, h('div', { className: 'prog' }, bar), msg, res), [h('button', { text: 'Close', on: { click: () => { ac.abort(); closeModal(); } } }), go]);
+    modal('Export video', h('div', {}, h('div', { style: 'display:flex;gap:6px;margin-bottom:8px' }, btns), customRows, sum, pf, h('div', { className: 'prog' }, bar), msg, res), [h('button', { text: 'Close', on: { click: () => { ac.abort(); token++; closeModal(); } } }), test, go]);
+    sync();
   }
   /* ---------- still image export (PNG/JPG) for X / Facebook ---------- */
   function saveFile(blob, name) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000); return url; }
@@ -1788,7 +1834,7 @@
   }
   $('#bImg').onclick = imageDialog;
   $('#bAddMap').onclick = () => { const cs = cur(), other = S.show.scenes.find(x => isMap(x.bg)), fresh = isMap(cs.bg) ? null : (other ? null : defaultMapBg()), srcBg = isMap(cs.bg) ? cs.bg : (other ? other.bg : fresh); const sc = E.newScene({ name: 'Map ' + (S.show.scenes.length + 1), bg: JSON.parse(JSON.stringify(srcBg)), title: { show: false, text: '', sub: '' } }); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); toast(isMap(cs.bg) ? 'New scene with the same map – draw on it' : (other ? 'New map scene (copied from your other map scene) – draw on it' : 'New map scene with your default map – draw on it')); };
-  $('#bExport').onclick = exportDialog;
+  $('#bExport').onclick = exportDialog; expBtnTitle();
 
   /* ---------- top bar ---------- */
   $('#showName').oninput = e => { S.show.name = e.target.value; }; $('#showName').onchange = commit;
