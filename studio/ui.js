@@ -30,11 +30,13 @@
   /* v0.10.0: autosave reports its outcome. A failed write (storage full or blocked) used to be swallowed silently. */
   function saveStatus(ok, why) {
     const el = $('#saveState'); if (!el) return;
-    if (ok) { const d = new Date(); el.textContent = 'Saved ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); el.style.color = '#7f93ad'; el.style.cursor = ''; el.title = 'Autosaved in this browser. Use Save to keep a copy as a file.'; el.onclick = null; el.dataset.state = 'saved'; saveStatus.warned = false; }
-    else { el.textContent = '⚠ Not saved'; el.style.color = '#ff6b6b'; el.style.cursor = 'pointer'; el.title = 'Autosave failed: ' + why + ' Click to download a copy of your show now.'; el.onclick = () => $('#bSave').click(); el.dataset.state = 'failed'; if (!saveStatus.warned) { saveStatus.warned = true; toast('Autosave failed – ' + why + ' Use Save to keep your work.'); } }
+    if (ok) { const d = new Date(); el.textContent = 'Saved ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); el.style.color = '#7f93ad'; el.style.cursor = 'pointer'; el.style.textDecoration = 'underline dotted'; el.title = 'Autosaved in this browser. Click to see recent autosaves and restore an earlier copy. Use Save to keep a file.'; el.onclick = recentDialog; el.dataset.state = 'saved'; saveStatus.warned = false; }
+    else { el.textContent = '⚠ Not saved'; el.style.color = '#ff6b6b'; el.style.cursor = 'pointer'; el.style.textDecoration = ''; el.title = 'Autosave failed: ' + why + ' Click to download a copy of your show now.'; el.onclick = () => $('#bSave').click(); el.dataset.state = 'failed'; if (!saveStatus.warned) { saveStatus.warned = true; toast('Autosave failed – ' + why + ' Use Save to keep your work.'); } }
   }
+  /* Built-in and library images are re-attached on load, so autosave and recent-autosave copies leave them out. */
+  const slimReplacer = (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v;
   function autosave() {
-    try { localStorage.setItem(KEY, JSON.stringify(S.show, (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v)); saveStatus(true); }
+    try { localStorage.setItem(KEY, JSON.stringify(S.show, slimReplacer)); saveStatus(true); recentSoon(); }
     catch (e) { saveStatus(false, e && e.name === 'QuotaExceededError' ? 'this browser’s storage is full.' : 'this browser is blocking storage.'); }
   }
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
@@ -1153,7 +1155,7 @@
     if (v.ok) go(); else if (v.gif) { toast('Reading GIF frames…'); const iv = setInterval(() => { if (v.ok) { clearInterval(iv); go(); } else if (v.err) { clearInterval(iv); toast('This GIF could not be read: ' + v.err); } }, 150); } else { toast('Loading video…'); v.el.addEventListener('loadedmetadata', () => setTimeout(go, 50), { once: true }); }
   }
   function videosPanel(p) {
-    p.append(h('div', { className: 'hint', text: 'Upload an MP4 or an animated GIF (for example a satellite/radar loop from AguaceroWX) and use it as a scene background. GIFs keep looping for as long as the scene lasts. Videos are stored in this browser only – they are NOT inside the show file, so on another computer add them again. Sound is not included.' }));
+    p.append(h('div', { className: 'hint', text: 'Upload an MP4 or an animated GIF (for example a satellite/radar loop from AguaceroWX) and use it as a scene background. GIFs keep looping for as long as the scene lasts. Videos are kept in this browser. When you Save, a show that uses videos or GIFs is packaged into one .wxshow file that carries them, so it opens on another computer. Sound is not included.' }));
     const fi = h('input', { type: 'file', accept: 'video/*,image/gif,.mp4,.m4v,.mov,.webm,.gif', multiple: true, style: 'display:none', onchange: e => { addVideoFiles([...e.target.files]); e.target.value = ''; } });
     const dz = h('div', { id: 'drop', text: 'Upload videos or animated GIFs: click to browse or drop files here' }); dz.onclick = () => fi.click();
     ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('hov'); })); dz.addEventListener('dragleave', () => dz.classList.remove('hov'));
@@ -1838,10 +1840,105 @@
 
   /* ---------- top bar ---------- */
   $('#showName').oninput = e => { S.show.name = e.target.value; }; $('#showName').onchange = commit;
-  $('#bNew').onclick = () => { if (confirm('Start a new show? Unsaved changes will be lost.')) { loadShow(newShowWithDefaultMap()); } };
-  $('#bSave').onclick = () => { const b = new Blob([JSON.stringify(S.show)], { type: 'application/json' }), a = h('a', { href: URL.createObjectURL(b), download: (S.show.name || 'show').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + '.wxshow.json' }); document.body.append(a); a.click(); a.remove(); toast('Show saved to your downloads'); };
+  /* ---------- v0.10.1: portable show file (Save / Open) and recent autosaves ---------- */
+  const WF = g.WXShowFile, appVer = () => (($('#ver') || {}).textContent || '').replace(/^v/, '').split(' ')[0];
+  const fmtMB = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB';
+  const showFileName = () => (S.show.name || 'show').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'show';
+  function downloadBlob(blob, name) { const u = URL.createObjectURL(blob), a = h('a', { href: u, download: name }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60000); }
+  function notice(title, lines) { modal(title, h('div', { style: 'display:grid;gap:8px;max-width:520px;line-height:1.4' }, lines.map(t => h('div', { text: t }))), [h('button', { className: 'pri', text: 'OK', on: { click: closeModal } })]); }
+  let fileBusy = false;
+  async function saveShowFile() {
+    if (fileBusy) return; if (!WF) { toast('Save is unavailable (showfile.js did not load)'); return; }
+    const inv = WF.inventory(S.show, E.videos), btn = $('#bSave');
+    if (inv.missing.length) {
+      const names = inv.missing.slice(0, 4).map(m => m.name + ' (' + m.scenes.join(', ') + ')').join('; ');
+      if (!confirm(inv.missing.length + ' video/GIF file(s) used by this show are not in this browser, so they cannot be put in the saved file: ' + names + '.\n\nThose scenes will show “not found” when the file is opened. Save anyway?')) return;
+    }
+    fileBusy = true; btn.disabled = true;
+    try {
+      if (!inv.present.length) { downloadBlob(new Blob([WF.legacyJson(S.show, { appVersion: appVer() })], { type: 'application/json' }), showFileName() + '.wxshow.json'); toast('Show saved to your downloads'); }
+      else {
+        toast('Packing ' + inv.present.length + ' video/GIF file(s) into the show…');
+        const r = await WF.pack(S.show, { videos: E.videos, appVersion: appVer() });
+        downloadBlob(r.blob, showFileName() + '.wxshow');
+        toast('Saved ' + showFileName() + '.wxshow (' + fmtMB(r.blob.size) + ', includes ' + inv.present.length + ' video/GIF file' + (inv.present.length > 1 ? 's' : '') + ')');
+      }
+    } catch (e) { notice('Could not save the show', [String(e && e.message || e), 'Your work is still open and autosaved in this browser.']); }
+    finally { fileBusy = false; btn.disabled = false; }
+  }
+  /* Put media from an opened file into this browser's video library (never overwrites a different file with the same id). */
+  async function installMedia(media) {
+    const remap = {}; let unsaved = 0;
+    for (const m of media) {
+      const have = vidList.find(x => x.id === m.id) || (E.videos[m.id] && E.videos[m.id].blob ? { id: m.id, blob: E.videos[m.id].blob } : null);
+      if (have && have.blob.size === m.blob.size) continue;
+      let id = m.id; if (have) { id = 'vid_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); remap[m.id] = id; }
+      const rec = { id, name: m.name, blob: m.blob, t: Date.now(), kind: m.kind === 'gif' ? 'gif' : 'video' };
+      (rec.kind === 'gif' ? E.registerGif : E.registerVideo)(id, m.blob, m.name); vidList.unshift(rec);
+      try { await vidTx('readwrite', s => s.put(rec)); } catch (e) { unsaved++; }
+    }
+    return { remap, unsaved };
+  }
+  function remapMedia(show, remap) { const f = o => { if (o && remap[o.vid]) o.vid = remap[o.vid]; }; show.scenes.forEach(sc => { f(sc.bg); (sc.objects || []).forEach(f); }); }
+  async function openShowFile(f) {
+    if (!WF) { toast('Open is unavailable (showfile.js did not load)'); return; }
+    let r; toast('Opening ' + f.name + '…');
+    try { r = await WF.unpack(f, { onProgress: (p, n) => toast('Checking ' + n + '…') }); } catch (err) { notice('Could not open ' + f.name, [String(err && err.message || err)]); return; }
+    await recentSnap('safety', 'Before opening ' + f.name);
+    const inst = await installMedia(r.media); if (Object.keys(inst.remap).length) remapMedia(r.show, inst.remap);
+    try { loadShow(r.show); } catch (err) { notice('Could not open ' + f.name, ['That file is not a WX Studio show.']); return; }
+    const lines = r.warnings.slice();
+    if (r.damaged.length) lines.push('These files inside the show were damaged and were skipped: ' + r.damaged.map(d => d.name + ' (' + d.why + ')').join(', ') + '.');
+    const stillMissing = WF.inventory(r.show, E.videos).missing;
+    if (stillMissing.length) lines.push(stillMissing.length + ' video/GIF file(s) used by this show are not available here' + (r.kind === 'json' ? ' (this older-style file does not contain videos or GIFs)' : '') + ': ' + stillMissing.slice(0, 5).map(m => m.name + ' – ' + m.scenes.join(', ')).join('; ') + '. Add them in the Videos tab and re-select them for those scenes.');
+    if (inst.unsaved) lines.push(inst.unsaved + ' video/GIF file(s) could not be stored in this browser and will work only until you reload. Save the show again to keep them.');
+    if (lines.length) notice('Opened ' + f.name, ['The show is open, with notes:'].concat(lines)); else toast('Opened ' + f.name + (r.media.length ? ' (' + r.media.length + ' video/GIF file' + (r.media.length > 1 ? 's' : '') + ' restored)' : ''));
+  }
+  /* Recent autosaves: copies of the working show kept in this browser's IndexedDB (separate from the single autosave slot).
+     'auto' = at most one per 5 minutes of editing and one when you leave the tab; 'safety' = taken before Open, New or Restore replace your work. */
+  const REC_MAX = { auto: 12, safety: 8 };
+  const recDB = () => new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-recent', 1); r.onupgradeneeded = () => r.result.createObjectStore('snaps', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } });
+  const recTx = async (mode, fn) => { const d = await recDB(); return new Promise((res, rej) => { const t = d.transaction('snaps', mode), s = t.objectStore('snaps'); let out; try { out = fn(s); } catch (e) { rej(e); return; } t.oncomplete = () => { d.close(); res(out && out.result); }; t.onerror = () => { d.close(); rej(t.error); }; t.onabort = () => { d.close(); rej(t.error); }; }); };
+  const recMeta = async () => { const d = await recDB(); return new Promise((res, rej) => { const out = [], c = d.transaction('snaps', 'readonly').objectStore('snaps').openCursor(); c.onsuccess = () => { const cur2 = c.result; if (!cur2) { d.close(); res(out.sort((a, b) => b.t - a.t)); return; } const v = cur2.value; out.push({ id: v.id, t: v.t, kind: v.kind, label: v.label, name: v.name, scenes: v.scenes, size: v.size, sig: v.sig }); cur2.continue(); }; c.onerror = () => { d.close(); rej(c.error); }; }); };
+  const sigOf = str => { let x = 2166136261; for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619); } return str.length + ':' + (x >>> 0).toString(36); };
+  const recLast = { auto: '', safety: '' }; let recT = 0;
+  async function recentSnap(kind, label) {
+    try {
+      const json = JSON.stringify(S.show, slimReplacer), sig = sigOf(json);   // captured now, before any later change
+      if (recLast[kind] === sig) return; recLast[kind] = sig;
+      const rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: Date.now(), kind, label, name: S.show.name || 'Untitled show', scenes: S.show.scenes.length, size: json.length, sig, json };
+      await recTx('readwrite', s => s.put(rec));
+      const mine = (await recMeta()).filter(x => x.kind === kind); const drop = mine.slice(REC_MAX[kind] || 10);
+      if (drop.length) await recTx('readwrite', s => { drop.forEach(x => s.delete(x.id)); });
+    } catch (e) { /* recent copies are a convenience; the normal autosave still runs */ }
+  }
+  function recentSoon() { if (recT) return; recT = setTimeout(() => { recT = 0; recentSnap('auto', 'Autosave'); }, 5 * 60 * 1000); }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') recentSnap('auto', 'When you left the page'); });
+  g.addEventListener('pagehide', () => { recentSnap('auto', 'When you left the page'); });
+  recMeta().then(a => { ['auto', 'safety'].forEach(k => { const m = a.find(x => x.kind === k); if (m) recLast[k] = m.sig; }); }).catch(() => { });
+  async function restoreRecent(id) {
+    try {
+      const rec = await recTx('readonly', s => s.get(id)); if (!rec) { toast('That copy is no longer available'); return; }
+      await recentSnap('safety', 'Before restoring “' + rec.name + '”');
+      loadShow(JSON.parse(rec.json)); closeModal();
+      const missing = WF ? WF.inventory(S.show, E.videos).missing : []; toast('Restored “' + rec.name + '” from ' + new Date(rec.t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + (missing.length ? ' – ' + missing.length + ' video/GIF file(s) not in this browser' : ''));
+    } catch (e) { toast('Could not restore that copy'); }
+  }
+  async function recentDialog() {
+    let list = []; try { list = await recMeta(); } catch (e) { /* IndexedDB unavailable */ }
+    const body = h('div', { style: 'display:grid;gap:8px;min-width:min(520px,80vw);max-height:60vh;overflow:auto' });
+    body.append(h('div', { className: 'hint', text: 'Copies of your work kept in this browser only. “Before…” copies are taken automatically just before Open, New or Restore replace your show. Use Save to keep a file you can move to another computer.' }));
+    if (!list.length) body.append(h('div', { className: 'hint', text: 'Nothing here yet. A copy is made after about five minutes of editing, when you leave the page, and before a show is replaced.' }));
+    list.forEach(m => body.append(h('div', { style: 'display:flex;gap:8px;align-items:center;padding:8px;border:1px solid #42516a;border-radius:6px' },
+      h('div', { style: 'flex:1;min-width:0' }, h('div', { text: m.label + (m.kind === 'safety' ? ' · safety copy' : ''), style: 'font-weight:600;overflow-wrap:anywhere' }), h('div', { className: 'hint', text: new Date(m.t).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' · ' + m.name + ' · ' + m.scenes + ' scene' + (m.scenes === 1 ? '' : 's') + ' · ' + fmtMB(m.size) })),
+      h('button', { className: 'sm pri', text: 'Restore', on: { click: () => { if (confirm('Replace the show that is open with this copy? Your current show is kept as a safety copy first.')) restoreRecent(m.id); } } }),
+      h('button', { className: 'sm dng', text: 'Delete', on: { click: async () => { try { await recTx('readwrite', s => s.delete(m.id)); } catch (e) { /* ignore */ } recentDialog(); } } }))));
+    modal('Recent autosaves', body, [h('button', { text: 'Close', on: { click: closeModal } })]);
+  }
+  $('#bNew').onclick = () => { if (confirm('Start a new show? Unsaved changes will be lost.')) { recentSnap('safety', 'Before starting a new show'); loadShow(newShowWithDefaultMap()); } };
+  $('#bSave').onclick = saveShowFile;
   $('#bOpen').onclick = () => $('#fileOpen').click();
-  $('#fileOpen').onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { loadShow(JSON.parse(r.result)); toast('Opened ' + f.name); } catch (err) { toast('That file is not a WX Studio show'); } }; r.readAsText(f); e.target.value = ''; };
+  $('#fileOpen').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openShowFile(f); };
   $('#bUndo').onclick = undo; $('#bRedo').onclick = redo;
   $('#bAddScene').onclick = () => newScene();
 

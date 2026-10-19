@@ -144,6 +144,18 @@
     return rt.promise;
   };
   const ready = rt => rt.frames.filter(f => f.img);
+  /* Export safety check (used by the export preflight). Says whether an ENABLED weather layer has frames that are actually decoded and
+   * drawable – a connected source is not the same thing. state: 'off' | 'ready' | 'partial' | 'loading' | 'unavailable'.
+   * It never claims the data is current: frame times are not checked here (freshnessChecked is always false). */
+  D.exportReadiness = function (scene) {
+    const dl = dlOf(scene); if (!dl) return { enabled: false, state: 'off', usable: 0, total: 0, failed: 0, msg: '', demo: false, freshnessChecked: false };
+    const rt = D.state.get(scene) || { frames: [], total: 0, failed: 0, status: 'idle', msg: '' }, usable = ready(rt).length, total = rt.total || rt.frames.length, src = D.sources[dl.source];
+    let state;
+    if (rt.status === 'ready') state = (usable < total || rt.failed) ? 'partial' : 'ready';
+    else if (rt.status === 'loading' || rt.status === 'idle') state = usable ? 'partial' : 'loading';
+    else state = usable ? 'partial' : 'unavailable';     // nosrc, empty, error
+    return { enabled: true, state, usable, total, failed: rt.failed || 0, msg: rt.msg || '', demo: !!(src && src.demo), freshnessChecked: false };
+  };
   D.curIdx = function (scene, t, editing) {
     const dl = dlOf(scene), rt = rtOf(scene), n = ready(rt).length; if (!dl || !n) return 0;
     const speed = clamp(dl.speed || 10, 1, 60), hold = clamp(+dl.dwell || 0, 0, 5) * speed;   // hold = frames' worth of pause on the newest frame

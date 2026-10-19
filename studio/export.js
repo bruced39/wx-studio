@@ -12,8 +12,8 @@
 
   /* ---------- platform presets (one table: check against the platforms' current pages before changing) ---------- */
   X.PRESETS = [
-    { id: 'x', label: 'X', title: 'X (Twitter)', width: 1920, height: 1080, fps: 30, bitrate: 16e6, maxSeconds: 140, maxBytes: 512 * 1048576, limitShort: '2:20', limitText: 'standard accounts (longer needs a paid X account)', sizeText: '512 MB' },
-    { id: 'facebook', label: 'Facebook', title: 'Facebook', width: 1920, height: 1080, fps: 30, bitrate: 16e6, maxSeconds: null, maxBytes: 10 * 1024 * 1048576, limitShort: '', limitText: '', sizeText: '10 GB' }
+    { id: 'x', label: 'X', title: 'X (Twitter)', width: 1920, height: 1080, fps: 30, bitrate: 16e6, maxSeconds: 140, maxBytes: 512 * 1048576, limitShort: '2:20', limitText: 'standard accounts (longer needs a paid X account)', sizeText: '512 MB', sizeNote: '' },
+    { id: 'facebook', label: 'Facebook', title: 'Facebook', width: 1920, height: 1080, fps: 30, bitrate: 16e6, maxSeconds: null, maxBytes: 10 * 1024 * 1048576, limitShort: '', limitText: '', sizeText: '10 GB', sizeNote: ' – not confirmed against Meta’s current page' }
   ];
   X.CUSTOM_SIZES = [['1920x1080', '1920×1080 (Full HD)'], ['1280x720', '1280×720 (smaller file)']];
   X.CUSTOM_QUALITY = [['10', 'Standard quality (10 Mbps)'], ['16', 'High quality (16 Mbps)'], ['6', 'Small file (6 Mbps)']];
@@ -21,9 +21,9 @@
   /* settings for a preset id ('x' | 'facebook' | 'custom'); custom = { size:'1920x1080', mbps:10 } */
   X.presetSettings = function (id, custom) {
     const p = X.PRESETS.find(q => q.id === id);
-    if (p) return { id: p.id, label: p.label, title: p.title, width: p.width, height: p.height, fps: p.fps, bitrate: p.bitrate, maxSeconds: p.maxSeconds, maxBytes: p.maxBytes, limitShort: p.limitShort, limitText: p.limitText, sizeText: p.sizeText };
+    if (p) return { id: p.id, label: p.label, title: p.title, width: p.width, height: p.height, fps: p.fps, bitrate: p.bitrate, maxSeconds: p.maxSeconds, maxBytes: p.maxBytes, limitShort: p.limitShort, limitText: p.limitText, sizeText: p.sizeText, sizeNote: p.sizeNote || '' };
     const c = custom || {}, sz = String(c.size || '1920x1080').split('x').map(Number), mbps = +c.mbps || 10;
-    return { id: 'custom', label: 'Custom', title: 'Custom', width: sz[0] || 1920, height: sz[1] || 1080, fps: 30, bitrate: mbps * 1e6, maxSeconds: null, maxBytes: null, limitShort: '', limitText: '', sizeText: '' };
+    return { id: 'custom', label: 'Custom', title: 'Custom', width: sz[0] || 1920, height: sz[1] || 1080, fps: 30, bitrate: mbps * 1e6, maxSeconds: null, maxBytes: null, limitShort: '', limitText: '', sizeText: '', sizeNote: '' };
   };
   X.estimateBytes = (seconds, bitrate, audioBps) => Math.round(seconds * ((bitrate || 0) + (audioBps || 0)) / 8 * 1.02);
   X.fmtDuration = s => { const t = Math.round(s), m = Math.floor(t / 60); return m + ':' + String(t % 60).padStart(2, '0'); };
@@ -41,12 +41,19 @@
       if (!f.mapboxToken) out.push({ level: 'error', text: `Scene${f.mapboxScenes.length > 1 ? 's' : ''} ${nums(f.mapboxScenes)} use${f.mapboxScenes.length > 1 ? '' : 's'} a Mapbox map but no Mapbox token is set (Scene → Mapbox settings).` });
       else out.push({ level: 'info', text: `Map scenes (${nums(f.mapboxScenes)}) render slowly. Keep this tab visible while exporting.` });
     }
+    (f.weather || []).forEach(w => {
+      const t = `Scene ${w.scene}: weather layer`;
+      if (w.state === 'ready') out.push({ level: 'info', text: `${t} has ${w.usable} frame${w.usable === 1 ? '' : 's'} loaded${w.demo ? ' (demo data)' : ''}. Frame times are not checked for freshness.` });
+      else if (w.state === 'partial') out.push({ level: 'warn', text: `${t} loaded only ${w.usable} of ${w.total} frames${w.msg ? ' (' + w.msg + ')' : ''}. The export will loop what is available.` });
+      else if (w.state === 'loading') out.push({ level: 'warn', text: `${t} is still loading frames. Wait for it to finish, or the export may not include it.` });
+      else out.push({ level: 'warn', text: `${t} has no usable frames${w.msg ? ' (' + w.msg + ')' : ''}. The export would show the map without it.` });
+    });
     (f.missing || []).forEach(m => out.push({ level: m.kind === 'video' ? 'error' : 'warn', text: `Scene ${m.scene}: ${m.kind === 'video' ? 'video or GIF' : 'image'} “${m.name}” is not available in this browser${m.kind === 'video' ? ' – the export would show a placeholder. Re-import it or remove it.' : ' and will be blank.'}` }));
-    if (st.maxSeconds && total > st.maxSeconds) out.push({ level: 'warn', text: `This show is ${X.fmtDuration(total)}. ${st.label} allows ${st.limitShort} on ${st.limitText}. You can still export it.` });
-    else if (st.maxSeconds) out.push({ level: 'ok', text: `Length ${X.fmtDuration(total)} is within the ${st.limitShort} limit for ${st.limitText.replace(/ \(.*\)/, '')} on ${st.label}.` });
+    if (st.maxSeconds && total > st.maxSeconds) out.push({ level: 'warn', text: `This show is ${X.fmtDuration(total)}. ${st.label}’s published limit is ${st.limitShort} on ${st.limitText}. Platform limits change, so treat this as a guide. You can still export it.` });
+    else if (st.maxSeconds) out.push({ level: 'ok', text: `Length ${X.fmtDuration(total)} is within the ${st.limitShort} limit ${st.label} publishes for ${st.limitText.replace(/ \(.*\)/, '')} (a guide; limits can change).` });
     const est = X.estimateBytes(total, st.bitrate, X.AUDIO_BPS);
-    if (st.maxBytes && est > st.maxBytes) out.push({ level: 'warn', text: `Estimated file size ${X.fmtBytes(est)} is over ${st.label}'s ${st.sizeText} limit. Choose Custom → Small file, or shorten the show.` });
-    else out.push({ level: 'ok', text: `Estimated file size about ${X.fmtBytes(est)}${st.maxBytes ? ` (limit ${st.sizeText})` : ''}.` });
+    if (st.maxBytes && est > st.maxBytes) out.push({ level: 'warn', text: `Estimated file size ${X.fmtBytes(est)} is over ${st.label}’s published ${st.sizeText} guide${st.sizeNote}. Choose Custom → Small file, or shorten the show.` });
+    else out.push({ level: 'ok', text: `Estimated file size about ${X.fmtBytes(est)}${st.maxBytes ? ` (published guide ${st.sizeText}${st.sizeNote})` : ''}.` });
     return out;
   };
   X.canExport = items => !items.some(i => i.level === 'error');
@@ -63,6 +70,16 @@
       if (b.type === 'image' && b.asset && !assets[b.asset]) f.missing.push({ scene: n, kind: 'image', name: b.asset });
       (sc.objects || []).forEach(o => { if (o.type === 'image' && o.asset && !assets[o.asset]) f.missing.push({ scene: n, kind: 'image', name: o.asset }); });
     });
+    /* Weather loop layers: ask WXData whether each enabled layer has frames that are actually decoded (not just a connected source). */
+    f.weather = [];
+    const D = g.WXData;
+    if (D && D.exportReadiness) {
+      for (let i = 0; i < show.scenes.length; i++) {
+        const sc = show.scenes[i]; if (!(sc.dataLoop && sc.dataLoop.on)) continue;
+        try { if (D.ensure) await Promise.race([D.ensure(sc), new Promise(r => setTimeout(r, 6000))]); } catch (e) { /* readiness reports the failure */ }
+        f.weather.push(Object.assign({ scene: i + 1 }, D.exportReadiness(sc)));
+      }
+    }
     return f;
   };
 

@@ -75,7 +75,7 @@ const css=`
  pointer-events:auto;box-shadow:0 0 0 2px #122b50,0 0 5px #000;}
 #wxradar-picker .nxsite.active{background:#ffb53f;border-color:#000;
  box-shadow:0 0 0 3px #fff;z-index:2;}
-#wxradar-site-status{position:absolute;left:1.3%;top:6.4%;z-index:12;
+#wxradar-site-status{position:absolute;left:1.3%;top:calc(2% + 34px);z-index:12;
  max-width:55%;font:600 11px Arial;background:#111d31dd;padding:3px 6px;
  border-radius:4px;color:#dcecff;pointer-events:none;}
 `;
