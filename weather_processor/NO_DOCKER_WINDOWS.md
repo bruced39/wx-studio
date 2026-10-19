@@ -51,9 +51,14 @@ real files and verifying their NOAA timestamps. We never mark a demo as live.
    `127.0.0.1`. A browser security policy might still block loopback from
    an HTTPS-embedded Streamlit app: if that occurs, don't expose the API on
    your public LAN or open ports; report the exact browser error.
-5. In **Weather Data → Cloud & data status**, wait for native sources to
-   appear with real observation times. Select the registered GOES, MRMS or
-   NEXRAD product in the playback dock.
+5. In **Weather Data → Data Source Status**, press **Run diagnostics**. Each product shows
+   its own state: *Connected · not verified* (listed by the processor), then
+   **LIVE · verified** only after you press **Verify frame** (or the active weather
+   loop decodes it) and the newest observation is within its freshness window
+   (provisional: MRMS 15 min, NEXRAD 20, GOES CONUS 20, Full Disk 30, Mesoscale 10).
+   Otherwise it says *Waiting*, *Stale* or *Unavailable*. **Copy report** gives you
+   text to share if something does not connect. Select the registered GOES, MRMS or
+   NEXRAD product in the playback dock; its badge says LIVE only when verified.
 
 The native decoder and existing Mapbox raster underlay support have already
 been implemented. If NOAA source downloads, Windows scientific libraries,

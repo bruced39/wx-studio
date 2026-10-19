@@ -28,7 +28,7 @@ The local processing is genuinely source-native but the current renderer still h
 2. Open the usual WX Studio Streamlit web app on that same computer.
 3. Expand Streamlit's sidebar and check: Use free local NOAA processor on this computer.
 4. If your browser prompts to allow access to the local/loopback network, allow it for the studio site.
-5. In Weather Data / Cloud & data status, look for freshly decoded NOAA products. They are not shown as live until the actual NOAA ingest worker downloads, decodes and publishes observations.
+5. Open **Weather Data → Data Source Status** and press **Run diagnostics**. Each product shows its own state: *Connected · not verified* (listed by the processor), then **LIVE · verified** only after you press **Verify frame** (or the active weather loop decodes it) and the newest observation is within its freshness window; otherwise *Waiting*, *Stale* or *Unavailable*. Nothing is shown as live until the NOAA ingest worker has downloaded, decoded and published real observations. The same section has a short "Connect local NOAA processor" help and a **Copy report** button.
 
 The Streamlit SERVER DOES NOT contact your computer. JavaScript inside your browser requests http://127.0.0.1:8080/catalog and image frames directly, using the already existing Mapbox under-label weather layer. The browser processor connection is optional; demos still work without it.
 

@@ -42,7 +42,7 @@ def open_groups(pg): pg.evaluate("(()=>{const g=WXWeatherWorkspace.ui.grp;g['dia
 def row(pg, pid): return pg.evaluate("(p)=>{const r=document.querySelector('#wxws [data-pid=\"'+p+'\"]');return r?{state:r.dataset.state,text:r.textContent,pill:r.querySelector('.ws-pill').textContent,btns:[...r.querySelectorAll('button')].map(b=>b.textContent)}:null}", pid)
 def card(pg): return pg.evaluate("(()=>{const c=document.querySelector('#wxws [data-diag=processor]');return c?{state:c.dataset.state,text:c.textContent,pill:c.querySelector('.ws-pill').textContent}:null})()")
 def strip(pg): return pg.evaluate("(()=>{const c=document.querySelector('#wxws .ws-cloud');return {pill:c.querySelector('.ws-pill').textContent,text:c.querySelector('.t').textContent,state:c.dataset.state}})()")
-def dock(pg): return pg.evaluate("(()=>{const n=document.querySelector('#dlBar .dl-live');return n?{t:n.textContent,s:n.getAttribute('data-wxs'),title:n.title}:null})()")
+def dock(pg): return pg.evaluate("(()=>{const n=document.querySelector('#dlBar .dl-live');return n?{t:n.textContent,s:n.getAttribute('data-st'),title:n.title}:null})()")
 BAR = """()=>{const sc=WX.S.show.scenes[WX.S.si],cv=document.createElement('canvas');cv.width=1920;cv.height=1080;const c=cv.getContext('2d'),calls=[],o=c.fillText.bind(c);
   c.fillText=function(t,...a){calls.push(String(t));return o(t,...a)};WXData.drawBar(c,sc,0,{});return calls}"""
 
@@ -89,7 +89,7 @@ with sync_playwright() as p:
     chk('A: every NOAA source row is "notconnected"; none is live/connected', states and all(x in ('notconnected', 'demo', 'experimental') for x in states) and 'live' not in states, states)
     chk('A: GOES East/West groups, MRMS and NEXRAD rows are present', pg.evaluate("document.querySelector('#wxws-status').textContent.includes('GOES-19 East')&&document.querySelector('#wxws-status').textContent.includes('GOES-18 West')") and row(pg, 'mrms-reflectivity') and row(pg, 'nexrad-reflectivity-KBOX') and row(pg, 'nexrad-velocity-KBOX'))
     chk('A: the panel shows no LIVE-verified pill anywhere', pg.evaluate("![...document.querySelectorAll('#wxws .ws-pill')].some(p=>/LIVE/.test(p.textContent))"))
-    chk('A: planned RTMA / Forecast models are Not connected and nothing is invented', pg.evaluate("[...document.querySelectorAll('#wxws [data-future]')].map(r=>r.dataset.future+':'+r.querySelector('.ws-pill').textContent).join()") == 'rtma:Not connected,models:Not connected' and 'No feed is enabled' in pg.evaluate("document.querySelector('#wxws [data-future=rtma]').textContent"))
+    chk('A: planned RTMA / Forecast models are Not connected and nothing is invented', pg.evaluate("[...document.querySelectorAll('#wxws [data-future]')].map(r=>r.dataset.future+':'+r.querySelector('.ws-pill').textContent).join()") == 'rtma:Not connected,models:Not connected' and 'No product ids are established' in pg.evaluate("document.querySelector('#wxws [data-future=rtma]').textContent"))
     # collapsible
     ar = pg.evaluate("document.querySelector('#wxws .ws-sh[aria-controls=wxws-status]').getAttribute('aria-expanded')"); head(pg, 'Data Source Status').click(); pg.wait_for_timeout(120)
     chk('A: Data Source Status collapses and expands', ar == 'true' and not sec_open(pg, 'status') and pg.evaluate("document.querySelector('#wxws .ws-sh[aria-controls=wxws-status]').getAttribute('aria-expanded')") == 'false')
@@ -153,8 +153,10 @@ with sync_playwright() as p:
     r = row(pg, 'mrms-reflectivity'); chk('D: MRMS row also Connected · not verified', r and r['state'] == 'connected', r)
     r = row(pg, 'nexrad-reflectivity-KBOX'); chk('D: NEXRAD KBOX ~35 min old → Stale, with the reason shown', r and r['state'] == 'stale' and r['pill'] == 'Stale' and __import__('re').search(r'3[5-7] min old', r['text']), r)
     open_groups(pg); r = row(pg, 'goes-west-full-C02'); chk('D: a product the processor does not list stays Waiting for NOAA frames', r and r['state'] == 'waiting' and r['pill'] == 'Waiting for NOAA frames', r)
-    r = row(pg, 'rtma-2m-temperature'); chk('D: an RTMA product the processor really lists is shown (Other products), with no Use button invented', r and r['state'] == 'connected' and 'Use' not in r['btns'], r)
-    chk('D: planned RTMA row reflects the real listing; Forecast models still Not connected', 'Listed' in pg.evaluate("document.querySelector('#wxws [data-future=rtma] .ws-pill').textContent") and pg.evaluate("document.querySelector('#wxws [data-future=models] .ws-pill').textContent") == 'Not connected')
+    r = row(pg, 'rtma-2m-temperature'); chk('D: an RTMA id is NOT an established product: shown only as "Not supported yet", never as a source (no state, no Verify/Use)', r and r['state'] == 'unsupported' and r['pill'] == 'Not supported yet' and r['btns'] == [] and 'never called live' in r['text'], r)
+    chk('D: RTMA and Forecast models placeholders stay Not connected even though the processor listed an RTMA id', pg.evaluate("[...document.querySelectorAll('#wxws [data-future]')].map(r=>r.querySelector('.ws-pill').textContent).join()") == 'Not connected,Not connected')
+    chk('D: strip counts the unsupported id as neither live nor connected', '3 verified' not in strip(pg)['text'] and 'LIVE' not in strip(pg)['text'], strip(pg))
+    r = row(pg, 'nexrad-reflectivity-KBOX'); chk('D: KBOX row is labelled as the Boston site', r and 'KBOX (Boston)' in r['text'], r)
     chk('D: nothing is LIVE before a frame has been downloaded and checked', pg.evaluate("![...document.querySelectorAll('#wxws .ws-pill')].some(p=>/LIVE/.test(p.textContent))"))
     # Verify
     pg.locator('#wxws [data-pid="goes-east-conus-C13"] button', has_text='Verify frame').click(); pg.wait_for_timeout(900)
@@ -173,7 +175,7 @@ with sync_playwright() as p:
     clip = ''
     try: clip = pg.evaluate("navigator.clipboard.readText()")
     except Exception as e: clip = ''
-    chk('D: report lists catalog counts, newest time and verified frame size', '/catalog: 4 product(s)' in rep and 'goes-east-conus-C13' in rep and 'verified 1x1' in rep and 'frame(s)' in rep, rep)
+    chk('D: report lists catalog counts, newest time and verified frame size', '/catalog: 4 product(s)' in rep and 'goes-east-conus-C13' in rep and 'verified 1x1' in rep and 'frame(s)' in rep and 'ignored' in rep and 'rtma-2m-temperature' in rep, rep)
     chk('D: report was copied to the clipboard (when the browser allows it)', clip == rep or clip == '', 'clipboard differs')
     pg.screenshot(path=S + 'D_connected_verified.png')
     # use the verified source on the map: dock badge LIVE
@@ -183,9 +185,12 @@ with sync_playwright() as p:
     chk('D: Use selects the real source', ld == 'goes-east-conus-C13', ld)
     d = dock(pg); chk('D: decoded + fresh real frames → dock badge LIVE (data-wxs=live)', d and d['t'] == 'LIVE' and d['s'] == 'live', d)
     calls = pg.evaluate(BAR); chk('D: exported bar says LIVE for verified fresh data', 'LIVE' in calls, calls)
+    msg = pg.evaluate("document.querySelector('#dlBar .dl-settings .st').textContent"); chk('D: the loop settings message uses the same status word ("· LIVE"), not a blanket "Live"', msg.endswith('· LIVE'), msg)
+    chk('D: dock badge hover text explains the status', 'LIVE · verified' in dock(pg)['title'], dock(pg))
     # time passes: 30 minutes later the same frames are stale
     pg.evaluate("(()=>{const r=Date.now;window.__realNow=r;Date.now=()=>r()+30*60000})()"); pg.wait_for_timeout(1600)
     d = dock(pg); chk('D: 30 minutes later the dock badge says STALE, not LIVE', d and d['t'] == 'STALE' and d['s'] == 'stale', d)
+    msg = pg.evaluate("document.querySelector('#dlBar .dl-settings .st').textContent"); chk('D: ...and so does the editor message', msg.endswith('· STALE'), msg)
     calls = pg.evaluate(BAR); chk('D: ...and the exported bar says STALE and never LIVE', 'STALE' in calls and 'LIVE' not in calls, calls)
     open_panel(pg)
     r = row(pg, 'goes-east-conus-C13'); chk('D: ...and its status row is Stale with the age', r and r['state'] == 'stale' and 'min old' in r['text'], r)
@@ -202,8 +207,31 @@ with sync_playwright() as p:
     st['mode'] = 'down'
     open_panel(pg); expand(pg, 'status', 'Data Source Status'); pg.locator('#wxws [data-diag=processor] button', has_text='Run diagnostics').click(); pg.wait_for_timeout(1200)
     c = card(pg); chk('E: processor lost → card says Waiting for local processor', c and c['state'] == 'waiting-local', c)
-    chk('E: frames already decoded in the loop keep their (honest) age-based state, not a fake error', pg.evaluate("document.querySelector('#dlBar .dl-live').getAttribute('data-wxs')") in ('live', 'waiting'))
+    chk('E: frames already decoded in the loop keep their (honest) age-based state, not a fake error', pg.evaluate("document.querySelector('#dlBar .dl-live').getAttribute('data-st')") in ('live', 'waiting'))
     chk('E: no page errors', not pg.errs, pg.errs); ctx.close()
+
+    # ============================ G. generic GOES alias + hook plumbing ============================
+    st = {'mode': 'ok', 'products': {'goes-west-conus-C13': (2, 6), 'goes-west-full-C02': (3, 6)}}
+    ctx, pg = fresh(b, INIT, mock(st)); pg.wait_for_timeout(900)
+    open_panel(pg); expand(pg, 'status', 'Data Source Status'); pg.locator('#wxws [data-diag=processor] button', has_text='Run diagnostics').click(); pg.wait_for_timeout(1200)
+    al = pg.evaluate("(()=>{const n=document.querySelector('#wxws [data-alias]');return n&&[n.dataset.alias,n.textContent]})()")
+    chk('G: with East CONUS visible NOT listed, the generic GOES alias says FALLBACK and names the product it uses', al and al[0] == 'fallback' and 'FALLBACK' in al[1] and 'GOES-18 West · CONUS · Clean IR 2 km' in al[1] and 'goes-east-conus-C02' in al[1], al)
+    pg.evaluate("WXWeatherWorkspace.close();0"); pg.evaluate("(()=>{const sc=WX.S.show.scenes[WX.S.si];sc.dataLoop=Object.assign(WXData.defaults(),{on:true,source:'goes',hours:1});WX.commit&&WX.commit()})()"); pg.wait_for_timeout(2500)
+    d = dock(pg); chk('G: an older scene using the alias still loads, and its badge hover text says it is a fallback', d and d['s'] in ('live', 'connected') and 'FALLBACK' in d['title'], d)
+    ls = pg.evaluate("WXWeatherWorkspace.diag.layerState(WX.S.show.scenes[WX.S.si].dataLoop)"); chk('G: the alias is evaluated on the product it really shows (West CONUS IR), not on East', ls and 'goes-west-conus-C13' in ls['why'], ls)
+    chk('G: no page errors', not pg.errs, pg.errs); ctx.close()
+    st = {'mode': 'ok', 'products': {'goes-east-conus-C02': (2, 6), 'goes-west-conus-C13': (2, 6)}}
+    ctx, pg = fresh(b, INIT, mock(st)); pg.wait_for_timeout(900)
+    open_panel(pg); expand(pg, 'status', 'Data Source Status'); pg.locator('#wxws [data-diag=processor] button', has_text='Run diagnostics').click(); pg.wait_for_timeout(1200)
+    al = pg.evaluate("(()=>{const n=document.querySelector('#wxws [data-alias]');return n&&[n.dataset.alias,n.textContent]})()")
+    chk('G: with East CONUS visible listed, the alias is the preferred (non-fallback) source', al and al[0] == 'preferred' and 'FALLBACK' not in al[1] and 'GOES-19 East · CONUS · Visible 0.5 km' in al[1], al)
+    chk('G: no page errors', not pg.errs, pg.errs); ctx.close()
+    # hook plumbing: the status comes from dataloop.js itself; no observers, timers or canvas patching in weather_workspace.js
+    ctx, pg = fresh(b); pg.wait_for_timeout(500)
+    chk('G: dataloop exposes the status hook and the workspace registered a provider', pg.evaluate("typeof WXData.liveStatus==='function'&&typeof WXData.statusProvider==='function'"))
+    chk('G: drawBar is dataloop\'s own function (not wrapped)', pg.evaluate("!WXData.drawBar.wxHonest&&!/fillText *= *function/.test(String(WXData.drawBar))"))
+    chk('G: the workspace source has no MutationObserver / relabel / canvas workaround', 'MutationObserver' not in open(str(ROOT / 'studio' / 'weather_workspace.js')).read())
+    ctx.close()
 
     # ============================ F. layout ============================
     st = {'mode': 'ok', 'products': {'goes-east-conus-C13': (2, 6), 'mrms-reflectivity': (3, 6)}}

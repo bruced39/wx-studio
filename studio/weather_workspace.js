@@ -103,23 +103,25 @@
   /* short words for the dock badge and the exported bar (long words would collide with the next label) */
   U.BADGE = { live: 'LIVE', connected: 'UNVERIFIED', stale: 'STALE', waiting: 'WAITING', unavailable: 'UNAVAILABLE', notconnected: 'OFFLINE', experimental: 'PREVIEW', demo: 'DEMO' };
   U.BADGE_COLOR = { live: '#ff5d5d', demo: '#b9a4ff', experimental: '#f5be4e', stale: '#f5be4e', waiting: '#8fb4ff', unavailable: '#ff9b9b', connected: '#9fb3cf', notconnected: '#8397b3' };
-  /* Which family a processor product id belongs to, and a readable name. Unknown ids are never invented: they come from /catalog. */
+  /* Which family a processor product id belongs to, and a readable name. ONLY the ids the processor backend really produces are recognised
+   * (GOES East/West C02/C13 sectors, MRMS reflectivity, NEXRAD reflectivity/velocity). RTMA and forecast-model ids are not established yet,
+   * so they are NOT guessed: anything else is family 'other' (shown as unsupported, never as a source). */
   U.parseProduct = function (pid) {
     pid = String(pid || ''); let m = SAT_ID.exec(pid);
     if (m) return { family: 'satellite', kind: 'goes', sector: m[2], label: (m[1] === 'east' ? 'GOES-19 East' : 'GOES-18 West') + ' · ' + SECT[m[2]] + ' · ' + (m[3] === 'C02' ? 'Visible 0.5 km' : 'Clean IR 2 km') };
     if (pid === 'mrms-reflectivity') return { family: 'radar', kind: 'mrms', label: 'MRMS reflectivity · 1 km national mosaic' };
-    m = /^nexrad-(reflectivity|velocity)-(K[A-Z0-9]{3})$/.exec(pid); if (m) return { family: 'radar', kind: 'nexrad', site: m[2], label: 'NEXRAD ' + m[2] + ' · ' + (m[1] === 'reflectivity' ? 'base reflectivity' : 'radial velocity') + ' · Level II' };
-    if (/^rtma/i.test(pid)) return { family: 'rtma', kind: 'rtma', label: pid };
-    if (/^(model|forecast|gfs|nam|hrrr|nbm|rap|href|ecmwf)/i.test(pid)) return { family: 'models', kind: 'model', label: pid };
+    m = /^nexrad-(reflectivity|velocity)-(K[A-Z0-9]{3})$/.exec(pid); if (m) return { family: 'radar', kind: 'nexrad', site: m[2], label: 'NEXRAD ' + m[2] + (m[2] === 'KBOX' ? ' (Boston)' : '') + ' · ' + (m[1] === 'reflectivity' ? 'base reflectivity' : 'radial velocity') + ' · Level II' };
     return { family: 'other', kind: 'other', label: pid };
   };
-  /* How old (minutes) the newest observation may be before it is called Stale: roughly 3x the product's normal scan interval (+ latency).
+  /* FRESHNESS LIMITS — minutes the newest observation may be old before the product is called Stale.
+   * PROVISIONAL (roughly 3x the normal scan interval plus latency). This table is the one place to adjust them.
    * The processor itself drops anything older than 50 minutes from /catalog. */
+  U.FRESH_MINUTES = { mrms: 15, nexrad: 20, goesConus: 20, goesFull: 30, goesMeso: 10, other: 30 };
   U.freshWindowMin = function (pid) {
-    const i = U.parseProduct(pid);
-    if (i.kind === 'mrms') return 15; if (i.kind === 'nexrad') return 20;
-    if (i.kind === 'goes') return i.sector === 'full' ? 30 : i.sector === 'conus' ? 20 : 10;
-    return 30;
+    const i = U.parseProduct(pid), T = U.FRESH_MINUTES;
+    if (i.kind === 'mrms') return T.mrms; if (i.kind === 'nexrad') return T.nexrad;
+    if (i.kind === 'goes') return i.sector === 'full' ? T.goesFull : i.sector === 'conus' ? T.goesConus : T.goesMeso;
+    return T.other;
   };
   U.fmtAge = function (ms) {
     if (!Number.isFinite(ms)) return 'unknown'; const m = Math.round(ms / 60000); if (m < 1) return 'just now'; if (m < 90) return m + ' min ago';
@@ -181,6 +183,7 @@
     L.push('Processor: ' + (m.proc.endpoint || 'none') + ' (' + m.proc.mode + ') — ' + m.proc.title + ' — ' + m.proc.detail);
     if (m.health) L.push('/health: ' + (m.health.ok ? 'ok · status=' + m.health.status + ' · freshProducts=' + m.health.freshProducts : 'FAILED · ' + m.health.error));
     if (m.catalog) L.push('/catalog: ' + (m.catalog.ok ? m.catalog.products.length + ' product(s)' : 'FAILED · ' + m.catalog.error));
+    if (m.unrecognized && m.unrecognized.length) L.push('Unrecognized products listed by the processor (ignored, not shown as sources): ' + m.unrecognized.join(', '));
     (m.rows || []).forEach(r => {
       if (r.state === 'notconnected' && !r.meta) return;
       let line = '- ' + r.pid + ' [' + r.label + ']';
@@ -207,12 +210,19 @@
     return { ok: true, products, bad };
   };
   /* Which processor product a weather-loop source id refers to (null when it is not a processor product). */
+  /* The generic 'goes' source exists only so older saved scenes keep working. It resolves to goes-east-conus-C02; if that product is not
+   * listed the bridge falls back to the first listed GOES product, and that is reported explicitly (fallback:true), never silently. */
+  U.GOES_ALIAS_PREFERRED = 'goes-east-conus-C02';
+  U.resolveGoesAlias = function (products) {
+    const list = (products || []).filter(x => SAT_ID.test(x)); if (!list.length) return null;
+    const pref = list.indexOf(U.GOES_ALIAS_PREFERRED) >= 0; return { pid: pref ? U.GOES_ALIAS_PREFERRED : list[0], fallback: !pref, preferred: U.GOES_ALIAS_PREFERRED };
+  };
   U.loopProduct = function (dl, products) {
     if (!dl) return null; const id = dl.source; products = products || [];
     if (U.SAT_PRODUCTS.indexOf(id) >= 0) return id;
     if (id === 'mrms') return 'mrms-reflectivity';
     if (id === 'nexrad') return 'nexrad-reflectivity-' + (dl.site || 'KBOX');
-    if (id === 'goes') return products.indexOf('goes-east-conus-C02') >= 0 ? 'goes-east-conus-C02' : (products.find(x => SAT_ID.test(x)) || null);
+    if (id === 'goes') { const a = U.resolveGoesAlias(products); return a ? a.pid : null; }
     return null;
   };
   U.procInput = function (pm, health) {
@@ -432,6 +442,7 @@
       return { ok: true, data: as === 'blob' ? await r.blob() : await r.json(), ms: Math.round(performance.now() - t0) };
     } catch (e) { return { ok: false, error: friendly(e) }; } finally { clearTimeout(to); }
   }
+  const bridgeProducts = () => { const b = BR(); return (b && b.products) || []; };
   const procModel = () => { const b = BR() || {}; return U.processorState({ endpoint: b.endpoint || '', bridgeStatus: b.status, bridgeError: b.error, health: dg.health, catalog: dg.catalog }); };
   const metaMap = () => { const m = {}; if (dg.catalog && dg.catalog.ok) dg.catalog.products.forEach(x => { m[x.pid] = x; }); return m; };
   const fmtZ = t => new Date(t).toISOString().slice(11, 16) + 'Z';
@@ -455,7 +466,9 @@
     if (def.nativeData === false) return { state: 'experimental', why: 'NOAA-rendered preview pulled directly by the browser — not decoded source data.' };
     const b = BR(), pid = U.loopProduct(dl, (b && b.products) || []);
     if (!pid) return { state: 'connected', why: 'Registered by the data service, but not a verifiable NOAA processor product.' };
-    return evalPid(pid);
+    const st = evalPid(pid);
+    if (dl.source === 'goes') { const a = U.resolveGoesAlias((b && b.products) || []); st.why = 'Generic GOES (older scenes) is showing ' + pid + (a && a.fallback ? ' — FALLBACK: ' + a.preferred + ' is not listed' : '') + '. ' + (st.why || ''); }
+    return st;
   }
   async function runDiag(opts) {
     opts = opts || {}; const ep = bridgeEp(); if (dg.busy) return;
@@ -494,11 +507,12 @@
   }
   function rowsForReport() {
     const out = [], seen = {}, add = pid => { if (seen[pid]) return; seen[pid] = 1; const st = evalPid(pid), meta = metaMap()[pid] || null; out.push({ pid, state: st.state, label: st.label, why: st.why, meta, verify: dg.verify[pid] || null }); };
-    U.SAT_PRODUCTS.forEach(add); add('mrms-reflectivity'); Object.keys(metaMap()).forEach(add); return out;
+    U.SAT_PRODUCTS.forEach(add); add('mrms-reflectivity'); Object.keys(metaMap()).filter(k => U.parseProduct(k).family !== 'other').forEach(add); return out;
   }
+  const unrecognizedIds = () => Object.keys(metaMap()).filter(k => U.parseProduct(k).family === 'other').sort();
   function makeReport() {
     const pm = procModel();
-    return U.buildReport({ at: Date.now(), version: (g.WX_VERSION || (g.WX && g.WX.VERSION) || ''), proc: { endpoint: bridgeEp(), mode: pm.mode, title: pm.title, detail: pm.detail }, health: dg.health, catalog: dg.catalog, rows: rowsForReport() });
+    return U.buildReport({ at: Date.now(), version: (g.WX_VERSION || (g.WX && g.WX.VERSION) || ''), proc: { endpoint: bridgeEp(), mode: pm.mode, title: pm.title, detail: pm.detail }, health: dg.health, catalog: dg.catalog, rows: rowsForReport(), unrecognized: unrecognizedIds() });
   }
   async function copyText(text) {
     try { if (g.navigator && g.navigator.clipboard && g.navigator.clipboard.writeText) { await g.navigator.clipboard.writeText(text); return true; } } catch (e) { /* fall through */ }
@@ -597,10 +611,10 @@
     box.append(srcRow({ name: 'Radial velocity · Level II', sub: 'not offered by the data service yet', status: 'notconnected', pick: () => 0 }));
   }
 
-  /* RTMA / Forecast models: datasets are not chosen yet. Anything ChatGPT adds to the catalog or registers as a source appears here automatically. */
+  /* RTMA / Forecast models: datasets are not chosen yet. Only a source that explicitly registers category 'rtma' / 'models', or a catalog entry in that category, appears here — ids are never guessed. */
   function secPending(box, dl, kind) {
     const cat = C(), pend = cat && cat.pending && cat.pending.find(x => x.id === (kind === 'rtma' ? 'rtma' : 'models')) || (cat && cat.pending && cat.pending.find(x => x.id === 'forecast'));
-    const inKind = id => { const d = D.sources[id]; return d && !d.demo && (d.category === kind || (kind === 'rtma' ? /^rtma/i.test(id) : /^(model|forecast|gfs|nam|hrrr|hrrr|nbm|rap|href|ecmwf)/i.test(id))); };
+    const inKind = id => { const d = D.sources[id]; return d && !d.demo && d.category === kind; };
     const regs = Object.keys(D.sources).filter(inKind), prods = (cat && cat.list(kind)) || [], shown = new Set();
     regs.forEach(id => { shown.add(id); box.append(srcRow({ name: D.displayName(id), sub: D.sources[id].provider || 'registered by the data service', status: stt(id), selected: !!dl && dl.source === id, pick: () => pick(id) })); });
     prods.filter(p => !shown.has(p.id)).forEach(p => box.append(srcRow({ name: p.label, sub: p.note || p.display || '', status: 'notconnected', pick: () => 0 })));
@@ -619,6 +633,7 @@
     const b = BR(), pid = U.loopProduct({ source: id }, (b && b.products) || []); if (!pid) return pill(k);
     const st = evalPid(pid); return el('span', { className: 'ws-pill st-' + st.state, text: st.label });
   }
+  function aliasText() { const b = BR(), a = U.resolveGoesAlias((b && b.products) || []); return a ? 'goes → ' + a.pid + (a.fallback ? ' (fallback: ' + a.preferred + ' is not listed)' : ' (compatibility alias for older scenes)') : 'goes (compatibility alias; no GOES product listed)'; }
   function secStatus(box) {
     secDiag(box);
     box.append(el('div', { className: 'ws-sub', text: 'What the labels mean' }));
@@ -626,7 +641,7 @@
     [['LIVE · verified', 'A real frame was downloaded and decoded from the NOAA processor, and its observation is recent.'], ['Connected · not verified', 'The processor lists a recent observation, but no frame has been downloaded and checked yet.'], ['Stale', 'The newest observation is older than the product’s fresh window.'], ['Waiting', 'The processor is not answering, or has not published fresh NOAA frames yet.'], ['Unavailable', 'The processor or a frame check reported an error.'], ['Experimental', 'NOAA-rendered preview fetched by the browser; not decoded source data.'], ['Demo', 'Synthetic test pattern, never NOAA data.'], ['Not connected', 'No processor is enabled, or the product is not offered yet.']].forEach(([k, v]) => kv.append(el('span', { text: k }), el('span', { text: v })));
     box.append(kv);
     box.append(el('div', { className: 'ws-sub', text: 'Registered sources' }));
-    Object.keys(D.sources).forEach(id => box.append(el('div', { className: 'ws-row', style: 'cursor:default' }, el('span', { className: 'm' }, el('b', { text: D.displayName(id) }), el('i', { text: id })), statePill(id))));
+    Object.keys(D.sources).forEach(id => box.append(el('div', { className: 'ws-row', style: 'cursor:default' }, el('span', { className: 'm' }, el('b', { text: D.displayName(id) }), el('i', { text: id === 'goes' ? aliasText() : id })), statePill(id))));
     box.append(el('div', { className: 'ws-note', text: 'Palettes: built-in starters work offline. Your cloud palettes need a sign-in (Map Style → Saved Styles).' }));
   }
   /* ---------- data source status / diagnostics ---------- */
@@ -676,15 +691,19 @@
       const rows = pids.map(pid => { const i = U.parseProduct(pid); return diagRow(pid, { name: i.label.replace(/^GOES-\d+ (East|West) · /, ''), reg: pid }); });
       box.append(diagGroup('diag-' + sat, sat === 'east' ? 'GOES-19 East' : 'GOES-18 West', rows, any));
     });
+    if (D.sources.goes) { const a = U.resolveGoesAlias(bridgeProducts()); box.append(el('div', { className: 'ws-note' + (a && a.fallback ? ' warn' : ''), attrs: { 'data-alias': a ? (a.fallback ? 'fallback' : 'preferred') : 'none' }, text: 'Generic “GOES” (kept so older saved scenes still load): ' + (a ? 'currently shows ' + U.parseProduct(a.pid).label + (a.fallback ? ' — FALLBACK, because ' + a.preferred + ' is not listed. Pick a specific sector above to be explicit.' : '.') : 'no GOES product is listed.') })); }
     // ---- radar ----
     box.append(el('div', { className: 'ws-sub', text: 'Radar' }));
     const site = (cur0 && cur0.source === 'nexrad' && cur0.site) || (RS() && RS().selected) || 'KBOX', rids = ['mrms-reflectivity', 'nexrad-reflectivity-' + site, 'nexrad-velocity-' + site];
     Object.keys(m).filter(k => U.parseProduct(k).kind === 'nexrad' && rids.indexOf(k) < 0).sort().forEach(k => rids.push(k));
     const radarRows = rids.map(pid => { const i = U.parseProduct(pid); return diagRow(pid, { reg: i.kind === 'mrms' ? 'mrms' : (/velocity/.test(pid) ? null : 'nexrad'), site: i.site }); });
     box.append(diagGroup('diag-radar', 'MRMS mosaic and NEXRAD site ' + site, radarRows, true));
-    // ---- anything else the processor reports ----
-    const other = Object.keys(m).filter(k => { const f = U.parseProduct(k).family; return f !== 'satellite' && f !== 'radar'; }).sort();
-    if (other.length) { box.append(el('div', { className: 'ws-sub', text: 'Other products the processor lists' })); other.forEach(k => box.append(diagRow(k, { reg: D.sources[k] ? k : null }))); box.append(el('div', { className: 'ws-note', text: 'These are listed by the processor but this interface has no viewer for them yet.' })); }
+    // ---- anything the processor lists that this interface does not recognise (never shown as a source) ----
+    const other = unrecognizedIds();
+    if (other.length) {
+      box.append(el('div', { className: 'ws-sub', text: 'Listed by the processor, not supported here yet' }));
+      other.forEach(k => box.append(el('div', { className: 'ws-drow notconnected', attrs: { 'data-pid': k, 'data-state': 'unsupported' } }, el('div', { className: 'hd' }, el('b', { text: k }), el('span', { className: 'ws-pill st-notconnected', text: 'Not supported yet' })), el('div', { className: 'mt', text: 'Newest ' + fmtZ(m[k].latest) + ' · ' + m[k].count + ' frame' + (m[k].count === 1 ? '' : 's') + '. This interface does not recognise the product id, so nothing is drawn from it and it is never called live.' }))));
+    }
     // ---- previews and demo (never NOAA decoded data) ----
     const ids = Object.keys(D.sources), exp = ids.filter(id => stt(id) === 'experimental'), demo = ids.filter(id => stt(id) === 'demo');
     if (exp.length || demo.length) {
@@ -693,13 +712,9 @@
       exp.forEach(id => box.append(mk(id, 'experimental', 'NOAA-rendered picture fetched directly by the browser. Real imagery, but not decoded source data, and it is never labeled LIVE.')));
       demo.forEach(id => box.append(mk(id, 'demo', 'Synthetic test pattern for trying the bar, palettes and export. It is NOT weather data.')));
     }
-    // ---- future products ----
+    // ---- future products: placeholders only; ids are not established, so nothing is recognised or activated ----
     box.append(el('div', { className: 'ws-sub', text: 'Planned products' }));
-    [['rtma', 'RTMA analysis', 'rtma'], ['models', 'Forecast models', 'models']].forEach(([fam, name]) => {
-      const lst = Object.keys(m).filter(k => U.parseProduct(k).family === fam), reg = ids.filter(id => !D.sources[id].demo && (D.sources[id].category === fam || U.parseProduct(id).family === fam));
-      box.append(el('div', { className: 'ws-drow notconnected', attrs: { 'data-future': fam } }, el('div', { className: 'hd' }, el('b', { text: name }), el('span', { className: 'ws-pill st-notconnected', text: lst.length || reg.length ? 'Listed' : 'Not connected' })),
-        el('div', { className: 'mt', text: lst.length || reg.length ? (lst.length + reg.length) + ' entr' + (lst.length + reg.length === 1 ? 'y' : 'ies') + ' appeared; choose them under the ' + (fam === 'rtma' ? 'RTMA' : 'Forecast Models') + ' section.' : 'No feed is enabled and no product is listed. This row fills in automatically once the processor lists real ' + name + ' products.' })));
-    });
+    [['rtma', 'RTMA analysis'], ['models', 'Forecast models']].forEach(([fam, name]) => box.append(el('div', { className: 'ws-drow notconnected', attrs: { 'data-future': fam } }, el('div', { className: 'hd' }, el('b', { text: name }), el('span', { className: 'ws-pill st-notconnected', text: 'Not connected' })), el('div', { className: 'mt', text: 'Not available yet. No product ids are established, so nothing is listed, drawn or called live.' }))));
   }
 
   function cmd(text) { return el('div', { className: 'ws-code' }, el('code', { text }), el('button', { className: 'ws-btn', text: 'Copy', on: { click: async e => { const b = e.currentTarget, ok = await copyText(text); b.textContent = ok ? 'Copied' : 'Select'; setTimeout(() => { b.textContent = 'Copy'; }, 1500); } } })); }
@@ -937,38 +952,18 @@
   W.close = function () { ui.open = false; if (panel) panel.hidden = true; };
   setInterval(function () { try { if (ui.open && bridgeEp() && !dg.busy) runDiag({ quiet: true }); } catch (e) { /* never disturb the editor */ } }, 60000);
 
-  /* ====================== honest LIVE labels ======================
-   * dataloop.js draws a fixed "LIVE" badge (dock) and "LIVE" text (exported bar) for every source. Until that file can be
-   * changed, relabel from here: the badge says what has actually been verified for the active source. */
-  function dockCss() {
-    if (document.getElementById('wxwsDockCss')) return;
-    const st = document.createElement('style'); st.id = 'wxwsDockCss';
-    st.textContent = Object.keys(U.BADGE_COLOR).map(k => '#stageWrap #dlBar .dl-live[data-wxs="' + k + '"]{color:' + U.BADGE_COLOR[k] + '}').join('\n') + '\n#stageWrap #dlBar .dl-live[data-wxs]:not([data-wxs="live"])::before{display:none}';
-    document.head.append(st);
-  }
-  function relabelDock() {
-    const n = document.querySelector('#dlBar .dl-live'); if (!n) return;
-    const sc = cur(), ls = layerState(sc && sc.dataLoop); if (!ls) return;
-    const w = U.BADGE[ls.state] || 'LIVE', tip = U.STATE_LABEL[ls.state] + (ls.why ? ' — ' + ls.why : '');
-    if (n.textContent !== w) n.textContent = w; if (n.getAttribute('data-wxs') !== ls.state) n.setAttribute('data-wxs', ls.state); if (n.title !== tip) n.title = tip;
-  }
-  if (!D.drawBar || !D.drawBar.wxHonest) {
-    const orig = D.drawBar;
-    if (typeof orig === 'function') {
-      D.drawBar = function (c, scene) {
-        let ls = null; try { ls = layerState(scene && scene.dataLoop); } catch (e) { /* draw as before */ }
-        if (!ls || ls.state === 'live' || !c || typeof c.fillText !== 'function') return orig.apply(this, arguments);
-        const own = Object.prototype.hasOwnProperty.call(c, 'fillText'), prev = c.fillText, word = U.BADGE[ls.state] || 'LIVE';
-        c.fillText = function (txt, x, y) {
-          if (txt === 'LIVE') { const keep = c.fillStyle; c.fillStyle = U.BADGE_COLOR[ls.state] || keep; prev.call(c, word, x, y, 90); c.fillStyle = keep; return; }
-          return prev.apply(c, arguments);
-        };
-        try { return orig.apply(this, arguments); } finally { if (own) c.fillText = prev; else delete c.fillText; }
-      };
-      D.drawBar.wxHonest = true;
-    }
-  }
-  W.diag = { state: dg, run: runDiag, verify: verifyFrame, layerState, evalPid, report: makeReport, relabelDock };
+  /* ====================== status label hook ======================
+   * dataloop.js draws the dock badge, the editor message and the exported-bar label from D.liveStatus(scene). This provider says what
+   * has actually been verified for the scene's source; LIVE only for a decoded, fresh real NOAA frame. Cached briefly because the dock
+   * asks every animation frame. */
+  let memo = null;
+  D.setStatusProvider && D.setStatusProvider(function (scene) {
+    const dl = scene && scene.dataLoop, key = dl ? [dl.on, dl.source, dl.site].join('|') : '', t = Date.now();
+    if (memo && memo.scene === scene && memo.key === key && Math.abs(t - memo.t) < 400) return memo.res;
+    const ls = layerState(dl), res = ls ? { state: ls.state, text: U.BADGE[ls.state], color: U.BADGE_COLOR[ls.state], title: U.STATE_LABEL[ls.state] + (ls.why ? ' — ' + ls.why : '') } : null;
+    memo = { scene, key, t, res }; return res;
+  });
+  W.diag = { state: dg, run: runDiag, verify: verifyFrame, layerState, evalPid, report: makeReport };
 
   document.addEventListener('pointerdown', e => {
     if (!ui.open || !panel) return; const t = e.target;
@@ -987,7 +982,5 @@
     };
     D.closeMenu = function () { W.close(); try { origClose && origClose.apply(D, arguments); } catch (e) { /* ignore */ } };
     D.openMenu.workspace = true; W.original = { openMenu: origOpen, closeMenu: origClose };
-    try { dockCss(); const sw = document.getElementById('stageWrap'); if (sw && g.MutationObserver) new MutationObserver(function () { try { relabelDock(); } catch (e) { /* ignore */ } }).observe(sw, { childList: true, subtree: true }); relabelDock(); } catch (e) { /* the dock keeps its own label */ }
-    setInterval(function () { try { relabelDock(); } catch (e) { /* ignore */ } }, 1000);
   }, 150);
 })(typeof window !== 'undefined' ? window : globalThis);

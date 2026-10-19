@@ -58,7 +58,9 @@ test('one clickable bottom-docked weather bar, no duplicate below the map',()=>{
   assert.deepEqual(timeline.children.map(e=>e.className),['dl-stamp','prog'],
     'timestamp is directly above the blue progress line');
   const opts=row.children.find(e=>e.className==='dl-options');
-  assert.ok(opts.children.some(e=>e.className==='dl-live'&&e.textContent==='LIVE'));
+  // The badge no longer hardcodes LIVE: this scene uses the synthetic demo source, so it must say DEMO (status hook in dataloop.js).
+  assert.ok(opts.children.some(e=>e.className==='dl-live'&&e.textContent==='DEMO'));
+  assert.ok(!opts.children.some(e=>e.className==='dl-live'&&e.textContent==='LIVE'),'demo data is never labelled LIVE');
   assert.ok(opts.children.some(e=>e.className==='dl-source'),'data source menu stays accessible');
   const ctrl=row.children.find(e=>e.className==='dl-ctrl');
   assert.ok(ctrl.children.some(e=>e.className==='pl'),'play/pause remains clickable');

@@ -7,7 +7,7 @@
 
 - Review date: 2026-10-18 (America/New_York; older entries below retain their original dates).
 - Repository: `bruced39/wx-studio`; default/deployment branch: `main`.
-- **Last reviewed application version:** `0.9.95` (`VERSION`).
+- **Last reviewed application version:** `0.9.96` (`VERSION`).
 - **Last reviewed code:** Map Style flyout on `feature/map-style-flyout-v0-9-2` prepared for `main`; see latest GitHub commit before editing. Reference `MAP_STYLE_REFERENCE.md` for video details.
 - This document may itself be committed after the code baseline without a version bump. Treat the code commit above as a historical snapshot; check `main` for any newer work.
 
@@ -848,3 +848,24 @@ User supplied **Recording 2026-10-18 181814.mp4** from after the v0.9.90 live-ed
 - **Tests and limits:** source-level assertions/branch diff reviewed against v0.9.94; no live Windows PowerShell/micromamba installation or actual ecCodes/NOAA network run available in the sandbox. User must run updated ZIP and report whether selfcheck passes; don't claim live feeds until a fresh real catalog appears.
 - **Claude overlap:** No updates to `studio/ui.js`, `studio/mapbox.js`, `studio/index.html`, `studio/engine.js`, `studio/dataloop.js`, all weather palettes, saved maps, Supabase or cloud data. Only Windows launcher, its environment yaml/docs/tests, VERSION and this handoff. Guarded fast-forward with expected parent SHA/no force.
 
+## v0.9.96 — Data Source Status diagnostics + honest status label hook (Claude, 2026-10-18)
+
+**Starting main:** v0.9.95 `4c6554d`. Task from the user, approved by ChatGPT after its review of the processor API, frame store and bridge: improve the Weather Data workspace's connection diagnostics and readiness reporting without touching processor/backend code, and replace the hardcoded "LIVE" labels with a proper hook.
+
+**New: Data Source Status section** (Weather Data panel, `studio/weather_workspace.js`; collapsible, between Palettes and Demo). Processor card (address, `/health`, `/catalog`, last check; Run diagnostics, Copy report, How to connect) and one row per recognised product: GOES-19 East / GOES-18 West sector × C02/C13, MRMS reflectivity, NEXRAD reflectivity/velocity (selected site, default KBOX = Boston; other NEXRAD sites appear when the processor lists them). Each row: state, newest observation time + age, frame count, errors, **Verify frame** (fetches `/manifests/{product}.json`, takes the newest frame, requires the frame URL to be on the processor's origin, downloads it and decodes it as an image), and Use. A second section, "Connect local NOAA processor", explains the no-Docker runner, the Docker option, `/health` / `/catalog`, the Streamlit sidebar checkbox, the browser local-network prompt and the v0.9.95 ecCodes fix.
+
+**States (the only labels):** `LIVE · verified` (a frame was fetched AND decoded — by Verify frame or by the active weather loop — and its observation is within the freshness limit) · `Connected · not verified` (catalog lists a recent observation only) · `Stale` · `Waiting` (local processor not answering, or no fresh frames yet) · `Unavailable` (error / failed frame check) · `Not connected` · `Experimental preview` (browser-fetched NWS image) · `Demo · synthetic`. Catalog-only products never say LIVE.
+
+**Freshness limits (provisional, ONE table):** `WXWeatherWorkspace.util.FRESH_MINUTES = { mrms: 15, nexrad: 20, goesConus: 20, goesFull: 30, goesMeso: 10, other: 30 }`. Edit that object to adjust.
+
+**Status hook (dataloop.js, approved):** the dock badge, the loop-settings message and the exported-bar label now come from `WXData.liveStatus(scene)` → `{state,text,color,title}`. `WXData.setStatusProvider(fn)` registers the provider (weather_workspace.js does). With no provider the label makes no live claim: demo → DEMO, browser preview → PREVIEW, anything else → UNVERIFIED. Replaced: `fillText('LIVE', …)` in `D.drawBar`, `text:'LIVE'` for the dock badge, and `frames · Live` in the settings message; CSS hides the red dot unless state is live. The earlier workaround (MutationObserver, 1 s timer, `D.drawBar` wrapper, `ctx.fillText` override) is REMOVED from weather_workspace.js.
+
+**Generic GOES alias:** kept for old saved scenes. `util.resolveGoesAlias(products)` mirrors the bridge: `goes-east-conus-C02` if listed, else the first listed GOES product, and the fallback is shown explicitly (a "FALLBACK" note in Data Source Status, in the registered-sources list, and in the badge hover text).
+
+**RTMA / forecast models:** not implemented. No ids are recognised or guessed (the earlier prefix matching was removed, also in the RTMA/Models sections); the planned rows are static "Not connected". A product id the UI does not recognise is listed as "Not supported yet" (no state, no Verify/Use) and noted as ignored in the report.
+
+**Changed files:** `studio/weather_workspace.js`, `studio/dataloop.js` (hook only), `weather_processor/NO_DOCKER_WINDOWS.md` and `weather_processor/LOCAL_FREE_WINDOWS.md` (now refer to Data Source Status and the LIVE definition), `tests/weather_diagnostics.test.js` (new, 42 tests with the util test), `tests/browser/weather_diagnostics_browser_check.py` (new, 73 checks, mocked processor), edited assertions in `tests/weather_workspace_util.test.js`, `tests/browser/weather_workspace_browser_check.py` (section order/names, strip wording) and `tests/data_loop_layout.test.js` (demo dock badge now DEMO, never LIVE), `VERSION`, this file.
+
+**Not touched:** `weather_processor/*.py`, `studio/weather/processor_bridge.js`, `studio/mapbox.js`, `studio/engine.js`, `studio/index.html`, `app.py`.
+
+**Tests / limits:** the diagnostics browser check drives a MOCK processor answered at the network layer (`http://127.0.0.1:8080` `/health`, `/catalog`, `/manifests`, `/frames`, 1×1 PNG frames). NOT verified: the real Docker/no-Docker processor, real NOAA data or frame sizes, and the browser's loopback permission prompt on the hosted page. The freshness limits are provisional. Python tests could not run in the sandbox (pytest is not installable); they fail identically on untouched main.

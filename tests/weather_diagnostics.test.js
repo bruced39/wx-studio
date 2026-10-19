@@ -98,7 +98,8 @@ test('nothing is LIVE without verified/decoded evidence — exhaustive over the 
 test('parseProduct names real processor ids and never invents others', () => {
   assert.deepEqual(plain(U.parseProduct('goes-east-conus-C02')).family, 'satellite'); assert.match(U.parseProduct('goes-east-conus-C02').label, /GOES-19 East · CONUS · Visible 0.5 km/); assert.match(U.parseProduct('goes-west-full-C13').label, /GOES-18 West · Full Disk · Clean IR 2 km/);
   assert.equal(U.parseProduct('mrms-reflectivity').kind, 'mrms'); assert.equal(U.parseProduct('nexrad-velocity-KBOX').site, 'KBOX'); assert.match(U.parseProduct('nexrad-reflectivity-KOKX').label, /KOKX · base reflectivity · Level II/);
-  assert.equal(U.parseProduct('rtma-temperature').family, 'rtma'); assert.equal(U.parseProduct('hrrr-refc').family, 'models'); assert.equal(U.parseProduct('something-else').family, 'other'); assert.equal(U.parseProduct('goes-east-conus-C99').family, 'other');
+  assert.equal(U.parseProduct('something-else').family, 'other'); assert.equal(U.parseProduct('goes-east-conus-C99').family, 'other');
+  for (const id of ['rtma-temperature', 'rtma-2m-temperature', 'hrrr-refc', 'gfs-t2m', 'nam-x', 'model-x', 'forecast-x']) assert.equal(U.parseProduct(id).family, 'other', id + ' is not an established product id and must not be recognised');
   assert.equal(U.SAT_PRODUCTS.length, 16); assert.ok(U.SAT_PRODUCTS.every(p => U.parseProduct(p).family === 'satellite'));
 });
 test('loopProduct maps the weather-loop source onto a processor product', () => {
@@ -134,4 +135,57 @@ test('report text has the processor, endpoints and per-product lines — and ski
     rows: [{ pid: PID, state: 'live', label: 'LIVE · verified', why: '', meta: meta(3, 5), verify: { ok: true, w: 2000, h: 1200, bytes: 204800 } }, { pid: 'mrms-reflectivity', state: 'waiting', label: 'Waiting', why: 'no frame yet', meta: null, verify: null }, { pid: 'goes-west-full-C02', state: 'notconnected', label: 'x', why: '', meta: null }] });
   assert.match(r, /v0\.9\.93/); assert.match(r, /\/health: ok · status=ready · freshProducts=1/); assert.match(r, /goes-east-conus-C02.*5 frame\(s\).*verified 2000x1200 200 KB/); assert.match(r, /mrms-reflectivity.*no frame yet/); assert.doesNotMatch(r, /goes-west-full-C02/);
   assert.match(U.buildReport({ at: NOW, proc: { endpoint: '', mode: 'none', title: 'Not connected', detail: 'd' }, rows: [] }), /Processor: none/);
+});
+
+/* ---------- requirement checks added with the dataloop status hook ---------- */
+test('freshness limits are one adjustable table with the approved provisional values', () => {
+  assert.deepEqual(plain(U.FRESH_MINUTES), { mrms: 15, nexrad: 20, goesConus: 20, goesFull: 30, goesMeso: 10, other: 30 });
+  const keep = U.FRESH_MINUTES.goesMeso; U.FRESH_MINUTES.goesMeso = 5;
+  assert.equal(U.freshWindowMin('goes-west-meso2-C02'), 5, 'editing the table changes the limit'); U.FRESH_MINUTES.goesMeso = keep;
+  assert.equal(U.freshWindowMin('goes-west-meso2-C02'), 10);
+});
+test('RTMA / model ids are not recognised anywhere: no family, no freshness special-case, report lists them as ignored', () => {
+  assert.equal(U.parseProduct('rtma-anything').kind, 'other'); assert.equal(U.freshWindowMin('rtma-anything'), U.FRESH_MINUTES.other);
+  const r = U.buildReport({ at: NOW, proc: { endpoint: LOCAL, mode: 'local', title: 'Connected', detail: 'd' }, rows: [], unrecognized: ['rtma-2m-temperature'] });
+  assert.match(r, /Unrecognized products .*ignored.*rtma-2m-temperature/);
+});
+test('KBOX is labelled as the Boston NEXRAD site', () => {
+  assert.match(U.parseProduct('nexrad-reflectivity-KBOX').label, /KBOX \(Boston\)/); assert.doesNotMatch(U.parseProduct('nexrad-reflectivity-KOKX').label, /Boston/);
+  assert.equal(U.parseProduct('nexrad-velocity-KBOX').kind, 'nexrad');
+});
+test('generic GOES alias: prefers East CONUS visible; any other choice is flagged as a fallback, never silent', () => {
+  const a = U.resolveGoesAlias(['goes-west-conus-C13', 'goes-east-conus-C02', 'mrms-reflectivity']); assert.deepEqual(plain(a), { pid: 'goes-east-conus-C02', fallback: false, preferred: 'goes-east-conus-C02' });
+  const f = U.resolveGoesAlias(['goes-west-conus-C13', 'goes-west-full-C02', 'mrms-reflectivity']); assert.equal(f.pid, 'goes-west-conus-C13'); assert.equal(f.fallback, true); assert.equal(f.preferred, 'goes-east-conus-C02');
+  assert.equal(U.resolveGoesAlias(['mrms-reflectivity']), null); assert.equal(U.resolveGoesAlias([]), null);
+  assert.equal(U.loopProduct({ source: 'goes' }, ['goes-west-conus-C13']), 'goes-west-conus-C13');
+});
+
+/* ---------- the dataloop status hook (real studio/dataloop.js in a DOM-less sandbox) ---------- */
+function loadDataloop() {
+  const win = {}, doc = { readyState: 'complete', createElement: () => ({}), getElementById: () => null, head: { append() {} } };
+  new Function('window', 'document', 'setTimeout', 'requestAnimationFrame', fs.readFileSync(path.join(__dirname, '../studio/dataloop.js'), 'utf8'))(win, doc, () => 0, () => 0);
+  return win.WXData;
+}
+test('dataloop: without a provider the label never claims LIVE (demo → DEMO, preview → PREVIEW, otherwise UNVERIFIED)', () => {
+  const D = loadDataloop();
+  assert.equal(D.liveStatus({ dataLoop: { source: 'demo' } }).text, 'DEMO');
+  D.registerSource({ id: 'nws-preview', label: 'preview', nativeData: false, list: async () => [] });
+  assert.equal(D.liveStatus({ dataLoop: { source: 'nws-preview' } }).text, 'PREVIEW');   // browser-fetched NWS image, not decoded source data
+  D.registerSource({ id: 'goes-east-conus-C02', label: 'x', list: async () => [] });
+  assert.equal(D.liveStatus({ dataLoop: { source: 'goes-east-conus-C02' } }).text, 'UNVERIFIED');
+  assert.notEqual(D.liveStatus(null).text, 'LIVE');
+});
+test('dataloop: a registered provider drives the label; a throwing or empty provider falls back to the safe default', () => {
+  const D = loadDataloop(), sc = { dataLoop: { source: 'demo' } };
+  D.setStatusProvider(() => ({ state: 'live', text: 'LIVE', color: '#ff5d5d', title: 't' })); assert.equal(D.liveStatus(sc).text, 'LIVE'); assert.equal(D.liveStatus(sc).state, 'live');
+  D.setStatusProvider(() => { throw new Error('boom'); }); assert.equal(D.liveStatus(sc).text, 'DEMO');
+  D.setStatusProvider(() => null); assert.equal(D.liveStatus(sc).text, 'DEMO');
+  D.setStatusProvider(() => ({ state: 'stale', text: '' })); assert.equal(D.liveStatus(sc).text, 'DEMO');
+  D.setStatusProvider(null); assert.equal(D.statusProvider, null);
+});
+test('dataloop.js no longer hardcodes a LIVE label', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../studio/dataloop.js'), 'utf8');
+  assert.doesNotMatch(src, /fillText\('LIVE'/); assert.doesNotMatch(src, /text: 'LIVE'/); assert.doesNotMatch(src, /frames · Live'/);
+  const ws = fs.readFileSync(path.join(__dirname, '../studio/weather_workspace.js'), 'utf8');
+  for (const bad of ['MutationObserver', 'relabelDock', 'wxHonest', "fillText = function"]) assert.ok(!ws.includes(bad), bad + ' workaround must be gone from weather_workspace.js');
 });

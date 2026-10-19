@@ -269,6 +269,22 @@
     return p.weekday + ', ' + p.month + ' ' + p.day + ', ' + p.year + ' ' + p.hour + ':' + p.minute + ' ' + (p.dayPeriod || '') + ' ' + p.timeZoneName;
   };
   const lenLabel = h => h + (h === 1 ? ' Hr' : ' Hrs');
+  /* ---------- status label (dock badge, editor message, exported bar) ----------
+   * The label must say what has actually been verified, never a blanket "LIVE". A provider (set by weather_workspace.js, which knows
+   * the NOAA processor state) returns { state, text, color, title } for a scene. With no provider the label makes no live claim:
+   * demo patterns say DEMO, browser-fetched previews say PREVIEW, everything else says UNVERIFIED. */
+  D.statusProvider = null;
+  D.setStatusProvider = fn => { D.statusProvider = typeof fn === 'function' ? fn : null; };
+  D.liveStatus = function (scene) {
+    try {
+      const r = D.statusProvider && D.statusProvider(scene);
+      if (r && typeof r.text === 'string' && r.text) return { state: String(r.state || ''), text: r.text, color: String(r.color || '#9fb3cf'), title: String(r.title || '') };
+    } catch (e) { /* fall through to the safe default */ }
+    const dl = scene && scene.dataLoop, k = dl ? D.classify(dl.source).status : 'notconnected';
+    if (k === 'demo') return { state: 'demo', text: 'DEMO', color: '#b9a4ff', title: 'Synthetic test pattern — not NOAA data' };
+    if (k === 'experimental') return { state: 'experimental', text: 'PREVIEW', color: '#f5be4e', title: 'NOAA-rendered preview — not decoded source data' };
+    return { state: 'connected', text: 'UNVERIFIED', color: '#9fb3cf', title: 'Not verified as live NOAA data' };
+  };
   D.barLabels = function (scene) {
     const dl = dlOf(scene), rt = rtOf(scene), fr = ready(rt), f = fr[clamp(rt.lastIdx, 0, Math.max(0, fr.length - 1))], si = srcInfo(dl.source);
     const site = dl.source === 'nexrad' ? (dl.site || si.defaultSite || 'KBOX') : '';
@@ -315,7 +331,7 @@
     c.fillStyle = '#2f7bff'; rr(c, bx0, by - 5, Math.max(10, (bx1 - bx0) * L.loadedFrac), 10, 5); c.fill();
     c.fillStyle = '#fff'; c.beginPath(); c.arc(bx0 + (bx1 - bx0) * L.pos, by, 11, 0, 6.3); c.fill();
     c.fillStyle = '#eaf2ff'; c.textAlign = 'right'; c.font = '600 24px system-ui,Arial,sans-serif'; c.fillText(L.stamp, bx1, y0 + 13);
-    c.font = FONT; c.fillStyle = '#ff5d5d'; c.textAlign = 'left'; c.fillText('LIVE', bx1 + 36, y0 + bh / 2); c.fillStyle = '#eaf2ff'; c.fillText(L.len + ' ▾', bx1 + 128, y0 + bh / 2); c.textAlign = 'right'; c.fillText(L.src + ' ▾', x1 - 22, y0 + bh / 2);
+    const LS = D.liveStatus(scene); c.font = FONT; c.fillStyle = LS.color; c.textAlign = 'left'; c.fillText(LS.text, bx1 + 36, y0 + bh / 2, 90); c.fillStyle = '#eaf2ff'; c.fillText(L.len + ' ▾', bx1 + 128, y0 + bh / 2); c.textAlign = 'right'; c.fillText(L.src + ' ▾', x1 - 22, y0 + bh / 2);
     c.restore();
   };
 
@@ -327,7 +343,7 @@
     document.head.append(style);
     // Weather Data menu, palette selector and status pills (second sheet keeps the dock rules above untouched).
     const s2=document.createElement('style');s2.id='dlCss2';
-    s2.textContent="#dlBar .pill,#dlMenu .pill{display:inline-block;font:800 9px/1 Barlow,Arial,sans-serif;letter-spacing:.5px;text-transform:uppercase;padding:3px 5px;border-radius:9px;white-space:nowrap}.pill.connected{background:#12361f;color:#6ee79a;border:1px solid #1f7a43}.pill.experimental{background:#3a2a08;color:#ffc65c;border:1px solid #8a6310}.pill.demo{background:#17294a;color:#8db4ff;border:1px solid #31508f}.pill.notconnected{background:#2a2f3a;color:#a4afc0;border:1px solid #444e60}#dlBar button.dl-source{display:inline-flex;align-items:center;gap:6px;max-width:240px}#dlBar .dl-srcname{overflow:hidden;text-overflow:ellipsis;max-width:170px}#dlBar .dl-live::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff4b4b;margin-right:5px;vertical-align:1px}#dlBar .dl-stamp.warn{color:#ffc65c}#dlBar .dl-stamp.load{color:#9ec2ff}#dlBar button.dl-palbtn{padding:0;width:30px}#dlBar .dl-palbtn .sw{display:block;margin:0 auto;width:20px;height:10px;border-radius:3px;background:linear-gradient(90deg,#04e9e7,#02fd02,#fdf802,#fd0000,#f800fd)}#dlBar:focus-visible{outline:2px solid #4b55f2;outline-offset:-2px}#dlBar select.dl-len{max-width:80px}#dlBar .dl-timeline .prog{flex:0 0 8px;height:8px;min-height:8px;margin:3px 1px 5px;background:#26324b}#dlBar .dl-timeline .prog i{background:#3d6dff}#dlBar .dl-timeline .prog b{top:-4px;width:16px;height:16px;margin-left:-8px;background:#fff;border:2px solid #3d6dff}"+
+    s2.textContent="#dlBar .pill,#dlMenu .pill{display:inline-block;font:800 9px/1 Barlow,Arial,sans-serif;letter-spacing:.5px;text-transform:uppercase;padding:3px 5px;border-radius:9px;white-space:nowrap}.pill.connected{background:#12361f;color:#6ee79a;border:1px solid #1f7a43}.pill.experimental{background:#3a2a08;color:#ffc65c;border:1px solid #8a6310}.pill.demo{background:#17294a;color:#8db4ff;border:1px solid #31508f}.pill.notconnected{background:#2a2f3a;color:#a4afc0;border:1px solid #444e60}#dlBar button.dl-source{display:inline-flex;align-items:center;gap:6px;max-width:240px}#dlBar .dl-srcname{overflow:hidden;text-overflow:ellipsis;max-width:170px}#dlBar .dl-live[data-st]:not([data-st=live])::before{display:none}#dlBar .dl-live::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff4b4b;margin-right:5px;vertical-align:1px}#dlBar .dl-stamp.warn{color:#ffc65c}#dlBar .dl-stamp.load{color:#9ec2ff}#dlBar button.dl-palbtn{padding:0;width:30px}#dlBar .dl-palbtn .sw{display:block;margin:0 auto;width:20px;height:10px;border-radius:3px;background:linear-gradient(90deg,#04e9e7,#02fd02,#fdf802,#fd0000,#f800fd)}#dlBar:focus-visible{outline:2px solid #4b55f2;outline-offset:-2px}#dlBar select.dl-len{max-width:80px}#dlBar .dl-timeline .prog{flex:0 0 8px;height:8px;min-height:8px;margin:3px 1px 5px;background:#26324b}#dlBar .dl-timeline .prog i{background:#3d6dff}#dlBar .dl-timeline .prog b{top:-4px;width:16px;height:16px;margin-left:-8px;background:#fff;border:2px solid #3d6dff}"+
     "#stageWrap #dlMenu{position:absolute;right:8px;bottom:52px;z-index:9;width:min(470px,calc(100% - 16px));max-height:calc(100% - 64px);overflow:auto;background:rgba(10,17,30,.98);border:1px solid #344763;border-radius:9px;box-shadow:0 8px 28px #000c;color:#e4eefc;font:600 12px/1.3 Barlow,Arial,sans-serif;box-sizing:border-box}#dlMenu[hidden]{display:none!important}#dlMenu *{box-sizing:border-box}#dlMenu .dm-head{display:flex;justify-content:space-between;align-items:center;padding:8px 10px 4px;font-size:14px}#dlMenu button{font:inherit;color:inherit;cursor:pointer}#dlMenu .dm-x{background:none;border:0;font-size:20px;line-height:1;padding:0 4px}#dlMenu .dm-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:2px 10px 6px;border-bottom:1px solid #223149}#dlMenu .dm-tab{background:#141d2e;border:1px solid #25354f;border-radius:14px;padding:4px 9px}#dlMenu .dm-tab.on,#dlMenu .dm-chip.on{background:#4b55f2;border-color:#4b55f2;color:#fff}#dlMenu .dm-body{padding:8px 10px;display:flex;flex-direction:column;gap:6px}#dlMenu .dm-body.pal{border-top:1px solid #223149}#dlMenu .dm-chips{display:flex;flex-wrap:wrap;gap:4px}#dlMenu .dm-chip{background:#141d2e;border:1px solid #25354f;border-radius:6px;padding:4px 8px}#dlMenu .dm-row{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;background:#121a2a;border:1px solid #22314a;border-radius:7px;padding:7px 9px}#dlMenu .dm-row:hover:not(.off){background:#1a2640}#dlMenu .dm-row.on{border-color:#4b55f2;box-shadow:inset 0 0 0 1px #4b55f2}#dlMenu .dm-row.off{opacity:.62;cursor:not-allowed}#dlMenu .dm-main{display:flex;flex-direction:column;gap:1px;min-width:0}#dlMenu .dm-main b{font-weight:700}#dlMenu .dm-main i{font-style:normal;font-weight:400;color:#9eb2cc;font-size:11px}#dlMenu .dm-note{font-weight:400;color:#9eb2cc;font-size:11px}#dlMenu .dm-note.rgb{color:#c8d6ee;background:#17223a;border:1px dashed #34476b;border-radius:6px;padding:7px 9px}#dlMenu .dm-h{font:800 11px Barlow,Arial,sans-serif;letter-spacing:.6px;text-transform:uppercase;color:#7f95b8}#dlMenu .dm-filter{background:#0e1626;border:1px solid #25354f;color:#e4eefc;border-radius:6px;padding:5px 7px;font:inherit}#dlMenu .dm-sites{background:#0e1626;border:1px solid #25354f;color:#e4eefc;border-radius:6px;font:inherit;width:100%}#dlMenu .dm-pal{display:flex;flex-direction:column;gap:3px;text-align:left;background:#121a2a;border:1px solid #22314a;border-radius:7px;padding:7px 9px}#dlMenu .dm-pal.on{border-color:#4b55f2;box-shadow:inset 0 0 0 1px #4b55f2}#stageWrap #dlMenu canvas.dm-strip{position:static!important;inset:auto!important;left:auto!important;top:auto!important;width:100%!important;height:12px!important;border-radius:3px;display:block;pointer-events:none}#dlMenu .dm-pm{display:flex;justify-content:space-between;gap:8px}#dlMenu .dm-pm i{font-style:normal;font-weight:400;color:#9eb2cc;font-size:11px}";
     document.head.append(s2);
   }
@@ -479,7 +495,7 @@
       refs.prog.addEventListener('pointercancel', () => { dn = false; });
       timeline.append(refs.stamp, refs.prog); row.append(timeline);
       const options = h('div', { className: 'dl-options' });
-      const mode = h('span', { className: 'dl-live', text: 'LIVE', title: 'Live data only for now (archive comes later)' });
+      const mode = h('span', { className: 'dl-live' }); refs.mode = mode; paintStatus(mode, D.liveStatus(sc));
       const src = srcInfo(dl.source), stt = D.classify(dl.source);
       const len = h('select', { className: 'dl-len', title: 'Loop history length' }, (src.lengths || [1, 2, 4]).map(x => h('option', { value: x, text: lenLabel(x), selected: +dl.hours === x })));
       len.onchange = () => { dl.hours = +len.value; save(); };
@@ -505,6 +521,14 @@
       if (hit) { e.preventDefault(); hit(); }
     });
 
+    /* write the status badge only when it changed (called every frame) */
+    function paintStatus(n, st) {
+      if (!n) return;
+      if (n.textContent !== st.text) n.textContent = st.text;
+      if (n._wxState !== st.state) { n._wxState = st.state; n.setAttribute('data-st', st.state); }
+      if (n.style.color !== st.color) n.style.color = st.color;
+      const tip = st.title || ''; if (n.title !== tip) n.title = tip;
+    }
     function tick(ts) {
       try {
         const sc = cur(), dl = dlRaw(), sig = sc ? (dl && dl.on ? [dl.source, dl.hours, dl.site].join('|') : 'off') + '|' + (sc.bg && sc.bg.type) : '';
@@ -518,11 +542,11 @@
             const L = D.barLabels(sc); let text = L.stamp, warn = false;
             if (!text) { warn = true; text = rt.status === 'loading' ? 'Loading ' + rt.loaded + ' / ' + rt.total + ' frames…' : rt.status === 'nosrc' ? 'Not connected — ' + D.displayName(dl.source, dl) : rt.status === 'empty' ? 'No frames available' : rt.status === 'error' ? (rt.msg || 'Weather data error') : ''; }
             if (refs.stamp.textContent !== text) refs.stamp.textContent = text; refs.stamp.className = 'dl-stamp' + (warn && text ? (rt.status === 'loading' ? ' load' : ' warn') : '');
-            refs.spd.textContent = speed + 'x';
+            refs.spd.textContent = speed + 'x'; const ST = D.liveStatus(sc); paintStatus(refs.mode, ST);
             refs.fill.style.width = Math.round(L.loadedFrac * 100) + '%'; refs.knob.style.left = Math.round(L.pos * 100) + '%'; refs.knob.style.display = fr.length ? '' : 'none'; refs.play.textContent = rt.playing ? '❚❚' : '▶';
             const cf = fr[clamp(rt.lastIdx, 0, Math.max(0, fr.length - 1))];
             refs.prog.title = fr.length ? 'Frame ' + (Math.floor(rt.lastIdx) + 1) + ' of ' + fr.length + (cf && cf.t ? ' · observed ' + ageText(cf.t) : '') + ' — click or drag to scrub' : 'Click or drag to scrub weather frames';
-            refs.msg.textContent = rt.status === 'loading' ? 'Loading ' + rt.loaded + ' / ' + rt.total + ' frames…' : (rt.msg || (fr.length + ' frames · Live'));
+            refs.msg.textContent = rt.status === 'loading' ? 'Loading ' + rt.loaded + ' / ' + rt.total + ' frames…' : (rt.msg || (fr.length + ' frames · ' + ST.text));
           }
         }
       } catch (e) { /* never break the editor */ }
