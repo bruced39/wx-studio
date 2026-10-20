@@ -51,6 +51,8 @@
       citytemp: { x: 960, y: 540, size: 40, name: 'Boston', value: '54°', colorByTemp: true },
       callout: { x: 960, y: 540, dx: 170, dy: -130, size: 36, label: 'Billerica', value: '54°', color: '#ffd23f' },
       legend: { x: 560, y: 940, w: 800, h: 46, kind: 'radar', title: '', left: 'LIGHT', right: 'HEAVY' },
+      flow: { pts: [], color: '#3fa9ff', size: 46, spacing: 2.8, speed: 1, style: 'glossy' },
+      jet: { pts: [], color: '#0b4fa8', width: 64, style: 'banded', speed: 1, arrowColor: '#ffffff' },
       ticker: { x: 0, y: 960, w: 1920, h: 76, text: 'WIND ADVISORY FOR EASTERN MASSACHUSETTS UNTIL 6 AM SATURDAY', label: 'ALERT', speed: 140, color: '#c01010' }
     };
     return Object.assign(base, JSON.parse(JSON.stringify(D[type] || {})), props || {});
@@ -246,6 +248,8 @@
     }
     return Object.assign({}, o, { size: hit.size, wrapW: bw, fitBox: false, y: o.y - hit.cH - (hit.n - 1) * hit.size * 1.15 / 2 });
   }
+  E.fontFor = fontFor;
+  E.effectiveText = fitResolve;      // text object as drawn (fit-box objects resolved to their real size and top)
   function textMetrics(o) {
     let lines = String(autoText(o)).split('\n'); mctx.font = fontFor(o);
     if (o.wrapW > 0) lines = wrapLines(lines, o.wrapW);
@@ -334,6 +338,8 @@
       case 'hl': return g.Sym.hlBounds(o.x, o.y, o.size);
       case 'front': return ptsBox(o.pts, o.size * 1.2);
       case 'arrow': case 'line': case 'pen': return ptsBox(o.pts, (o.width || 8) * 1.8 + 6);
+      case 'flow': return ptsBox(o.pts, (o.size || 46) * 1.1 + 6);
+      case 'jet': return ptsBox(o.pts, (o.width || 64) * 0.95 + 8);
       case 'shape': case 'image': return { x: Math.min(o.x, o.x + o.w), y: Math.min(o.y, o.y + o.h), w: Math.abs(o.w), h: Math.abs(o.h) };
       case 'barb': return { x: o.x - o.size, y: o.y - o.size, w: o.size * 2, h: o.size * 2 };
       case 'pin': return { x: o.x - 24, y: o.y - 24, w: 300, h: 70 };
@@ -354,6 +360,7 @@
   function drawObj(c, o, t, p, show) {
     switch (o.type) {
       case 'text': {
+        if (E.editingId && E.editingId === o.id) break;
         o = fitResolve(o); const m = textMetrics(o); c.save(); c.font = fontFor(o); c.textBaseline = 'top'; c.textAlign = o.align || 'left';
         if (o.box) drawTextBox(c, o, E.bounds(o));
         let fill = o.color;
@@ -368,6 +375,8 @@
       case 'hl': g.Sym.drawHL(c, o.kind, o.x, o.y, o.size, o.value, t, { progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'front': g.Sym.drawFront(c, o.kind, o.pts, o.size, t, { flip: o.flip, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'arrow': g.Sym.drawPath(c, o.pts, { color: o.color, width: o.width, style: o.style, head: o.head, t, progress: o.animMode === 'draw' ? p : 1 }); break;
+      case 'flow': g.Sym.drawFlow(c, o.pts, { color: o.color, size: o.size, spacing: o.spacing, speed: o.speed, style: o.style, t, progress: o.animMode === 'draw' ? p : 1 }); break;
+      case 'jet': g.Sym.drawJet(c, o.pts, { color: o.color, width: o.width, style: o.style, speed: o.speed, arrowColor: o.arrowColor, label: o.label, t, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'line': g.Sym.drawPath(c, o.pts, { color: o.color, width: o.width, style: o.style, closed: o.closed, label: o.label, t, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'pen': g.Sym.drawPath(c, o.pts, { color: o.color, width: o.width, raw: true, glow: false, t, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'shape': {
@@ -560,17 +569,22 @@
   const TB2 = { cuts: [0, 260, 480, 600, 860, 1100], zones: [1, 3], boxL: 18, silverInset: 14, silverCY: 0.43 };
   /* v0.10.1.2: "text only" banner (T.textOnly): the banner artwork is already in the scene background (the bar templates), so only the title text is
      drawn - centred in T.region (the silver panel: l, r, cy, h) and shrunk to fit its width. Same fonts, layer style, entrance and offsets as banner #2. */
-  function drawTitle2Text(c, T, t, editing) {
-    const R = T.region || { l: 186, r: 1272, cy: 102, h: 88 }; let txt = String(T.text || ''); if (!txt) return; if (T.upper !== false) txt = txt.toUpperCase();
-    let p = 1; if (!editing) { const d = T.delay == null ? 0.2 : T.delay; if (t < d) return; p = ease.out(clamp((t - d) / 0.7, 0, 1)); }
-    const mode = (!T.anim || T.anim === 'auto') ? 'fade' : T.anim, fam = '"' + (T.font || 'Roboto Condensed') + '", "Barlow Condensed", Arial Narrow, sans-serif', weight = T.weight || 700;
+  E.title2Layout = function (T, c) {
+    const R = T.region || { l: 186, r: 1272, cy: 102, h: 88 }; let txt = String(T.text || ''); if (T.upper !== false) txt = txt.toUpperCase();
+    const fam = '"' + (T.font || 'Roboto Condensed') + '", "Barlow", "Barlow Condensed", Arial Narrow, sans-serif', weight = T.weight || 700;
     const dx = T.dx || 0, pad = R.pad != null ? R.pad : 0.03 * (R.r - R.l), availL = R.l + dx + pad, availR = R.r + dx - pad, availW = Math.max(40, availR - availL);
-    let size = T.size > 0 ? T.size : R.h * 0.9; c.save(); c.font = `${weight} ${size}px ${fam}`; let tw = c.measureText(txt).width;
+    let size = T.size > 0 ? T.size : R.h * 0.9; c.save(); c.font = `${weight} ${size}px ${fam}`; let tw = txt ? c.measureText(txt).width : 0;
     if (tw > availW) { size = size * availW / tw; c.font = `${weight} ${size}px ${fam}`; tw = c.measureText(txt).width; }
-    c.textBaseline = 'middle'; c.textAlign = 'left'; const mh = c.measureText('H'), capShift = ((mh.actualBoundingBoxAscent || size * 0.35) - (mh.actualBoundingBoxDescent || 0)) / 2;
-    const tx = T.align === 'left' ? availL : T.align === 'right' ? availR - tw : availL + (availW - tw) / 2, ty = R.cy + (T.ty || 0) + capShift;
-    if (mode === 'fade') c.globalAlpha *= p; else if (mode === 'in-left') c.translate(-(1 - p) * (availR + 200), 0); else if (mode === 'in-right') c.translate((1 - p) * (W - availL + 200), 0); else if (mode === 'in-top') c.translate(0, -(1 - p) * (R.cy + R.h + 300));
-    E.drawFxLines(c, [txt], tx, ty, size * 1.1, T.fx, T.color || '#07345a', size); c.restore();
+    c.textBaseline = 'middle'; c.textAlign = 'left'; const mh = c.measureText('H'), capShift = ((mh.actualBoundingBoxAscent || size * 0.35) - (mh.actualBoundingBoxDescent || 0)) / 2; c.restore();
+    const tx = T.align === 'left' ? availL : T.align === 'right' ? availR - tw : availL + (availW - tw) / 2;
+    return { R, txt, fam, weight, size, tw, tx, ty: R.cy + (T.ty || 0) + capShift, availL, availR, availW };
+  };
+  function drawTitle2Text(c, T, t, editing) {
+    if (E.editingTitle2) return; const L = E.title2Layout(T, c); if (!L.txt) return;
+    let p = 1; if (!editing) { const d = T.delay == null ? 0.2 : T.delay; if (t < d) return; p = ease.out(clamp((t - d) / 0.7, 0, 1)); }
+    const mode = (!T.anim || T.anim === 'auto') ? 'fade' : T.anim, R = L.R; c.save(); c.font = `${L.weight} ${L.size}px ${L.fam}`; c.textBaseline = 'middle'; c.textAlign = 'left';
+    if (mode === 'fade') c.globalAlpha *= p; else if (mode === 'in-left') c.translate(-(1 - p) * (L.availR + 200), 0); else if (mode === 'in-right') c.translate((1 - p) * (W - L.availL + 200), 0); else if (mode === 'in-top') c.translate(0, -(1 - p) * (R.cy + R.h + 300));
+    E.drawFxLines(c, [L.txt], L.tx, L.ty, L.size * 1.1, T.fx, T.color || '#07345a', L.size); c.restore();
   }
   function drawTitle2(c, show, scene, t, editing) {
     const T = scene.title2; if (!T || !T.show) return; if (T.textOnly) { drawTitle2Text(c, T, t, editing); return; } const A = g.WX_TB2; if (!A) return; const bar = tb2Img('bar'), logo = tb2Img('logo'); if (!bar) return;
@@ -719,7 +733,7 @@
     for (let i = scene.objects.length - 1; i >= 0; i--) {
       const o = scene.objects[i]; if (o.hidden || o.locked) continue; const s = toScreen(o, xf), b = E.bounds(s);
       if (sx >= b.x && sx <= b.x + b.w && sy >= b.y && sy <= b.y + b.h) {
-        if (s.pts && s.pts.length > 1 && (o.type === 'pen' || o.type === 'line' || o.type === 'arrow' || o.type === 'front')) {  // precise: near the polyline
+        if (s.pts && s.pts.length > 1 && (o.type === 'pen' || o.type === 'line' || o.type === 'arrow' || o.type === 'front' || o.type === 'flow' || o.type === 'jet')) {  // precise: near the polyline
           const poly = g.Sym.catmull(s.pts, !!s.closed, 6), tol = Math.max(14, (s.width || s.size || 8)); let ok = false;
           for (let j = 1; j < poly.length && !ok; j++) { const a = poly[j - 1], bb = poly[j], dx = bb[0] - a[0], dy = bb[1] - a[1], l2 = dx * dx + dy * dy || 1, u = clamp(((sx - a[0]) * dx + (sy - a[1]) * dy) / l2, 0, 1); ok = Math.hypot(sx - (a[0] + u * dx), sy - (a[1] + u * dy)) <= tol + (o.type === 'front' ? o.size : 0); }
           if (!ok) continue;
@@ -840,7 +854,7 @@
   const STD_BANNER = { l: 186, r: 1272, cy: 102, h: 88 };
   const barRows = (x, w, h, ys) => ys.map(y => ({ x, y, w, h }));
   E.TPL_ART = {
-    'hl-sky': { asset: 'tpl_hl_sky', title: 'Weather Headlines', banner: { l: 258, r: 1318, cy: 110, h: 88 }, titleSize: 96, bars: barRows(349, 1220, 136, [290, 472, 653, 842]), padX: 46, padY: 16, textSize: 54, kind: 'glass' },
+    'hl-sky': { asset: 'tpl_hl_sky', title: 'Weather Headlines', banner: { l: 258, r: 1318, cy: 110, h: 88 }, titleSize: 84, bars: barRows(349, 1220, 136, [290, 472, 653, 842]), padX: 46, padY: 16, textSize: 54, kind: 'glass' },
     'hl-night': { asset: 'tpl_hl_night', title: 'Weather Headlines', banner: STD_BANNER, titleSize: 84, bars: barRows(418, 1085, 169, [250, 452, 655, 858]), padX: 74, padY: 18, textSize: 64, kind: 'blue' },
     'hl-day': { asset: 'tpl_hl_day', title: 'Weather Headlines', banner: STD_BANNER, titleSize: 84, bars: barRows(418, 1085, 169, [250, 452, 655, 858]), padX: 74, padY: 18, textSize: 64, kind: 'blue' },
     'storm-night': { asset: 'tpl_storm_night', title: 'Storm Update', banner: STD_BANNER, titleSize: 84, bars: barRows(415, 1089, 169, [250, 452, 655, 858]), padX: 76, padY: 18, textSize: 64, kind: 'red' },
@@ -848,13 +862,23 @@
   };
   E.TEMPLATES = [['hl-sky', 'Weather Headlines – sky (glass boxes)'], ['hl-night', 'Weather Headlines – night (blue bars)'], ['hl-day', 'Weather Headlines – day (blue bars)'],
     ['storm-night', 'Storm Update – night (red bars)'], ['storm-day', 'Storm Update – day (red bars)'], ['impacts', 'Storm Impacts (over current map)']];
+  E.sharedBarSize = function (art, lines) {
+    const max = art.textSize; if (!mctx || !lines.length) return max;
+    for (let sz = max; sz > 14; sz--) {
+      mctx.font = fontFor({ weight: 800, size: sz, font: 'sans' });
+      if (lines.every((ln, i) => { const b = art.bars[i], bw = b.w - 2 * art.padX, ls = wrapLines(String(ln).toUpperCase().split('\n'), bw); return ls.length <= 2 && ls.length * sz * 1.15 <= b.h - 2 * art.padY && Math.max(...ls.map(l => mctx.measureText(l).width)) <= bw; })) return sz;
+    }
+    return 14;
+  };
   E.buildTemplate = function (kind, o) {
     const objs = [], lines = (o.lines || []).filter(x => String(x).trim()), m = o.safe || 48;
     const add = (type, props, delay) => { const ob = E.newObject(type, props); ob.anim = { in: props.anim || 'fade', delay: delay || 0, dur: 0.6 }; delete ob.anim.undefined; objs.push(ob); return ob; };
     const art = E.TPL_ART[kind];
     if (art) {
-      lines.slice(0, art.bars.length).forEach((ln, i) => {
-        const b = art.bars[i], t = add('text', { x: b.x + b.w / 2, y: b.y + b.h / 2, text: String(ln).toUpperCase(), size: art.textSize, align: 'center', color: '#ffffff', weight: 800, wrapW: b.w - 2 * art.padX, fitBox: true, fitH: b.h - 2 * art.padY, maxLines: 2, autoFit: true, anim: 'fade' }, 0.5 + i * 0.35);
+      // every bar gets the SAME size: the number given, or (blank/0) the largest size at which all the lines fit on two lines
+      const use = lines.slice(0, art.bars.length), sz = o.size > 0 ? o.size : E.sharedBarSize(art, use);
+      use.forEach((ln, i) => {
+        const b = art.bars[i], t = add('text', { x: b.x + b.w / 2, y: b.y + b.h / 2, text: String(ln).toUpperCase(), size: sz, align: 'center', font: 'sans', color: '#ffffff', weight: 800, wrapW: b.w - 2 * art.padX, fitBox: true, fitH: b.h - 2 * art.padY, maxLines: 2, autoFit: true, anim: 'fade' }, 0.5 + i * 0.35);
         t.fx = E.fxDefault(); t.fx.stroke.on = false; t.fx.shadow = Object.assign({}, t.fx.shadow, { on: true, color: '#000000', opacity: art.kind === 'glass' ? 55 : 70, angle: 90, dist: 3, size: 6 });
       });
       return objs;
@@ -873,7 +897,7 @@
   E.sceneFromTemplate = function (kind, o, bg) {
     const art = E.TPL_ART[kind], nm = (E.TEMPLATES.find(t => t[0] === kind) || [0, 'Template'])[1].replace(/ –.*| \(.*/, '');
     const sc = E.newScene({ name: art ? nm + (/night/.test(kind) ? ' (night)' : /day/.test(kind) ? ' (day)' : '') : nm, duration: 10, bg: art ? { type: 'image', asset: art.asset, kenburns: false, fit: 'fill' } : (bg || { type: 'image', asset: 'bgdefault', kenburns: false, fit: 'fill' }), title: { show: false, text: '', sub: '' }, objects: E.buildTemplate(kind, o) });
-    if (art) sc.title2 = Object.assign(E.title2Default(), { show: true, textOnly: true, region: Object.assign({}, art.banner), text: o.title || art.title, size: art.titleSize, align: 'center', anim: 'fade', delay: 0.1 });
+    if (art) sc.title2 = Object.assign(E.title2Default(), { show: true, textOnly: true, region: Object.assign({}, art.banner), text: o.title || art.title, size: o.titleSize > 0 ? o.titleSize : art.titleSize, font: 'Barlow', align: 'center', anim: 'fade', delay: 0.1 });
     return sc;
   };
 

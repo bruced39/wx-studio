@@ -176,6 +176,75 @@
     c.restore();
   }
 
+  /* ---------- colour helpers (hex / rgb() in, rgba() out) ---------- */
+  function rgbOf(col) { col = String(col || '#ffffff'); let m = /^#([0-9a-f]{3})$/i.exec(col); if (m) col = '#' + m[1].split('').map(x => x + x).join(''); m = /^#([0-9a-f]{6})/i.exec(col); if (m) { const n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; } m = /(\d+)[, ]+(\d+)[, ]+(\d+)/.exec(col); return m ? [+m[1], +m[2], +m[3]] : [255, 255, 255]; }
+  const rgbaOf = (col, a) => { const q = rgbOf(col); return 'rgba(' + q[0] + ',' + q[1] + ',' + q[2] + ',' + a + ')'; };
+  const shade = (col, k) => { const q = rgbOf(col), t = k >= 0 ? 255 : 0, f = Math.abs(k); return 'rgb(' + q.map(v => Math.round(v + (t - v) * f)).join(',') + ')'; };
+
+  /* ---------- flow arrows: separate arrows (no line between them) streaming along a bendable path ---------- */
+  function flowGlyph(c, p, size, col, style, alpha) {
+    c.save(); c.translate(p.x, p.y); c.rotate(Math.atan2(p.ty, p.tx)); c.globalAlpha *= alpha;
+    const L = size, hw = size * 0.46;
+    if (style === 'glossy') {
+      const tl = size * 2.1, tg = c.createLinearGradient(-tl, 0, -L * 0.2, 0); tg.addColorStop(0, rgbaOf(col, 0)); tg.addColorStop(1, rgbaOf(col, 0.8));
+      c.fillStyle = tg; c.beginPath(); c.moveTo(-L * 0.2, -hw * 0.34); c.lineTo(-tl, 0); c.lineTo(-L * 0.2, hw * 0.34); c.closePath(); c.fill();
+      c.shadowColor = col; c.shadowBlur = size * 0.4;
+    }
+    c.beginPath(); c.moveTo(L * 0.58, 0); c.lineTo(-L * 0.36, -hw); c.lineTo(-L * 0.1, 0); c.lineTo(-L * 0.36, hw); c.closePath();
+    if (style === 'glossy') {
+      const gr = c.createLinearGradient(0, -hw, 0, hw); gr.addColorStop(0, shade(col, 0.55)); gr.addColorStop(0.5, col); gr.addColorStop(1, shade(col, -0.35));
+      c.fillStyle = gr; c.fill(); c.shadowBlur = 0; c.lineJoin = 'round'; c.lineWidth = Math.max(1.5, size * 0.07); c.strokeStyle = 'rgba(255,255,255,0.92)'; c.stroke();
+      c.fillStyle = 'rgba(255,255,255,0.28)'; c.beginPath(); c.moveTo(L * 0.5, -hw * 0.04); c.lineTo(-L * 0.28, -hw * 0.86); c.lineTo(-L * 0.12, -hw * 0.04); c.closePath(); c.fill();
+    } else { c.fillStyle = col; c.fill(); }
+    c.restore();
+  }
+  function drawFlow(c, pts, o) {
+    o = o || {}; if (!pts || pts.length < 2) return;
+    const size = Math.max(6, o.size || 46), col = o.color || '#3fa9ff', style = o.style === 'plain' ? 'plain' : 'glossy', gap = Math.max(1.2, o.spacing || 2.8), spd = o.speed == null ? 1 : o.speed, t = o.t || 0;
+    const m = measure(catmull(pts, false, 10)); if (m.L < 2) return; const Lp = m.L * (o.progress == null ? 1 : o.progress), sp = size * gap, shift = ((t * spd * size * 2.4) % sp + sp) % sp, edge = size * 1.6;
+    c.save();
+    for (let k = -1; ; k++) {
+      const s = k * sp + shift; if (s > Lp) break; if (s < 0) continue;
+      flowGlyph(c, at(m, s), size, col, style, clamp(Math.min(s, Lp - s) / edge, 0, 1));
+    }
+    c.restore();
+  }
+
+  /* ---------- jet stream: wide band along a bendable path with animated arrows ---------- */
+  function drawJet(c, pts, o) {
+    o = o || {}; if (!pts || pts.length < 2) return;
+    const w = Math.max(10, o.width || 64), style = o.style === 'ribbon' ? 'ribbon' : 'banded', col = o.color || (style === 'ribbon' ? '#d5dbe6' : '#0b4fa8'), acol = o.arrowColor || '#ffffff', spd = o.speed == null ? 1 : o.speed, t = o.t || 0;
+    const m0 = measure(catmull(pts, false, 12)); if (m0.L < 2) return; const Lp = m0.L * (o.progress == null ? 1 : o.progress), sub = upTo(m0, Lp), m = measure(sub); if (m.L < 2) return;
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+    const glyphs = (gw, step, col2, alpha0) => {                 // arrows streaming along the middle of the band
+      const shift = ((t * spd * step * 0.9) % step + step) % step, edge = Math.min(step * 1.5, m.L / 3);
+      for (let k = -1; ; k++) {
+        const s = k * step + shift; if (s > m.L) break; if (s < 0) continue; const p = at(m, s), a = clamp(Math.min(s, m.L - s) / edge, 0, 1) * alpha0;
+        c.save(); c.translate(p.x, p.y); c.rotate(Math.atan2(p.ty, p.tx)); c.globalAlpha *= a; c.fillStyle = col2;
+        c.beginPath(); c.moveTo(gw * 0.55, 0); c.lineTo(-gw * 0.4, -gw * 0.5); c.lineTo(-gw * 0.15, 0); c.lineTo(-gw * 0.4, gw * 0.5); c.closePath(); c.fill(); c.restore();
+      }
+    };
+    if (style === 'banded') {
+      c.shadowColor = 'rgba(0,0,0,0.35)'; c.shadowBlur = w * 0.18; c.strokeStyle = '#ffffff'; c.lineWidth = w + Math.max(5, w * 0.14); strokePoly(c, m.poly); c.stroke(); c.shadowBlur = 0;
+      c.strokeStyle = col; c.lineWidth = w; strokePoly(c, m.poly); c.stroke();
+      c.strokeStyle = 'rgba(255,255,255,0.14)'; c.lineWidth = w * 0.42; c.save(); c.translate(0, -w * 0.12); strokePoly(c, m.poly); c.stroke(); c.restore();   // soft sheen
+      glyphs(w * 0.46, w * 1.45, acol, 1);
+    } else {
+      // ribbon: narrow tail growing to full width, ending in a large arrow head
+      const head = Math.min(w * 2.1, m.L * 0.45), body = Math.max(0, m.L - head), N = Math.max(8, Math.ceil(m.L / 8)), tail = Math.min(body * 0.45, w * 4);
+      const hw = s => { const u = tail > 0 ? clamp(s / tail, 0, 1) : 1; return w * 0.5 * (0.3 + 0.7 * (u * u * (3 - 2 * u))); };
+      const Lft = [], Rgt = []; for (let i = 0; i <= N; i++) { const s = body * i / N, p = at(m, s), q = hw(s); Lft.push([p.x - p.ty * q, p.y + p.tx * q]); Rgt.push([p.x + p.ty * q, p.y - p.tx * q]); }
+      const pb = at(m, body), pe = at(m, m.L), hb = w * 0.5 * 1.75;
+      c.beginPath(); Lft.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); c.lineTo(pb.x - pb.ty * hb, pb.y + pb.tx * hb); c.lineTo(pe.x, pe.y); c.lineTo(pb.x + pb.ty * hb, pb.y - pb.tx * hb);
+      for (let i = N; i >= 0; i--) c.lineTo(Rgt[i][0], Rgt[i][1]); c.closePath();
+      const first = at(m, 0), gr = c.createLinearGradient(first.x, first.y, pe.x, pe.y); gr.addColorStop(0, rgbaOf(col, 0.35)); gr.addColorStop(0.45, rgbaOf(col, 0.85)); gr.addColorStop(1, rgbaOf(col, 0.9));
+      c.shadowColor = 'rgba(0,0,0,0.3)'; c.shadowBlur = w * 0.25; c.fillStyle = gr; c.fill(); c.shadowBlur = 0; c.lineWidth = Math.max(1.5, w * 0.04); c.strokeStyle = 'rgba(255,255,255,0.55)'; c.stroke();
+      glyphs(w * 0.34, w * 1.1, o.arrowColor ? acol : shade(col, -0.45), 0.8);
+    }
+    if (o.label) { const mid = at(m, m.L * 0.5); pill(c, o.label, mid.x, mid.y, Math.max(16, w * 0.4), 'rgba(8,20,38,0.85)', '#fff'); }
+    c.restore();
+  }
+
   /* ---------- wind barb ---------- */
   function drawBarb(c, x, y, kt, dirFrom, size, col) {
     c.save(); c.translate(x, y); c.strokeStyle = c.fillStyle = col || '#fff'; c.lineWidth = Math.max(2, size * 0.07); c.lineCap = 'round';
@@ -189,5 +258,5 @@
     c.restore();
   }
 
-  g.Sym = { FONT, catmull, measure, at, drawHL, hlBounds, drawFront, drawPath, drawBarb, pill, FRONT_KINDS: [['cold', 'Cold front'], ['warm', 'Warm front'], ['stationary', 'Stationary front'], ['occluded', 'Occluded front'], ['trough', 'Trough'], ['dryline', 'Dry line']] };
+  g.Sym = { FONT, catmull, measure, at, drawHL, hlBounds, drawFront, drawPath, drawFlow, drawJet, drawBarb, pill, FRONT_KINDS: [['cold', 'Cold front'], ['warm', 'Warm front'], ['stationary', 'Stationary front'], ['occluded', 'Occluded front'], ['trough', 'Trough'], ['dryline', 'Dry line']] };
 })(typeof window !== 'undefined' ? window : globalThis);

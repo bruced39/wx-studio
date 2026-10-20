@@ -157,7 +157,7 @@
   }
 
   /* ---------- tools ---------- */
-  const TOOLS = [['pan', '✋ Pan Map'], ['select', '⌖ Select'], ['pen', '✎ Pen'], ['arrow', '➚ Arrow'], ['line', '〰 Isobar'], ['front', '▲ Front'], ['hl-H', 'H'], ['hl-L', 'L'], ['icon', '☀ Icon'], ['text', 'T Text'], ['rect', '▭ Box'], ['ellipse', '◯ Oval'], ['pin', '● Pin'], ['storm', '🌀 Storm'], ['barb', '⇶ Wind barb']];
+  const TOOLS = [['pan', '✋ Pan Map'], ['select', '⌖ Select'], ['pen', '✎ Pen'], ['arrow', '➚ Arrow'], ['flow', '➤ Flow arrows'], ['jet', '≋ Jet stream'], ['line', '〰 Isobar'], ['front', '▲ Front'], ['hl-H', 'H'], ['hl-L', 'L'], ['icon', '☀ Icon'], ['text', 'T Text'], ['rect', '▭ Box'], ['ellipse', '◯ Oval'], ['pin', '● Pin'], ['storm', '🌀 Storm'], ['barb', '⇶ Wind barb']];
   function addWidget(k) {
     if (!k) return; const m = SAFE(); let o;
     if (k === 'citytemp') o = addObject('citytemp', {});
@@ -178,7 +178,7 @@
   }
   function setTool(id) {
     finishDraft();S.tool=id;
-    if(S.show&&['front','arrow','line'].includes(id))toast('Click each point along the line, then double-click (or press Enter) to finish');
+    if(S.show&&['front','arrow','line','flow','jet'].includes(id))toast('Click each point along the line, then double-click (or press Enter) to finish');
     document.querySelectorAll('#tools button[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===id));
     // Do not access cur() before S.show exists.
     ov.style.cursor=(id==='pan'||(id==='select'&&S.show?.scenes?.[S.si]?.bg?.type==='mapbox'))?'grab':id==='select'?'default':'crosshair';
@@ -240,7 +240,7 @@
       return;
     }
     if (S.tool === 'pen') { S.draft = { type: 'pen', pts: [p] }; S.drag = { k: 'pen' }; return; }
-    if (['arrow', 'line', 'front'].includes(S.tool)) {
+    if (['arrow', 'line', 'front', 'flow', 'jet'].includes(S.tool)) {
       if (!S.draft) S.draft = { type: S.tool, pts: [p] }; else { const l = S.draft.pts[S.draft.pts.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) < 8) { finishDraft(); return; } S.draft.pts.push(p); } return;
     }
     if (S.tool === 'rect' || S.tool === 'ellipse') { S.draft = { type: 'shape', shape: S.tool === 'rect' ? 'round' : 'ellipse', x: p[0], y: p[1], w: 0, h: 0 }; S.drag = { k: 'shape', o: p }; return; }
@@ -293,14 +293,53 @@
   ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; S.snapLines = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
   ov.addEventListener('pointercancel', () => { const d=S.drag; S.drag = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if(d&&(d.k==='orbit'||d.k==='pan'))g.MB.setInteractive(false); });
   ov.addEventListener('contextmenu', e => { if (cur().bg.type === 'mapbox') e.preventDefault(); });
-  ov.addEventListener('dblclick', () => { if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); } });
+  /* ---------- v0.10.1.3: double-click text on the stage to edit it in place ----------
+     A small text box is laid exactly over the text (same font, size and alignment) so you can click to place the cursor, type, delete and press Enter for a
+     new line. Esc or clicking elsewhere finishes. The banner title (text-only banner) is single-line: Enter finishes. The right-hand panel is unchanged. */
+  let inl = null;
+  function endInline() { if (!inl) return; const i = inl; inl = null; E.editingId = null; E.editingTitle2 = false; i.el.remove(); commit(); renderPanels(); }
+  function startInline(o, title2) {
+    endInline(); const sc = cur(); let ta = document.createElement('textarea'); ta.className = 'wxInline'; ta.spellcheck = false; ta.setAttribute('aria-label', 'Edit text on the stage');
+    const wasUpper = title2 ? false : (String(o.text || '') !== '' && String(o.text) === String(o.text).toUpperCase() && /[A-Z]/.test(o.text));
+    const lum = col => { const q = (/^#([0-9a-f]{6})/i.exec(String(col || '')) || [])[1]; if (!q) return 1; const n = parseInt(q, 16); return ((n >> 16 & 255) * 0.3 + (n >> 8 & 255) * 0.59 + (n & 255) * 0.11) / 255; };
+    function place() {
+      const r = ov.getBoundingClientRect(), wr = ov.parentElement.getBoundingClientRect(), k = r.width / W, ox = r.left - wr.left, oy = r.top - wr.top, st = ta.style;
+      st.boxSizing = 'border-box'; st.position = 'absolute'; st.margin = '0'; st.resize = 'none'; st.overflow = 'hidden'; st.zIndex = '30'; st.outline = '2px solid #2f9bff'; st.border = '0'; st.lineHeight = title2 ? '' : '1.15';
+      if (title2) {
+        const L = E.title2Layout(o, octx), R = L.R; st.left = ox + (R.l + (o.dx || 0)) * k + 'px'; st.width = (R.r - R.l) * k + 'px'; st.top = oy + (R.cy - R.h / 2 + (o.ty || 0)) * k + 'px'; st.height = R.h * k + 'px';
+        st.font = `${L.weight} ${L.size * k}px ${L.fam}`; st.lineHeight = R.h * k + 'px'; st.textAlign = o.align || 'center'; st.whiteSpace = 'nowrap'; st.padding = '0 6px'; st.color = o.color || '#07345a'; st.textTransform = o.upper !== false ? 'uppercase' : 'none';
+        st.background = lum(o.color || '#07345a') > 0.6 ? 'rgba(8,24,52,0.6)' : 'rgba(255,255,255,0.55)';
+      } else {
+        const so = E.toScreen(o, E.xf(sc, editT())), eff = E.effectiveText(so), b = E.bounds(so), pad = (so.box ? so.size * 0.35 : 4) * k;
+        st.left = ox + b.x * k + 'px'; st.top = oy + b.y * k + 'px'; st.width = Math.max(60, b.w * k) + 'px'; st.height = Math.max(20, b.h * k) + 'px'; st.padding = pad + 'px';
+        st.font = E.fontFor(eff).replace(/\d+(\.\d+)?px/, eff.size * k + 'px'); st.textAlign = so.align || 'left'; st.whiteSpace = so.wrapW > 0 ? 'pre-wrap' : 'pre'; st.color = so.color || '#fff';
+        st.background = lum(so.color) > 0.6 ? 'rgba(8,24,52,0.6)' : 'rgba(255,255,255,0.55)'; st.textShadow = 'none';
+      }
+    }
+    inl = { el: ta, o }; if (title2) E.editingTitle2 = true; else E.editingId = o.id;
+    ta.value = String(o.text || ''); ov.parentElement.append(ta); place();
+    ta.addEventListener('input', () => { if (wasUpper) { const p = ta.selectionStart; ta.value = ta.value.toUpperCase(); ta.setSelectionRange(p, p); } o.text = ta.value; place(); });
+    ta.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); endInline(); }
+      else if (e.key === 'Enter' && (title2 || e.ctrlKey || e.metaKey)) { e.preventDefault(); endInline(); }
+    });
+    ta.addEventListener('blur', () => { if (inl && inl.el === ta) endInline(); });
+    ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); setTimeout(() => { if (inl && inl.el === ta && document.activeElement !== ta) ta.focus(); }, 0);
+  }
+  ov.addEventListener('dblclick', e => {
+    if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); return; }
+    if (S.tool !== 'select' || !S.show) return; const sc = cur(), p = pt(e), hit = E.hit(sc, editT(), p[0], p[1]);
+    if (hit && hit.type === 'text' && !hit.auto) { S.oid = hit.id; if (S.tab !== 'object') setTab('object'); else renderPanels(); startInline(hit, false); return; }
+    const T = sc.title2; if (!hit && T && T.show && T.textOnly) { const R = T.region || { l: 186, r: 1272, cy: 102, h: 88 }, dx = T.dx || 0; if (p[0] >= R.l + dx && p[0] <= R.r + dx && Math.abs(p[1] - (R.cy + (T.ty || 0))) <= R.h / 2 + 6) startInline(T, true); }
+  });
   ov.addEventListener('wheel', e => { const sc = cur(); if (!isMap(sc.bg)) return; e.preventDefault(); backToEdit(); const p = pt(e);
     if (sc.bg.type === 'mapbox') { g.MB.setInteractive(true); const v = mapView(sc), ll = E.xf(sc, editT()).inv(p[0], p[1]); v.z = clamp(v.z - e.deltaY * 0.0025, 0, 20); const l2 = E.xf(sc, editT()).inv(p[0], p[1]); if (isFinite(ll[0]) && isFinite(l2[0])) v.c = [v.c[0] + ll[0] - l2[0], Math.max(-85, Math.min(85, v.c[1] + ll[1] - l2[1]))]; updateZoomBadge(); clearTimeout(ov._wt); ov._wt = setTimeout(()=>{g.MB.setInteractive(false);commit();},180); return; }
     const v = mapView(sc), k = W / v.w, P = [v.cx + (p[0] - W / 2) / k, v.cy + (p[1] - H / 2) / k]; v.w = clamp(v.w * Math.exp(e.deltaY * 0.0012), 18, 1700); const k2 = W / v.w; v.cx = P[0] - (p[0] - W / 2) / k2; v.cy = P[1] - (p[1] - H / 2) / k2; clearTimeout(ov._wt); ov._wt = setTimeout(commit, 400); }, { passive: false });
   ['dragover', 'dragenter'].forEach(ev => stage.parentElement.addEventListener(ev, e => { e.preventDefault(); }));
   stage.parentElement.addEventListener('drop', e => { e.preventDefault(); const ovid = e.dataTransfer && e.dataTransfer.getData('application/x-wx-overlay'); if (ovid) { const b = bgList.find(x => x.id === ovid); if (b) { addOverlay(b, pt(e)); setTool('select'); } return; } const ic = e.dataTransfer && e.dataTransfer.getData('application/x-wx-icon'); if (ic) { const p = pt(e); addObject('icon', { x: p[0], y: p[1], icon: ic }); setTool('select'); const o = selObj(); if (o) { S.oid = o.id; } refreshAll(); return; } if (e.dataTransfer && e.dataTransfer.files.length) addFiles([...e.dataTransfer.files], e.shiftKey ? 'bg' : 'obj'); });
   document.addEventListener('keydown', e => {
-    const tg = e.target.tagName; if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    const tg = e.target.tagName; if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || inl) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
@@ -376,7 +415,7 @@
       octx.setLineDash([]);
       if (d.type === 'shape') { octx.strokeStyle = '#2f9bff'; octx.strokeRect(d.x, d.y, d.w, d.h); }
       else { const pts = d.type === 'pen' ? d.pts : d.pts.concat([S.cursor]); const o = { pts, color: '#ffe14d', width: 8, kind: S.opt.front, size: 28, style: 'solid' };
-        if (d.type === 'front') g.Sym.drawFront(octx, S.opt.front, pts, 28, clock()); else g.Sym.drawPath(octx, pts, { color: '#ffe14d', width: 8, raw: d.type === 'pen', glow: false, head: d.type === 'arrow', t: clock() });
+        if (d.type === 'front') g.Sym.drawFront(octx, S.opt.front, pts, 28, clock()); else g.Sym.drawPath(octx, pts, { color: '#ffe14d', width: 8, raw: d.type === 'pen', glow: false, head: d.type === 'arrow' || d.type === 'flow' || d.type === 'jet', t: clock() });
         octx.fillStyle = '#fff'; d.pts.forEach(p => { octx.beginPath(); octx.arc(p[0], p[1], 6, 0, 6.3); octx.fill(); }); }
     }
     const o = selObj();
@@ -427,7 +466,7 @@
     const o = selObj(); if (!o) { p.append(h('div', { className: 'hint', text: 'Select an object on the stage, or pick a tool below the stage and draw. Click a polyline object to edit its points; drag the square handle to resize.' })); return; }
     p.append(h('div', { className: 'h', text: o.type.toUpperCase() }));
     const T = o.type, B = (k, kind, op) => p.append(bind(o, k, kind, op));
-    if (T === 'text') { B('auto', 'select', { label: 'Auto text', rerender: true, options: [['', 'Manual'], ['valid', 'Valid time'], ['datetime', 'Date + time'], ['date', 'Date'], ['clock', 'Clock']] }); if (!o.auto) B('text', 'area', { label: 'Text' }); B('size', 'range', { min: 16, max: 300 }); B('color', 'color'); B('weight', 'select', { options: OPT.weight }); B('align', 'select', { options: OPT.align }); B('font', 'select', { options: [['display', 'Condensed'], ['sans', 'Standard']] }); B('box', 'check', { label: 'Background box', rerender: true });
+    if (T === 'text') { B('auto', 'select', { label: 'Auto text', rerender: true, options: [['', 'Manual'], ['valid', 'Valid time'], ['datetime', 'Date + time'], ['date', 'Date'], ['clock', 'Clock']] }); if (!o.auto) B('text', 'area', { label: 'Text' }); B('size', 'num', { min: 10, max: 400, label: 'Size' }); B('color', 'color'); B('weight', 'select', { options: OPT.weight }); B('align', 'select', { options: OPT.align }); B('font', 'select', { options: [['display', 'Condensed'], ['sans', 'Standard']] }); B('box', 'check', { label: 'Background box', rerender: true });
       if (o.box) B('boxStyle', 'select', { label: 'Box style', options: [['plain', 'Plain tint'], ['titlebar', 'Title bar'], ['red', 'Red glossy'], ['glass', 'Glass']] });
       p.append(h('div', { className: 'h', text: 'Text style' }), fld('Preset', h('select', { on: { change: e => { E.applyTextPreset(o, e.target.value); commit(); renderPanels(); } } }, E.TEXT_PRESETS.map(x => h('option', { value: x[0], text: x[1] })))));
       if (o.fitBox) { if (o.autoFit == null) o.autoFit = true; B('autoFit', 'check', { label: 'Auto-fit text to its bar (size = largest allowed)', rerender: true }); if (o.autoFit !== false) B('maxLines', 'range', { min: 1, max: 4, label: 'Max lines' }); B('wrapW', 'range', { min: 100, max: 1800, step: 10, label: 'Text width (px)' }); B('fitH', 'range', { min: 30, max: 400, step: 2, label: 'Text height (px)' }); }
@@ -439,6 +478,8 @@
     if (T === 'icon') { B('icon', 'select', { options: g.Icons.list.map(i => [i.id, i.label]) }); B('size', 'range', { min: 60, max: 800 }); }
     if (T === 'hl') { B('kind', 'select', { options: [['H', 'H – High'], ['L', 'L – Low']] }); B('value', 'text', { label: 'Pressure (mb)' }); B('size', 'range', { min: 80, max: 500 }); }
     if (T === 'front') { B('kind', 'select', { options: g.Sym.FRONT_KINDS }); B('size', 'range', { min: 12, max: 70 }); B('flip', 'check', { label: 'Flip side' }); }
+    if (T === 'flow') { B('style', 'select', { label: 'Look', options: [['glossy', 'Glossy arrows with tails'], ['plain', 'Plain arrows']] }); B('color', 'color'); B('size', 'num', { min: 10, max: 200, label: 'Arrow size' }); B('spacing', 'range', { min: 1.4, max: 8, step: 0.1, label: 'Spacing' }); B('speed', 'range', { min: 0, max: 4, step: 0.1, label: 'Speed (0 = still)' }); }
+    if (T === 'jet') { const JC = { ribbon: '#d5dbe6', banded: '#0b4fa8' }; B('style', 'select', { label: 'Look', options: [['banded', 'Banded (dark band, white edge)'], ['ribbon', 'Ribbon (soft band, big head)']], after: v => { if (o.color === JC.ribbon || o.color === JC.banded) o.color = JC[v]; }, rerender: true }); B('color', 'color', { label: 'Band color' }); B('arrowColor', 'color', { label: 'Arrow color' }); B('width', 'num', { min: 10, max: 300, label: 'Band width' }); B('speed', 'range', { min: 0, max: 4, step: 0.1, label: 'Speed (0 = still)' }); B('label', 'text', { label: 'Label (optional)' }); }
     if (T === 'arrow') { B('color', 'color'); B('width', 'range', { min: 3, max: 50 }); B('style', 'select', { options: OPT.style }); B('head', 'check', { label: 'Arrow head' }); }
     if (T === 'line') { B('color', 'color'); B('width', 'range', { min: 2, max: 40 }); B('style', 'select', { options: [['solid', 'Solid'], ['dash', 'Dashed'], ['flow', 'Animated flow']] }); B('closed', 'check', { label: 'Closed loop' }); B('label', 'text', { label: 'Label (e.g. 1008)' }); }
     if (T === 'pen') { B('color', 'color'); B('width', 'range', { min: 2, max: 50 }); }
@@ -889,7 +930,8 @@
       bind(T2, 'show', 'check', { label: 'Show' }),
       bind(T2, 'text', 'text', { label: 'Title' }),
       bind(T2, 'align', 'select', { label: 'Text align', options: [['center', 'Center'], ['left', 'Left'], ['right', 'Right']] }),
-      bind(T2, 'size', 'range', { min: 0, max: 200, label: 'Font size (largest; shrinks to fit, 0 = auto)' }),
+      bind(T2, 'size', 'num', { min: 0, max: 300, label: 'Font size (largest; shrinks to fit, 0 = auto)' }),
+      bind(T2, 'font', 'select', { label: 'Font', options: [['Barlow', 'Standard'], ['Roboto Condensed', 'Condensed']] }),
       bind(T2, 'dx', 'range', { min: -600, max: 600, step: 2, label: 'Left / right offset' }),
       bind(T2, 'ty', 'range', { min: -60, max: 60, step: 1, label: 'Up / down offset' }),
       bind(T2, 'upper', 'check', { label: 'ALL CAPS' }),
@@ -910,7 +952,7 @@
       bind(T2, 'logo', 'check', { label: 'Show logo', rerender: true }),
       T2.logo !== false ? bind(T2, 'logoScale', 'range', { min: 0.6, max: 2, step: 0.05, label: 'Logo size' }) : null,
       bind(T2, 'align', 'select', { label: 'Text align', options: [['center', 'Center'], ['left', 'Left'], ['right', 'Right']] }),
-      bind(T2, 'size', 'range', { min: 0, max: 160, label: 'Font size (0 = auto)' }),
+      bind(T2, 'size', 'num', { min: 0, max: 300, label: 'Font size (0 = auto)' }),
       bind(T2, 'upper', 'check', { label: 'ALL CAPS' }),
       bind(T2, 'color', 'color', { label: 'Text color' }),
       bind(T2, 'anim', 'select', { label: 'Entrance', options: [['auto', 'Automatic (from its edge)'], ['in-left', 'Slide from left'], ['in-right', 'Slide from right'], ['in-top', 'Slide from top'], ['fade', 'Fade'], ['none', 'None']] }),
@@ -1760,16 +1802,18 @@
     const STORM = ['Timing: latest track and timing may have slowed the start time for rainfall Fri/Sat AM', 'Change in the track and speed will shift where the heaviest rain occurs', 'Confidence remains high that southeastern MA, Cape & Islands will see the strongest wind gusts', 'Coastal flooding & beach erosion still remain along the coast. Power outages still possible.'];
     const HEAD = ['Bands of rain move in Cape/Islands 11A-12P, Boston 2-3P, Billerica Fri eve', 'Peak wind & rain Friday night into Saturday', 'Widespread 2-4" rainfall in the east, locally higher coast/SE MA', 'Strongest winds Fri night-Sat 40-50+, power outages? 30-40 mph inland'];
     const defs = { 'hl-sky': ['Weather Headlines', HEAD], 'hl-night': ['Weather Headlines', HEAD], 'hl-day': ['Weather Headlines', HEAD], 'storm-night': ['Storm Update', STORM], 'storm-day': ['Storm Update', STORM], impacts: ['Storm Impacts', ['Friday-Monday', 'Rain 1.00" west', 'Heavy rain 2-4"+ east', 'Strong winds 40+ mph Cape']] };
-    const st = { kind: 'storm-night', title: defs['storm-night'][0], lines: defs['storm-night'][1].slice() };
+    const st = { kind: 'storm-night', title: defs['storm-night'][0], lines: defs['storm-night'][1].slice(), size: 0, titleSize: 0 };
     const tIn = h('input', { type: 'text', value: st.title, oninput: e => st.title = e.target.value }), tas = [0, 1, 2, 3, 4].map(i => h('textarea', { rows: 2, value: st.lines[i] || '', oninput: e => { st.lines[i] = e.target.value; } }));
     const hint = h('div', { className: 'hint' }), hintFor = () => { hint.textContent = st.kind === 'impacts' ? 'Impacts: first line is the time frame (lower left); the next lines become red panels. It keeps the current scene background (your map).' : 'One line per bar (4 bars). The banner and bars come from your artwork; the title sits centred in the white banner area and each line is centred in its bar, shrinking to fit on up to 2 lines. Text is capitalized automatically and everything stays editable afterwards.'; tas.forEach((t, i) => { t.style.display = (E.TPL_ART[st.kind] && i > 3) ? 'none' : ''; const lab = t.parentElement; if (lab && lab.style) lab.style.display = t.style.display; }); };
     const kindSel = h('select', { onchange: e => { st.kind = e.target.value; const d = defs[st.kind]; st.title = d[0]; st.lines = d[1].slice(); tIn.value = st.title; tas.forEach((t, i) => { t.value = st.lines[i] || ''; }); hintFor(); } }, E.TEMPLATES.map(t => h('option', { value: t[0], text: t[1], selected: t[0] === st.kind })));
-    modal('Scene templates', h('div', {}, fld('Template', kindSel), fld('Title', tIn), hint, ...tas.map(t => fld('', t, true))),
+    const szIn = h('input', { type: 'number', min: 0, max: 300, step: 1, placeholder: 'auto', style: 'width:90px', title: 'Blank or 0 = the largest size at which all four bars fit on two lines. Every bar gets this same size.', oninput: e => { st.size = +e.target.value || 0; } });
+    const tzIn = h('input', { type: 'number', min: 0, max: 300, step: 1, placeholder: '84', style: 'width:90px', oninput: e => { st.titleSize = +e.target.value || 0; } });
+    modal('Scene templates', h('div', {}, fld('Template', kindSel), fld('Title', tIn), fld('Title size', tzIn), fld('Bar text size', szIn), hint, ...tas.map(t => fld('', t, true))),
       [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => {
         const art = E.TPL_ART[st.kind]; if (art && !(g.WX_TPL && g.WX_TPL[art.asset])) { toast('Template artwork is missing from this build.'); return; }
         const bg = st.kind === 'impacts' ? JSON.parse(JSON.stringify(cur().bg)) : null; S.show.assets = S.show.assets || {};
         if (art) S.show.assets[art.asset] = g.WX_TPL[art.asset]; else if (!bg && g.WX_BGDEFAULT) S.show.assets.bgdefault = g.WX_BGDEFAULT;
-        const sc = E.sceneFromTemplate(st.kind, { title: st.title, lines: st.lines, safe: SAFE() }, bg); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
+        const sc = E.sceneFromTemplate(st.kind, { title: st.title, lines: st.lines, safe: SAFE(), size: st.size, titleSize: st.titleSize }, bg); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
     hintFor();
   }
   function mapboxSettings() {
