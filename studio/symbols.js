@@ -182,14 +182,14 @@
   const shade = (col, k) => { const q = rgbOf(col), t = k >= 0 ? 255 : 0, f = Math.abs(k); return 'rgb(' + q.map(v => Math.round(v + (t - v) * f)).join(',') + ')'; };
 
   /* ---------- flow arrows: separate arrows (no line between them) streaming along a bendable path ---------- */
-  function flowGlyph(c, p, size, col, style, alpha) {
+  function flowGlyph(c, p, size, col, style, alpha, headOnly) {
     c.save(); c.translate(p.x, p.y); c.rotate(Math.atan2(p.ty, p.tx)); c.globalAlpha *= alpha;
     const L = size, hw = size * 0.46;
-    if (style === 'glossy') {
+    if (style === 'glossy' && !headOnly) {
       const tl = size * 2.1, tg = c.createLinearGradient(-tl, 0, -L * 0.2, 0); tg.addColorStop(0, rgbaOf(col, 0)); tg.addColorStop(1, rgbaOf(col, 0.8));
       c.fillStyle = tg; c.beginPath(); c.moveTo(-L * 0.2, -hw * 0.34); c.lineTo(-tl, 0); c.lineTo(-L * 0.2, hw * 0.34); c.closePath(); c.fill();
-      c.shadowColor = col; c.shadowBlur = size * 0.4;
     }
+    if (style === 'glossy') { c.shadowColor = col; c.shadowBlur = size * 0.4; }
     c.beginPath(); c.moveTo(L * 0.58, 0); c.lineTo(-L * 0.36, -hw); c.lineTo(-L * 0.1, 0); c.lineTo(-L * 0.36, hw); c.closePath();
     if (style === 'glossy') {
       const gr = c.createLinearGradient(0, -hw, 0, hw); gr.addColorStop(0, shade(col, 0.55)); gr.addColorStop(0.5, col); gr.addColorStop(1, shade(col, -0.35));
@@ -198,14 +198,37 @@
     } else { c.fillStyle = col; c.fill(); }
     c.restore();
   }
+  function streakGlyph(c, m, s, size, col, alpha) {       // arrow head with a long curved tail that follows the path (broadcast "streak" arrow)
+    const p = at(m, s), hw = size * 0.46, tl = Math.min(size * 4.2, Math.max(0, s - size * 0.15)), N = 14;
+    if (tl > size * 0.4) {
+      const Lf = [], Rg = []; for (let j = 0; j <= N; j++) { const q = at(m, s - size * 0.15 - tl * j / N), w = hw * 0.62 * Math.pow(1 - j / N, 1.15); Lf.push([q.x - q.ty * w, q.y + q.tx * w]); Rg.push([q.x + q.ty * w, q.y - q.tx * w]); }
+      const e = at(m, s - size * 0.15 - tl), gr = c.createLinearGradient(p.x, p.y, e.x, e.y); gr.addColorStop(0, rgbaOf(col, 0.9 * alpha)); gr.addColorStop(1, rgbaOf(col, 0));
+      c.fillStyle = gr; c.beginPath(); Lf.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); for (let j = N; j >= 0; j--) c.lineTo(Rg[j][0], Rg[j][1]); c.closePath(); c.fill();
+    }
+    flowGlyph(c, p, size, col, 'glossy', alpha, true);
+  }
+  function blockGlyph(c, p, size, col, alpha) {           // solid 3-D block arrow (shaft + head), bevelled
+    c.save(); c.translate(p.x, p.y); c.rotate(Math.atan2(p.ty, p.tx)); c.globalAlpha *= alpha; const sh = size * 0.17, hw = size * 0.5;
+    c.beginPath(); c.moveTo(size * 0.7, 0); c.lineTo(size * 0.15, -hw); c.lineTo(size * 0.15, -sh); c.lineTo(-size * 0.75, -sh); c.lineTo(-size * 0.75, sh); c.lineTo(size * 0.15, sh); c.lineTo(size * 0.15, hw); c.closePath();
+    c.shadowColor = 'rgba(0,0,0,0.45)'; c.shadowBlur = size * 0.2; c.shadowOffsetY = size * 0.08; const gr = c.createLinearGradient(0, -hw, 0, hw); gr.addColorStop(0, shade(col, 0.5)); gr.addColorStop(0.5, col); gr.addColorStop(1, shade(col, -0.45));
+    c.fillStyle = gr; c.fill(); c.shadowColor = 'transparent'; c.lineJoin = 'round'; c.lineWidth = Math.max(1.2, size * 0.04); c.strokeStyle = rgbaOf(shade(col, -0.6), 0.8); c.stroke(); c.restore();
+  }
+  function chevronGlyph(c, p, size, col, alpha) {          // outlined double chevron  >>
+    c.save(); c.translate(p.x, p.y); c.rotate(Math.atan2(p.ty, p.tx)); c.globalAlpha *= alpha; c.lineCap = 'round'; c.lineJoin = 'round';
+    const path = dx => { c.beginPath(); c.moveTo(dx - size * 0.32, -size * 0.45); c.lineTo(dx + size * 0.1, 0); c.lineTo(dx - size * 0.32, size * 0.45); };
+    [-size * 0.28, size * 0.2].forEach(dx => { path(dx); c.strokeStyle = '#ffffff'; c.lineWidth = size * 0.3; c.stroke(); });
+    [-size * 0.28, size * 0.2].forEach(dx => { path(dx); c.strokeStyle = col; c.lineWidth = size * 0.17; c.stroke(); });
+    c.restore();
+  }
   function drawFlow(c, pts, o) {
     o = o || {}; if (!pts || pts.length < 2) return;
-    const size = Math.max(6, o.size || 46), col = o.color || '#3fa9ff', style = o.style === 'plain' ? 'plain' : 'glossy', gap = Math.max(1.2, o.spacing || 2.8), spd = o.speed == null ? 1 : o.speed, t = o.t || 0;
+    const size = Math.max(3, o.size || 46), col = o.color || '#3fa9ff', style = ['plain', 'streak', 'block', 'chevron'].includes(o.style) ? o.style : 'glossy', gap = Math.max(1.2, o.spacing || 2.8), spd = o.speed == null ? 1 : o.speed, t = o.t || 0;
     const m = measure(catmull(pts, false, 10)); if (m.L < 2) return; const Lp = m.L * (o.progress == null ? 1 : o.progress), sp = size * gap, shift = ((t * spd * size * 2.4) % sp + sp) % sp, edge = size * 1.6;
     c.save();
     for (let k = -1; ; k++) {
       const s = k * sp + shift; if (s > Lp) break; if (s < 0) continue;
-      flowGlyph(c, at(m, s), size, col, style, clamp(Math.min(s, Lp - s) / edge, 0, 1));
+      const a = clamp(Math.min(s, Lp - s) / edge, 0, 1);
+      if (style === 'streak') streakGlyph(c, m, s, size, col, a); else if (style === 'block') blockGlyph(c, at(m, s), size, col, a); else if (style === 'chevron') chevronGlyph(c, at(m, s), size, col, a); else flowGlyph(c, at(m, s), size, col, style, a);
     }
     c.restore();
   }
@@ -224,22 +247,50 @@
         c.beginPath(); c.moveTo(gw * 0.55, 0); c.lineTo(-gw * 0.4, -gw * 0.5); c.lineTo(-gw * 0.15, 0); c.lineTo(-gw * 0.4, gw * 0.5); c.closePath(); c.fill(); c.restore();
       }
     };
+    const words = String(o.words == null ? 'JET STREAM' : o.words).toUpperCase(), asText = o.flowText === 'text' && words.trim();
+    const textRun = (fs, color, alpha0) => {                  // the words repeat along the band and slide through it; kept upright when the jet flows leftwards
+      c.save(); c.font = `800 ${fs}px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle'; const chars = [...words], adv = chars.map(ch => c.measureText(ch).width + fs * 0.07), total = adv.reduce((a, b) => a + b, 0), period = total + fs * 3.4;
+      const shift = ((t * spd * fs * 3) % period + period) % period, edge2 = Math.min(fs * 2, m.L / 3), p0 = at(m, 0), p1 = at(m, m.L), flip = p1.x < p0.x - 1;
+      c.fillStyle = color; c.shadowColor = 'rgba(0,0,0,0.35)'; c.shadowBlur = fs * 0.12;
+      for (let k = -1; ; k++) {
+        const s0 = k * period + shift; if (s0 > m.L) break; if (s0 + total < 0) continue; let cum = 0;
+        chars.forEach((ch, i) => {
+          const sc = s0 + (flip ? total - cum - adv[i] / 2 : cum + adv[i] / 2); cum += adv[i]; if (sc < 0 || sc > m.L || ch === ' ') return;
+          const q = at(m, sc); c.save(); c.translate(q.x, q.y); c.rotate(Math.atan2(q.ty, q.tx) + (flip ? Math.PI : 0)); c.globalAlpha *= clamp(Math.min(sc, m.L - sc) / edge2, 0, 1) * alpha0; c.fillText(ch, 0, fs * 0.04); c.restore();
+        });
+      }
+      c.restore();
+    };
+    const edge = o.outline !== false, fade = clamp((o.fade || 0) / 100, 0, 0.95), NL = 14;       // edge line on/off, soft (feathered) edges 0-95 %
     if (style === 'banded') {
-      c.shadowColor = 'rgba(0,0,0,0.35)'; c.shadowBlur = w * 0.18; c.strokeStyle = '#ffffff'; c.lineWidth = w + Math.max(5, w * 0.14); strokePoly(c, m.poly); c.stroke(); c.shadowBlur = 0;
-      c.strokeStyle = col; c.lineWidth = w; strokePoly(c, m.poly); c.stroke();
+      if (edge) { c.shadowColor = 'rgba(0,0,0,0.35)'; c.shadowBlur = w * 0.18; c.strokeStyle = '#ffffff'; c.lineWidth = w + Math.max(5, w * 0.14); strokePoly(c, m.poly); c.stroke(); c.shadowBlur = 0; }
+      if (fade > 0) {                                           // stacked strokes, widest faintest: the band melts into the map at its sides
+        const a = 1 - Math.pow(0.004, 1 / NL); c.strokeStyle = col; c.globalAlpha *= a;
+        for (let k = 0; k < NL; k++) { c.lineWidth = w * (1 - fade * k / (NL - 1)); strokePoly(c, m.poly); c.stroke(); }
+        c.globalAlpha /= a;
+      } else { c.strokeStyle = col; c.lineWidth = w; strokePoly(c, m.poly); c.stroke(); }
       c.strokeStyle = 'rgba(255,255,255,0.14)'; c.lineWidth = w * 0.42; c.save(); c.translate(0, -w * 0.12); strokePoly(c, m.poly); c.stroke(); c.restore();   // soft sheen
-      glyphs(w * 0.46, w * 1.45, acol, 1);
+      if (asText) textRun(w * 0.52, acol, 1); else glyphs(w * 0.46, w * 1.45, acol, 1);
     } else {
       // ribbon: narrow tail growing to full width, ending in a large arrow head
       const head = Math.min(w * 2.1, m.L * 0.45), body = Math.max(0, m.L - head), N = Math.max(8, Math.ceil(m.L / 8)), tail = Math.min(body * 0.45, w * 4);
       const hw = s => { const u = tail > 0 ? clamp(s / tail, 0, 1) : 1; return w * 0.5 * (0.3 + 0.7 * (u * u * (3 - 2 * u))); };
-      const Lft = [], Rgt = []; for (let i = 0; i <= N; i++) { const s = body * i / N, p = at(m, s), q = hw(s); Lft.push([p.x - p.ty * q, p.y + p.tx * q]); Rgt.push([p.x + p.ty * q, p.y - p.tx * q]); }
-      const pb = at(m, body), pe = at(m, m.L), hb = w * 0.5 * 1.75;
-      c.beginPath(); Lft.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); c.lineTo(pb.x - pb.ty * hb, pb.y + pb.tx * hb); c.lineTo(pe.x, pe.y); c.lineTo(pb.x + pb.ty * hb, pb.y - pb.tx * hb);
-      for (let i = N; i >= 0; i--) c.lineTo(Rgt[i][0], Rgt[i][1]); c.closePath();
-      const first = at(m, 0), gr = c.createLinearGradient(first.x, first.y, pe.x, pe.y); gr.addColorStop(0, rgbaOf(col, 0.35)); gr.addColorStop(0.45, rgbaOf(col, 0.85)); gr.addColorStop(1, rgbaOf(col, 0.9));
-      c.shadowColor = 'rgba(0,0,0,0.3)'; c.shadowBlur = w * 0.25; c.fillStyle = gr; c.fill(); c.shadowBlur = 0; c.lineWidth = Math.max(1.5, w * 0.04); c.strokeStyle = 'rgba(255,255,255,0.55)'; c.stroke();
-      glyphs(w * 0.34, w * 1.1, o.arrowColor ? acol : shade(col, -0.45), 0.8);
+      const pb = at(m, body), pe = at(m, m.L), first = at(m, 0);
+      const shape = sc => {                                      // sc = width scale (1 = full)
+        const Lft = [], Rgt = []; for (let i = 0; i <= N; i++) { const s0 = body * i / N, p = at(m, s0), q = hw(s0) * sc; Lft.push([p.x - p.ty * q, p.y + p.tx * q]); Rgt.push([p.x + p.ty * q, p.y - p.tx * q]); }
+        const hb = w * 0.5 * 1.75 * sc; c.beginPath(); Lft.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); c.lineTo(pb.x - pb.ty * hb, pb.y + pb.tx * hb); c.lineTo(pe.x, pe.y); c.lineTo(pb.x + pb.ty * hb, pb.y - pb.tx * hb);
+        for (let i = N; i >= 0; i--) c.lineTo(Rgt[i][0], Rgt[i][1]); c.closePath();
+      };
+      const gr = c.createLinearGradient(first.x, first.y, pe.x, pe.y); gr.addColorStop(0, rgbaOf(col, 0.35)); gr.addColorStop(0.45, rgbaOf(col, 0.85)); gr.addColorStop(1, rgbaOf(col, 0.9));
+      if (fade > 0) {
+        c.fillStyle = gr; const a = 1 - Math.pow(0.02, 1 / NL); c.globalAlpha *= a;
+        for (let k = 0; k < NL; k++) { shape(1 - fade * k / (NL - 1)); c.fill(); }
+        c.globalAlpha /= a;
+      } else {
+        shape(1); if (edge) { c.shadowColor = 'rgba(0,0,0,0.3)'; c.shadowBlur = w * 0.25; } c.fillStyle = gr; c.fill(); c.shadowBlur = 0;
+        if (edge) { c.lineWidth = Math.max(1.5, w * 0.04); c.strokeStyle = 'rgba(255,255,255,0.55)'; c.stroke(); }
+      }
+      if (asText) textRun(w * 0.4, o.arrowColor ? acol : shade(col, -0.55), 0.9); else glyphs(w * 0.34, w * 1.1, o.arrowColor ? acol : shade(col, -0.45), 0.8);
     }
     if (o.label) { const mid = at(m, m.L * 0.5); pill(c, o.label, mid.x, mid.y, Math.max(16, w * 0.4), 'rgba(8,20,38,0.85)', '#fff'); }
     c.restore();

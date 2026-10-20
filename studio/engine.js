@@ -52,7 +52,7 @@
       callout: { x: 960, y: 540, dx: 170, dy: -130, size: 36, label: 'Billerica', value: '54°', color: '#ffd23f' },
       legend: { x: 560, y: 940, w: 800, h: 46, kind: 'radar', title: '', left: 'LIGHT', right: 'HEAVY' },
       flow: { pts: [], color: '#3fa9ff', size: 46, spacing: 2.8, speed: 1, style: 'glossy' },
-      jet: { pts: [], color: '#0b4fa8', width: 64, style: 'banded', speed: 1, arrowColor: '#ffffff' },
+      jet: { pts: [], color: '#0b4fa8', width: 64, style: 'banded', speed: 1, arrowColor: '#ffffff', outline: true, fade: 0, flowText: 'arrows', words: 'JET STREAM' },
       ticker: { x: 0, y: 960, w: 1920, h: 76, text: 'WIND ADVISORY FOR EASTERN MASSACHUSETTS UNTIL 6 AM SATURDAY', label: 'ALERT', speed: 140, color: '#c01010' }
     };
     return Object.assign(base, JSON.parse(JSON.stringify(D[type] || {})), props || {});
@@ -194,11 +194,13 @@
     return { k, map: true, v, fwd: (x, y) => [W / 2 + (x - v.cx) * k, H / 2 + (y - v.cy) * k], inv: (x, y) => [(x - W / 2) / k + v.cx, (y - H / 2) / k + v.cy] };
   };
   const GEO_SCALED = { shape: 1, image: 1 };
+  const GEO_SIZE = { flow: 'size', jet: 'width' };          // pts-only objects whose arrow size / band width zoom with a pinned map
   function toScreen(o, xf) {
     if (!o.geo || !xf.map) return o;
     const s = Object.assign({}, o);
     if (o.pts) s.pts = o.pts.map(p => xf.fwd(p[0], p[1]));
     if (o.x != null && o.y != null) { const p = xf.fwd(o.x, o.y), kk = xf.kOf ? xf.kOf(o) : xf.k; s.x = p[0]; s.y = p[1]; if (GEO_SCALED[o.type]) { s.w = o.w * kk; s.h = o.h * kk; } }
+    if (GEO_SIZE[o.type] && o[GEO_SIZE[o.type]] != null && (xf.kOf ? o.z0 != null : true)) s[GEO_SIZE[o.type]] = o[GEO_SIZE[o.type]] * (xf.kOf ? xf.kOf(o) : xf.k);
     return s;
   }
   E.toScreen = toScreen;
@@ -206,10 +208,11 @@
   E.setGeo = function (o, scene, t, on) {
     const xf = E.xf(scene, t); if (!xf.map || !!o.geo === !!on) { o.geo = !!on && xf.map; return; }
     if (xf.mb) {
-      if (on) { if (o.pts) o.pts = o.pts.map(p => xf.inv(p[0], p[1])); if (o.x != null) { const p = xf.inv(o.x, o.y); o.x = p[0]; o.y = p[1]; o.z0 = xf.v.z; } }
-      else { const kk = xf.kOf(o); if (o.pts) o.pts = o.pts.map(p => xf.fwd(p[0], p[1])); if (o.x != null) { const p = xf.fwd(o.x, o.y); o.x = p[0]; o.y = p[1]; if (GEO_SCALED[o.type]) { o.w *= kk; o.h *= kk; } delete o.z0; } }
+      if (on) { if (o.pts) o.pts = o.pts.map(p => xf.inv(p[0], p[1])); if (o.x != null) { const p = xf.inv(o.x, o.y); o.x = p[0]; o.y = p[1]; o.z0 = xf.v.z; } else if (GEO_SIZE[o.type]) o.z0 = xf.v.z; }
+      else { const kk = xf.kOf(o); if (GEO_SIZE[o.type] && o.z0 != null && o[GEO_SIZE[o.type]] != null) o[GEO_SIZE[o.type]] *= kk; if (o.pts) o.pts = o.pts.map(p => xf.fwd(p[0], p[1])); if (o.x != null) { const p = xf.fwd(o.x, o.y); o.x = p[0]; o.y = p[1]; if (GEO_SCALED[o.type]) { o.w *= kk; o.h *= kk; } } delete o.z0; }
       o.geo = !!on; return;
     }
+    if (GEO_SIZE[o.type] && o[GEO_SIZE[o.type]] != null) o[GEO_SIZE[o.type]] = on ? o[GEO_SIZE[o.type]] / xf.k : o[GEO_SIZE[o.type]] * xf.k;
     if (on) { // screen -> map
       if (o.pts) o.pts = o.pts.map(p => xf.inv(p[0], p[1]));
       if (o.x != null) { const p = xf.inv(o.x, o.y); o.x = p[0]; o.y = p[1]; if (GEO_SCALED[o.type]) { o.w /= xf.k; o.h /= xf.k; } }
@@ -376,7 +379,7 @@
       case 'front': g.Sym.drawFront(c, o.kind, o.pts, o.size, t, { flip: o.flip, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'arrow': g.Sym.drawPath(c, o.pts, { color: o.color, width: o.width, style: o.style, head: o.head, t, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'flow': g.Sym.drawFlow(c, o.pts, { color: o.color, size: o.size, spacing: o.spacing, speed: o.speed, style: o.style, t, progress: o.animMode === 'draw' ? p : 1 }); break;
-      case 'jet': g.Sym.drawJet(c, o.pts, { color: o.color, width: o.width, style: o.style, speed: o.speed, arrowColor: o.arrowColor, label: o.label, t, progress: o.animMode === 'draw' ? p : 1 }); break;
+      case 'jet': g.Sym.drawJet(c, o.pts, { color: o.color, width: o.width, outline: o.outline, fade: o.fade, flowText: o.flowText, words: o.words, style: o.style, speed: o.speed, arrowColor: o.arrowColor, label: o.label, t, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'line': g.Sym.drawPath(c, o.pts, { color: o.color, width: o.width, style: o.style, closed: o.closed, label: o.label, t, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'pen': g.Sym.drawPath(c, o.pts, { color: o.color, width: o.width, raw: true, glow: false, t, progress: o.animMode === 'draw' ? p : 1 }); break;
       case 'shape': {
