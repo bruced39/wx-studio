@@ -526,28 +526,56 @@
     if (st.on && st.size > 0 && (st.pos === 'center' || st.pos === 'inside')) { c.lineWidth = st.size; c.strokeStyle = rgba(st.color, st.opacity); each((l, yy) => c.strokeText(l, x, yy)); }
     c.restore();
   };
-  E.title2Default = () => ({ show: true, text: '7 DAY FORECAST', pos: 'ul', width: 1150, y: 40, logo: true, logoScale: 1.05, align: 'center', size: 0, upper: true, color: '#07345a', font: 'Roboto Condensed', weight: 700, anim: 'auto', delay: 0.2, fx: E.fxDefault() });
+  E.title2Default = () => ({ show: true, text: '7 DAY FORECAST', pos: 'ul', width: 1150, y: 40, dx: 0, autoWidth: true, height: 154, minW: 0, logo: true, logoScale: 1.05, align: 'center', size: 0, upper: true, color: '#07345a', font: 'Roboto Condensed', weight: 700, anim: 'auto', delay: 0.2, fx: E.fxDefault() });
   const tb2Imgs = {};
   function tb2Img(k) { const A = g.WX_TB2 && g.WX_TB2[k]; if (!A) return null; let e = tb2Imgs[k]; if (!e) { e = tb2Imgs[k] = { el: new Image(), ok: false }; e.el.onload = () => { e.ok = true; if (E.onAsset) E.onAsset(); }; e.el.src = A.src; } return e.ok ? e.el : null; }
+  /* Banner artwork geometry (source pixels of the 1100×264 bar image). The silver ("white") panel sits at 7.7%–76% of the banner height (centre ≈ 43%) and
+     starts 14 px inside the box. For a wider/narrower banner the two plain stretches [260,480] and [600,860] are widened/narrowed while the caps, glow
+     dots and the end under the logo keep their shape and height (so the banner never gets taller or shorter because of its length). */
+  const TB2 = { cuts: [0, 260, 480, 600, 860, 1100], zones: [1, 3], boxL: 18, silverInset: 14, silverCY: 0.43 };
   function drawTitle2(c, show, scene, t, editing) {
     const T = scene.title2; if (!T || !T.show) return; const A = g.WX_TB2; if (!A) return; const bar = tb2Img('bar'), logo = tb2Img('logo'); if (!bar) return;
-    const m = show.safe != null ? show.safe : 48, bb = A.bar.box, bw0 = bb[2] - bb[0], bh0 = bb[3] - bb[1];
-    const width = T.pos === 'full' ? W - 2 * m : (T.width || 1150), sb = width / bw0, chh = bh0 * sb;
-    const barL = T.pos === 'ur' ? W - m - width : m, barT = T.y == null ? 40 : T.y;
+    const m = show.safe != null ? show.safe : 48, bb = A.bar.box, bw0 = bb[2] - bb[0], bh0 = bb[3] - bb[1], fixedBox = 584, zoneSrc = 480;
+    const stretch = !!T.autoWidth || T.height > 0;       // old shows (neither set) keep the original uniform scaling exactly
+    const maxW = W - 2 * m;
+    let width, sb, chh;
+    if (!stretch) { width = T.pos === 'full' ? maxW : (T.width || 1150); sb = width / bw0; chh = bh0 * sb; }
+    else { chh = T.height > 0 ? T.height : bh0 * ((T.pos === 'full' ? maxW : (T.width || 1150)) / bw0); sb = chh / bh0; width = T.pos === 'full' ? maxW : (T.width || 1150); }
+    const inset = TB2.silverInset * sb;
+    let lw = 0, lb = A.logo.box, sl = 0;
+    if (T.logo !== false && logo) { const lbw = lb[2] - lb[0], lbh = lb[3] - lb[1]; sl = chh * (T.logoScale || 1.05) / lbh; lw = lbw * sl; }
+    // ---- text (measured first: with "fit to text" the banner length follows it)
+    let txt = String(T.text || ''); if (T.upper !== false) txt = txt.toUpperCase();
+    const fam = '"' + (T.font || 'Roboto Condensed') + '", "Barlow Condensed", Arial Narrow, sans-serif', weight = T.weight || 700;
+    let size = T.size > 0 ? T.size : chh * 0.53, tw = 0;
+    if (txt) { c.save(); c.font = `${weight} ${size}px ${fam}`; tw = c.measureText(txt).width; c.restore(); }
+    const pad = 0.3 * chh, minWb = sb * (fixedBox + 0.02 * zoneSrc);
+    if (T.autoWidth && T.pos !== 'full') {
+      width = tw + 2 * pad + (lw > 0 ? lw - 0.02 * chh : 0) + (lw > 0 ? 1 : 2) * inset;
+      width = Math.max(width, T.minW || 0, minWb); if (width > maxW) width = maxW;       // too long even at full width: the text shrinks below
+    } else if (stretch) width = Math.max(width, minWb);
+    const barL0 = T.pos === 'ur' ? W - m - width : m, barL = barL0 + (T.dx || 0), barT = T.y == null ? 40 : T.y;
     let p = 1; const mode = T.anim === 'auto' ? (T.pos === 'ur' ? 'in-right' : T.pos === 'full' ? 'in-top' : 'in-left') : (T.anim || 'none');
     if (!editing) { const d = T.delay == null ? 0.2 : T.delay; if (t < d) return; p = ease.out(clamp((t - d) / 0.7, 0, 1)); }
     c.save();
     if (mode === 'fade') c.globalAlpha *= p; else if (mode === 'in-left') c.translate(-(1 - p) * (barL + width + 200), 0); else if (mode === 'in-right') c.translate((1 - p) * (W - barL + 200), 0); else if (mode === 'in-top') c.translate(0, -(1 - p) * (barT + chh + 300));
-    c.drawImage(bar, barL - bb[0] * sb, barT - bb[1] * sb, A.bar.w * sb, A.bar.h * sb);
+    const top = barT - bb[1] * sb, dh = A.bar.h * sb;
+    if (!stretch) c.drawImage(bar, barL - bb[0] * sb, top, A.bar.w * sb, A.bar.h * sb);
+    else {
+      const f = Math.max(0.02, (width / sb - fixedBox) / zoneSrc), cuts = TB2.cuts; let dx = barL - TB2.boxL * sb;   // dest x of source x=0
+      for (let i = 0; i < cuts.length - 1; i++) {
+        const sx = cuts[i], sw = cuts[i + 1] - sx, k = TB2.zones.includes(i) ? f * sb : sb, dw = sw * k, over = i < cuts.length - 2 ? 0.8 : 0;   // 0.8 px overlap hides hairline seams
+        c.drawImage(bar, sx, 0, sw + over / k, A.bar.h, dx, top, dw + over, dh); dx += dw;
+      }
+    }
     let logoL = barL + width;
-    if (T.logo !== false && logo) { const lb = A.logo.box, lbw = lb[2] - lb[0], lbh = lb[3] - lb[1], sl = chh * (T.logoScale || 1.05) / lbh, lw = lbw * sl; logoL = barL + width + chh * 0.02 - lw; const ly = barT + chh / 2 - (lbh * sl) / 2; c.drawImage(logo, logoL - lb[0] * sl, ly - lb[1] * sl, A.logo.w * sl, A.logo.h * sl); }
-    // text inside the silver area, left of the logo
-    const silverTop = barT + chh * 0.06, silverH = chh * 0.58, padL = chh * 0.22, availL = barL + padL, availR = (T.logo !== false ? logoL : barL + width) - chh * 0.18, availW = Math.max(40, availR - availL);
-    let txt = String(T.text || ''); if (T.upper !== false) txt = txt.toUpperCase();
+    if (lw > 0) { logoL = barL + width + chh * 0.02 - lw; const lbh = lb[3] - lb[1], ly = barT + chh / 2 - (lbh * sl) / 2; c.drawImage(logo, logoL - lb[0] * sl, ly - lb[1] * sl, A.logo.w * sl, A.logo.h * sl); }
+    // text: centred in the silver panel — horizontally between its left edge and the logo, vertically on the panel's centre line
+    const whiteL = barL + inset, whiteR = lw > 0 ? logoL : barL + width - inset, availL = whiteL + pad * 0.55, availR = whiteR - pad * 0.55, availW = Math.max(40, availR - availL);
     if (txt) {
-      let size = T.size > 0 ? T.size : silverH * 0.92; const fam = '"' + (T.font || 'Roboto Condensed') + '", "Barlow Condensed", Arial Narrow, sans-serif';
-      c.font = `${T.weight || 700} ${size}px ${fam}`; let tw = c.measureText(txt).width; if (tw > availW) { size = size * availW / tw; c.font = `${T.weight || 700} ${size}px ${fam}`; tw = c.measureText(txt).width; }
-      c.textBaseline = 'middle'; c.textAlign = 'left'; const tx = T.align === 'left' ? availL : T.align === 'right' ? availR - tw : availL + (availW - tw) / 2, ty = silverTop + silverH / 2 + size * 0.04;
+      c.font = `${weight} ${size}px ${fam}`; tw = c.measureText(txt).width; if (tw > availW) { size = size * availW / tw; c.font = `${weight} ${size}px ${fam}`; tw = c.measureText(txt).width; }
+      c.textBaseline = 'middle'; c.textAlign = 'left'; const mh = c.measureText('H'), capShift = ((mh.actualBoundingBoxAscent || size * 0.35) - (mh.actualBoundingBoxDescent || 0)) / 2;
+      const tx = T.align === 'left' ? availL : T.align === 'right' ? availR - tw : whiteL + (whiteR - whiteL - tw) / 2, ty = barT + chh * TB2.silverCY + capShift;
       E.drawFxLines(c, [txt], tx, ty, size * 1.1, T.fx, T.color || '#07345a', size);
     }
     c.restore();
