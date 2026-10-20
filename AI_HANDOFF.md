@@ -1004,7 +1004,7 @@ User supplied **Recording 2026-10-18 181814.mp4** from after the v0.9.90 live-ed
 - New: `tests/cloud_workspace_pg.test.js` (9 engine-vs-real-SQL tests; skipped unless PostgreSQL binaries and the migrations are present — run with `WX_MIGRATIONS_DIR=<dir containing 20261020*.sql>`), and the browser check can run the whole page against the real SQL: `WX_BACKEND=pg WX_MIGRATIONS_DIR=… python3 tests/browser/cloud_workspace_browser_check.py` (37/37 pass on both the fake and the real SQL).
 - Still NOT covered (needs the live project): real PostgREST/Storage/Auth behaviour (raw-binary object upload, JWT refresh, CORS), real two-computer Windows Chrome test.
 
-## v0.10.2 integration build — branch `claude/v0.10.2-integration` (Claude, 2026-10-20) — NOT released, VERSION stays 0.10.1.4
+## v0.10.2 integration build — branch `claude/v0.10.2-integration` (Claude, 2026-10-20) — NOT released; VERSION stays at main's (0.10.1.5 after the latest merge)
 
 **Base:** normal merge (no rebase, no force-push) of `origin/main` b307138e8b269bb0c381e68bc8c07565f9cd0153 (v0.10.1.4) into `claude/v0.10.2-cloud-workspace` 5da6b09. Only conflict: the `<script>` list in `studio/index.html` (resolved additively: cloud scripts kept, `tpl_art.js` added after `bgdefault.js`). `ui.js` and `AI_HANDOFF.md` merged automatically. Nothing from v0.10.1.1–.4 was reverted. Main is unchanged.
 
