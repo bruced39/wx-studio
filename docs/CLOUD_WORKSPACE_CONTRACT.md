@@ -160,9 +160,20 @@ verifies the object exists in the caller's private folder and that its metadata 
 Storage metadata does not prove the bytes match the hash — **the browser verifies the original bytes before upload and the downloaded bytes before use**.
 
 ```json
-{ "ok": true, "status": "registered|exists", "sha256": "...", "storage_path": "<uid>/<sha>.png" }
+{ "ok": true, "status": "registered|exists", "storage_path": "<uid>/<sha>.png" }
 ```
-Failures: `{ "ok": false, "status": "invalid", "code": "mime_not_allowed|kind_not_allowed|too_large|bad_hash|object_missing|metadata_mismatch|conflicts_with_existing" }`.
+The success response carries **no** `sha256` field (the client already knows the hash it sent). Unauthenticated: `{ "ok": false, "status": "unauthenticated" }`.
+Failures: `{ "ok": false, "status": "invalid", "code": "mime_not_allowed|media_invalid|media_conflict|object_missing|object_mismatch" }`:
+
+| code | meaning | client behaviour |
+|---|---|---|
+| `mime_not_allowed` | kind is not `image` or MIME is not png/jpeg/webp | image stays local-only, reason `mime_not_allowed` |
+| `media_invalid` | bad hash, size outside 1 B – 8 MiB, name not 1–120 characters, or width/height out of range | stays local-only (`upload_failed`, detail = code) |
+| `media_conflict` | the hash is already registered with a different path/MIME/size/kind | stays local-only (`upload_failed`, detail = code); nothing is overwritten |
+| `object_missing` | no object exists at the canonical path | stays local-only (`upload_failed`); retried on the next sync |
+| `object_mismatch` | the stored object's size or MIME differs from what was claimed | stays local-only (`upload_failed`); the stored object is never overwritten |
+
+A local-only image is retried on later syncs and never blocks saving the document.
 
 ## 3. Storage (not RPC) errors the client recognises
 
@@ -170,7 +181,7 @@ Failures: `{ "ok": false, "status": "invalid", "code": "mime_not_allowed|kind_no
 |---|---|
 | HTTP 413 / `EntityTooLarge` | `too_large` |
 | quota message (e.g. `exceed_storage_size_quota`, "quota", "exceeded the maximum") | `storage_full` (reported as an upload failure with that detail; never assumed for every quota error) |
-| HTTP 409 / "already exists" for a content-addressed path | verify the existing object and register; never overwrite |
+| Duplicate object at the content-addressed path — older Storage: HTTP 400 `{"error":"Asset Already Exists"}`; newer: HTTP 409 `{"error":"Duplicate","message":"The resource already exists"}` | recognised only by that structured `error` name or the "resource/asset/object already exists" message (an arbitrary 400 or 409 is **not** treated as "exists"); then register — `wx_studio_register_media` verifies the stored object's size and MIME (`object_missing` / `object_mismatch` otherwise). Never overwritten (no `x-upsert`). |
 | network failure | retryable offline status (sync stays pending) |
 | 401 / 403 auth | re-authenticate, retry once |
 | anything else | `upload_failed`, original status/message kept for diagnostics |
@@ -179,6 +190,9 @@ No media is ever deleted automatically.
 
 ## 4. Client behaviour guaranteed by this contract
 
+- The periodic "is there a newer cloud version?" SELECT (every 20 s) is skipped while the browser tab is hidden and runs immediately when it becomes visible again. Saves, settings pushes and explicit syncs are never suspended.
+- Bundled artwork (default sky, 7-day template and the five headline / storm template backgrounds `tpl_hl_sky`, `tpl_hl_night`, `tpl_hl_day`, `tpl_storm_night`, `tpl_storm_day`) is **never uploaded**. An image is treated as bundled only when its id is a known bundled id **and** its bytes equal the bundled copy (SHA-256); a custom image that reuses such an id is uploaded like any other and is never replaced by the bundled one on open. The cloud document keeps the scene's `bg.asset` id, carries no `assets` entry for it, and records `builtinAssets: { "<id>": "<sha256 of the bundled bytes>" }` (an additive top-level field the RPC stores unchanged). On open the bundled copy is re-attached from the app; if this build lacks it (`builtin_missing`) or its bytes differ (`builtin_changed`) the open succeeds and the user is told, nothing is silently substituted. Bundled images never produce local-only-image warnings. Portable `.wxshow` files are unchanged.
+- Flow, Jet, fit-box text and every other object type are stored as the complete JSON the editor produces (no fixed field list), so new fields round-trip untouched.
 - Local autosave works regardless of Supabase. A failed sync never changes or replaces the local show.
 - Debounce 3 s after the last change; one save in flight; retry backoff 5 s → 5 min. Pending op ids and payload identity survive reloads.
 - A lost-response retry is recognised only when the conflict's `last_op_id` is one of this device's own pending/recent op ids **and** the current cloud document equals the document that was sent (verified by fetching it); otherwise it is a real conflict. Another device's save is never mistaken for ours.

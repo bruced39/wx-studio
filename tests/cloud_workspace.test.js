@@ -16,7 +16,7 @@ async function client(fake, uid, o) {
   o = o || {}; const kv = o.kv || CW.memoryKV(), timers = fakeTimers();
   const state = { show: o.show || mkShow(), scene: 's1', local: !!o.realWork, settings: o.settings || {}, loaded: [], written: [] };
   const host = {
-    getShow: () => state.show, getSceneId: () => state.scene, localOnlyMedia: () => o.lom || [],
+    getShow: () => state.show, getSceneId: () => state.scene, localOnlyMedia: () => o.lom || [], builtinAssets: () => o.builtin || {},
     hasRealLocalWork: () => state.local, renameShow: n => { state.show.name = n; },
     loadShow: async (s, opts) => { state.show = s; state.loaded.push(opts); if (opts && opts.sceneId) state.scene = opts.sceneId; state.local = true; },
     readSettings: () => Object.assign({}, state.settings), writeSettings: p => { for (const k of Object.keys(p)) { if (p[k] === null) delete state.settings[k]; else state.settings[k] = p[k]; } state.written.push(p); }
@@ -30,13 +30,13 @@ const rpcCalls = (fake, name) => fake.calls.filter(c => c.path.endsWith('/rpc/' 
 
 test('first sync uploads images, registers them, then saves the document with media refs only', async () => {
   const fake = createFakeSupabase(), data = png(2000, 7);
-  const c = await client(fake, 'u1', { show: mkShow({ assets: { img1: data, bgdefault: 'data:image/jpeg;base64,/9j/' } }) });
+  const c = await client(fake, 'u1', { builtin: { bgdefault: 'data:image/jpeg;base64,/9j/' }, show: mkShow({ assets: { img1: data, bgdefault: 'data:image/jpeg;base64,/9j/' } }) });
   c.eng.markDirty(); assert.ok(c.timers.pending().includes(3000), 'debounced 3 s');
   const r = await c.eng.syncNow(); assert.equal(r.ok, true); assert.ok(['created', 'saved'].includes(r.status));
   const order = fake.calls.map(x => x.path.split('?')[0].split('/').slice(-1)[0] + ':' + x.method);
   assert.ok(order.indexOf('wx_studio_register_media:POST') < order.indexOf('wx_studio_save_show:POST'), 'register before save');
   const row = fake.db.shows[0]; assert.equal(row.doc.cloud_schema, 1); assert.equal(row.doc.v, 1);
-  assert.match(row.doc.assets.img1.media, /^sha256:[0-9a-f]{64}$/); assert.equal(row.doc.assets.bgdefault, undefined);
+  assert.match(row.doc.assets.img1.media, /^sha256:[0-9a-f]{64}$/); assert.equal(row.doc.assets.bgdefault, undefined); assert.ok(row.doc.builtinAssets.bgdefault, 'bundled image recorded by id + hash, never uploaded'); assert.equal(fake.objects.size, 1);
   assert.ok(!JSON.stringify(row.doc).includes('data:'));
   assert.equal(c.eng.status().kind, 'cloud'); assert.equal(c.eng.status().label, 'Saved to cloud');
   // second sync with no change makes no save call

@@ -16,7 +16,6 @@
   const CW = {};
   const MAX_IMAGE = 8 * 1048576, DEBOUNCE = 3000, BACKOFF = [5000, 10000, 20000, 40000, 80000, 160000, 300000];
   const IMG_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
-  const BUILTIN_ASSETS = ['bgdefault', 'bg7day'];
   const SETTINGS_KEYS = ['wx.mapbox.token', 'wx.mapbox.scale', 'wx.mapbox.nativeScale.v1', 'wx.studio.defaultMap.v1', 'wx_bg_default', 'wx_fxpresets', 'wx_snap', 'wx_ov_opt', 'wx.export.v1'];
   CW.SETTINGS_KEYS = SETTINGS_KEYS; CW.MAX_IMAGE = MAX_IMAGE;
 
@@ -72,8 +71,10 @@
     if (!e) return { reason: 'upload_failed' };
     if (e.code === 'offline') return { reason: 'offline' };
     if (e.code === 'auth') return { reason: 'auth' };
-    const text = ((e.text || '') + ' ' + (e.message || '')).toLowerCase(), sc = String((e.body && e.body.statusCode) || e.status || '');
-    if (sc === '409' || /already exists|duplicate/.test(text)) return { reason: 'exists' };
+    const b = e.body || {}, kind = String(b.error || '').toLowerCase(), msg = String(b.message || e.message || '').toLowerCase(), text = ((e.text || '') + ' ' + msg).toLowerCase(), sc = String(b.statusCode || e.status || '');
+    /* An object already stored under this content-addressed path: older Storage answers HTTP 400 "Asset Already Exists", newer answers HTTP 409 "Duplicate" / "The resource already exists".
+       Recognised only by those structured names or that specific message — an arbitrary 400 or 409 is NOT treated as "already there". */
+    if (kind === 'duplicate' || kind === 'asset already exists' || /\b(resource|asset|object) already exists\b/.test(msg)) return { reason: 'exists' };
     if (/exceed_storage_size_quota|quota/.test(text)) return { reason: 'storage_full', detail: e.message };
     if (sc === '413' || /entitytoolarge|payload too large|exceeded the maximum allowed size/.test(text)) return { reason: 'too_large', detail: e.message };
     return { reason: 'upload_failed', detail: (e.status ? 'HTTP ' + e.status + ': ' : '') + (e.message || '') };
@@ -97,22 +98,26 @@
     if (r && r.ok) { known.add(sha); return { ok: true }; }
     if (r && r.status === 'unauthenticated') throw new CwError('auth', 'Sign in again.');
     const code = r && r.code;
-    return { ok: false, reason: code === 'too_large' ? 'too_large' : code === 'mime_not_allowed' ? 'mime_not_allowed' : 'upload_failed', detail: code || (r && r.message) };
+    return { ok: false, reason: code === 'mime_not_allowed' ? 'mime_not_allowed' : 'upload_failed', detail: code || (r && r.message) };   // media_invalid | media_conflict | object_missing | object_mismatch → kept local, reported
   }
   /* local show -> cloud document. Images are uploaded first; the result never contains data URLs. */
   CW.buildCloudDoc = async function (ctx) {
     const show = ctx.show, rest = Object.assign({}, show); delete rest.assets; const doc = clone(rest); doc.cloud_schema = 1; if (doc.v === undefined) doc.v = 1;
     if (typeof doc.name !== 'string') doc.name = 'My Weather Show'; doc.name = doc.name.slice(0, 200);
-    const assets = {}, issues = [];
+    const assets = {}, issues = [], bi = ctx.builtin || {}, biDoc = {};
+    /* Bundled artwork (default sky, 7-day template, headline / storm backgrounds) ships inside the app: it is never uploaded. An image is treated as bundled only
+       when its id is a known bundled id AND its bytes match the bundled copy; a custom image that merely reuses such an id is uploaded like any other image. */
+    const builtinSha = async id => { const k = 'builtin:' + id; if (!(k in ctx.hashMemo)) { const bp = typeof bi[id] === 'string' ? parseDataUrl(bi[id]) : null; ctx.hashMemo[k] = bp ? await sha256(bp.bytes) : null; } return ctx.hashMemo[k]; };
     for (const id of Object.keys(show.assets || {})) {
-      if (BUILTIN_ASSETS.includes(id)) continue;
       const data = show.assets[id], mk = typeof data === 'string' ? id + '|' + data.length + '|' + data.slice(0, 64) + '|' + data.slice(-64) : '';
+      if (bi[id] && data === bi[id]) { const bs = await builtinSha(id); if (bs) { biDoc[id] = bs; continue; } }
       let m = mk ? ctx.hashMemo[mk] : null, p = null;       // images are decoded and hashed once, not on every autosave
       if (!m) {
         p = parseDataUrl(data);
         if (!p) { if (ctx.placeholders[id]) continue; assets[id] = { local_only: true, reason: 'unavailable', mime: 'image/png', bytes: 0, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'unavailable' }); continue; }
         m = { mime: p.mime, bytes: p.bytes.length }; if (IMG_EXT[m.mime] && m.bytes <= MAX_IMAGE) m.sha = await sha256(p.bytes); ctx.hashMemo[mk] = m;
       }
+      if (bi[id] && m.sha && m.sha === await builtinSha(id)) { biDoc[id] = m.sha; continue; }
       const entry = { mime: m.mime, bytes: m.bytes };
       if (!IMG_EXT[m.mime]) { assets[id] = { local_only: true, reason: 'mime_not_allowed', ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'mime_not_allowed' }); continue; }
       if (m.bytes > MAX_IMAGE) { assets[id] = { local_only: true, reason: 'too_large', ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'too_large' }); continue; }
@@ -126,7 +131,7 @@
     }
     // Unresolved references this computer has no bytes for are carried forward untouched (never turned into a local-only marker, never dropped).
     for (const id of Object.keys(ctx.placeholders || {})) if (!(id in assets) && !((show.assets || {})[id] && parseDataUrl(show.assets[id]))) assets[id] = ctx.placeholders[id];
-    doc.assets = assets;
+    doc.assets = assets; if (Object.keys(biDoc).length) doc.builtinAssets = biDoc; else delete doc.builtinAssets;
     const lom = ctx.localOnlyMedia ? ctx.localOnlyMedia() : []; if (lom.length) doc.localOnlyMedia = lom; else delete doc.localOnlyMedia;
     return { doc, issues };
   };
@@ -134,6 +139,13 @@
   CW.hydrateDoc = async function (ctx, doc) {
     const show = clone(doc); delete show.cloud_schema; const lom = show.localOnlyMedia || []; delete show.localOnlyMedia;
     const assets = {}, placeholders = {}, missing = [], have = ctx.existingAssets || {}; show.assets = assets;
+    /* Bundled artwork: re-attached from this app's own copy (never downloaded). If this build lacks it, or carries different artwork, say so. */
+    const bi = ctx.builtin || {}, recorded = doc.builtinAssets || {}; delete show.builtinAssets;
+    for (const id of Object.keys(recorded)) {
+      const bp = typeof bi[id] === 'string' ? parseDataUrl(bi[id]) : null;
+      if (!bp) { missing.push({ id, reason: 'builtin_missing' }); continue; }
+      assets[id] = bi[id]; if (recorded[id] && (await sha256(bp.bytes)) !== recorded[id]) missing.push({ id, reason: 'builtin_changed' });
+    }
     const ids = Object.keys(doc.assets || {}); let next = 0;
     const work = async () => {
       while (next < ids.length) {
@@ -164,7 +176,7 @@
     const blank = () => ({ showId: null, baseRev: 0, baseKey: '', dirty: false, pending: null, recentOps: [], unacked: [], lastSyncedAt: null, placeholders: {}, localOnlyImages: 0, mediaState: null, nextReason: 'autosave', nextMeta: null, remoteNewer: null, remoteDeleted: false, conflict: null, claim: null, settingsRev: 0, settingsSent: {}, settingsInit: false, settingsIgnored: [], lastWs: '' });
     const save = () => kv.set(K('sync'), rec);
     const sessionUid = async () => { const s = await o.auth.session(); return s && s.user && s.user.id ? s.user.id : null; };
-    const ctx = () => ({ api, uid, deviceId: E.deviceId, show: host.getShow(), placeholders: rec.placeholders, baseAssets: baseDoc && baseDoc.assets, hashMemo, failed, known, localOnlyMedia: host.localOnlyMedia });
+    const ctx = () => ({ api, uid, deviceId: E.deviceId, show: host.getShow(), placeholders: rec.placeholders, baseAssets: baseDoc && baseDoc.assets, hashMemo, failed, known, localOnlyMedia: host.localOnlyMedia, builtin: host.builtinAssets ? host.builtinAssets() : null });
     const setState = (s, err) => { state = s; lastError = err || null; emit('status', E.status()); };
 
     /* ----- status (exactly one of the contract states) ----- */
@@ -292,7 +304,7 @@
     async function fetchDoc(table, id) { const r = ((await api.select(table, 'select=doc,rev,name&id=eq.' + id)) || [])[0]; if (!r) throw new CwError('http', 'That version is no longer available.'); return r; }
     E.openShow = async function (showId, opts) {
       opts = opts || {}; const row = await fetchDoc('wx_studio_shows', showId);
-      const h = await CW.hydrateDoc({ api, uid, deviceId: E.deviceId, existingAssets: opts.keepAssets === false ? {} : (host.getShow().assets || {}) }, row.doc);
+      const h = await CW.hydrateDoc({ api, uid, deviceId: E.deviceId, builtin: host.builtinAssets ? host.builtinAssets() : null, existingAssets: opts.keepAssets === false ? {} : (host.getShow().assets || {}) }, row.doc);
       const cur = rec.showId === showId;
       if (!cur && (rec.dirty || rec.pending) && !opts.skipFlush) { try { await E.syncNow({ force: true }); } catch (e) { /* best effort: local copy is kept by the host safety snapshot */ } }
       await host.loadShow(h.show, { sceneId: opts.sceneId, source: opts.reason || 'cloud', cloud: true });
@@ -306,7 +318,7 @@
     E.listVersions = async function (showId) { return (await api.select('wx_studio_show_versions', 'select=id,show_id,rev,reason,protected,name,scene_count,doc_bytes,doc_hash,device_id,device_name,restored_from_rev,note,created_at&show_id=eq.' + (showId || rec.showId) + '&order=rev.desc&limit=200')) || []; };
     E.restoreVersion = async function (version) {      // restoring creates a NEW revision; the replaced state stays recoverable
       const row = await fetchDoc('wx_studio_show_versions', version.id);
-      const h = await CW.hydrateDoc({ api, uid, deviceId: E.deviceId, existingAssets: host.getShow().assets || {} }, row.doc);
+      const h = await CW.hydrateDoc({ api, uid, deviceId: E.deviceId, builtin: host.builtinAssets ? host.builtinAssets() : null, existingAssets: host.getShow().assets || {} }, row.doc);
       await host.loadShow(h.show, { source: 'restore', cloud: true }); rec.placeholders = h.placeholders; rec.nextReason = 'restore'; rec.nextMeta = { restored_from_rev: version.rev }; rec.dirty = true; rec.conflict = null; await save();
       return E.syncNow({ force: true, reason: 'restore' });
     };
@@ -400,8 +412,11 @@
       try { await E.pushSettings(); } catch (e) { /* retried on the next tick */ }
       try { await E.pushWorkspace(); } catch (e) { /* retried */ }
       if (state === 'offline' || state === 'failed') return;
+      if (o.isHidden && o.isHidden()) return;       // the periodic "is there a newer version?" SELECT is skipped while the tab is hidden (saves and settings pushes above are not)
       await E.checkRemote();
     };
+    /* The tab became visible again: look for a newer cloud version straight away instead of waiting for the next 20 s tick. */
+    E.onVisible = async function () { if (!uid || !rec || state === 'offline' || state === 'failed') return; try { await E.checkRemote(); } catch (e) { /* retried on the next tick */ } };
     E.flushOnClose = function () { if (uid && rec && rec.dirty && state !== 'conflict') return E.syncNow({ reason: 'close' }).catch(() => { }); };
     E.setClaim = async function (c) { if (!rec) return; rec.claim = c; await save(); if (c !== 'later') { state = 'idle'; emit('status', E.status()); } };
     E.forget = async function () {        // "clear local account data": drop everything this engine stored for the current account

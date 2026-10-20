@@ -17,7 +17,7 @@
   const WX = g.WX, S = WX.S, WF = g.WXShowFile;
 
   const host = {
-    getShow: () => S.show, getSceneId: () => B.sceneId(), hasRealLocalWork: B.hasRealLocalWork, renameShow: B.renameShow,
+    getShow: () => S.show, builtinAssets: () => B.builtinAssets(), getSceneId: () => B.sceneId(), hasRealLocalWork: B.hasRealLocalWork, renameShow: B.renameShow,
     loadShow: async (sh, o) => { B.loadCloudShow(sh, o); },
     localOnlyMedia: () => {
       const out = [], here = new Set();
@@ -29,7 +29,7 @@
     writeSettings: patch => { Object.keys(patch).forEach(k => { if (patch[k] === null) ls.del(k); else ls.set(k, patch[k]); }); },
     backupSettings: async local => { ls.set('wx.studio.settingsBackup.v1', JSON.stringify({ at: new Date().toISOString(), settings: local })); }
   };
-  const eng = CWm.createEngine({ api, kv, host, deviceId, deviceName: deviceName(), auth: { session: getSession } });
+  const eng = CWm.createEngine({ api, kv, host, deviceId, deviceName: deviceName(), auth: { session: getSession }, isHidden: () => document.visibilityState === 'hidden' });
   g.WXCloudUI = { engine: eng, api, kv, deviceId, ready: null };
 
   /* ---------- small helpers ---------- */
@@ -88,7 +88,7 @@
     open('account', 'Cloud workspace', body, [btn('Sign out…', signOutDialog, 'dng'), btn('Close', closeModal)]);
   }
   function reportOpen(r, title) {
-    const lines = []; if (r.missing && r.missing.length) lines.push(r.missing.length + ' image(s) in this show are not available on this computer (' + r.missing.slice(0, 4).map(m => m.id + ': ' + ({ too_large: 'too large to upload', mime_not_allowed: 'unsupported type', upload_failed: 'upload failed', unavailable: 'unavailable', hash_mismatch: 'download damaged', download_failed: 'could not download' }[m.reason] || m.reason)).join('; ') + '). Their place is kept so nothing is lost.');
+    const lines = []; if (r.missing && r.missing.length) lines.push(r.missing.length + ' image(s) in this show are not available on this computer (' + r.missing.slice(0, 4).map(m => m.id + ': ' + ({ too_large: 'too large to upload', mime_not_allowed: 'unsupported type', upload_failed: 'upload failed', unavailable: 'unavailable', hash_mismatch: 'download damaged', download_failed: 'could not download', builtin_missing: 'bundled artwork missing from this version of WX Studio', builtin_changed: 'bundled artwork differs in this version of WX Studio' }[m.reason] || m.reason)).join('; ') + '). Their place is kept so nothing is lost.');
     if (r.localOnlyMedia && r.localOnlyMedia.length) lines.push(r.localOnlyMedia.length + ' video/GIF file(s) used by this show live on another computer: ' + r.localOnlyMedia.slice(0, 5).map(m => m.name).join(', ') + '. Open the .wxshow file from that computer to bring them here.');
     if (lines.length) notice(title, ['The show is open, with notes:'].concat(lines)); else toast(title);
   }
@@ -226,7 +226,7 @@
     await onSignedIn(ev.userId);
   });
   g.addEventListener('online', () => { if (eng.uid()) eng.syncNow({ force: true }).catch(() => { }); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') eng.flushOnClose(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') eng.flushOnClose(); else eng.onVisible(); });
   g.addEventListener('pagehide', () => { eng.flushOnClose(); });
   paintChip();
   g.WXCloudUI.ready = (async () => {

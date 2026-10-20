@@ -30,7 +30,13 @@
   function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
-  function ensureBG(sh) { if (g.WX_BGDEFAULT && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bgdefault')) { sh.assets = sh.assets || {}; sh.assets.bgdefault = g.WX_BGDEFAULT; } if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } if (g.WX_TPL && sh && sh.scenes) Object.keys(g.WX_TPL).forEach(k => { if (sh.scenes.some(x => x.bg && x.bg.asset === k)) { sh.assets = sh.assets || {}; sh.assets[k] = g.WX_TPL[k]; } }); }
+  /* Bundled artwork that ships inside the app (default sky, 7-day template, headline / storm backgrounds). v0.10.2: also the list the cloud client uses to
+     recognise bundled images (they are never uploaded). keepCustom (cloud open) never replaces a different image that merely reuses a bundled id. */
+  function builtinBGs() { const o = {}; if (g.WX_BGDEFAULT) o.bgdefault = g.WX_BGDEFAULT; if (g.WX_BG7DAY) o.bg7day = g.WX_BG7DAY; if (g.WX_TPL) Object.keys(g.WX_TPL).forEach(k => { o[k] = g.WX_TPL[k]; }); return o; }
+  function ensureBG(sh, opt) {
+    if (!sh || !sh.scenes) return; const B = builtinBGs();
+    Object.keys(B).forEach(k => { if (!sh.scenes.some(x => x.bg && x.bg.asset === k)) return; sh.assets = sh.assets || {}; if (opt && opt.keepCustom && sh.assets[k] && sh.assets[k] !== B[k]) return; sh.assets[k] = B[k]; });
+  }
   const libHas = (k, v) => { try { return bgList.some(b => b.asset === k && b.data === v); } catch (e) { return false; } };
   /* v0.10.0: autosave reports its outcome. A failed write (storage full or blocked) used to be swallowed silently. */
   function saveStatus(ok, why) {
@@ -103,7 +109,7 @@
     const sh=E.newShow(); if(sh.scenes&&sh.scenes[0]&&sh.scenes[0].bg&&sh.scenes[0].bg.type==='mapbox')sh.scenes[0].bg=JSON.parse(JSON.stringify(defaultMapBg()));
     return sh;
   }
-  function loadShow(sh) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
+  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
@@ -2079,9 +2085,9 @@
   }
   function setNamespace(uid) { try { if (uid) localStorage.setItem(NS_KEY, uid); else localStorage.removeItem(NS_KEY); } catch (e) { /* ignore */ } }
   function loadCloudShow(sh, o) {
-    loadShow(sh); const id = o && o.sceneId; if (id != null) { const i = S.show.scenes.findIndex(x => String(x.id) === String(id)); if (i > 0) { S.si = i; S.oid = null; refreshAll(); } }
+    loadShow(sh, { keepCustom: true }); const id = o && o.sceneId; if (id != null) { const i = S.show.scenes.findIndex(x => String(x.id) === String(id)); if (i > 0) { S.si = i; S.oid = null; refreshAll(); } }
   }
   g.WX = { S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog,
-    cloud: { hooks: HK, ns: () => NS, setNamespace, hasRealLocalWork, legacyInfo, claimLegacy, clearAccountData, keepLocalCopy, loadCloudShow, sceneId: () => (S.show.scenes[S.si] || {}).id, renameShow: n => { S.show.name = n; commit(); }, recentDialog, modal, closeModal, notice, toast, h, fmtMB, recentSnap, videos: () => E.videos } };
+    cloud: { hooks: HK, ns: () => NS, setNamespace, hasRealLocalWork, legacyInfo, claimLegacy, clearAccountData, keepLocalCopy, loadCloudShow, builtinAssets: builtinBGs, sceneId: () => (S.show.scenes[S.si] || {}).id, renameShow: n => { S.show.name = n; commit(); }, recentDialog, modal, closeModal, notice, toast, h, fmtMB, recentSnap, videos: () => E.videos } };
   boot();
 })(window);

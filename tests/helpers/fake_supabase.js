@@ -155,11 +155,11 @@ function createFakeSupabase(opt) {
       if (!Number.isInteger(p_size_bytes) || p_size_bytes <= 0 || p_size_bytes > MAX_IMG) return bad('invalid', { code: 'media_invalid' });
       const path = uid + '/' + p_sha256 + '.' + MIMES[p_mime], obj = objects.get(path);
       const ex = db.media.find(r => r.user_id === uid && r.sha256 === p_sha256);
-      if (ex) { if (ex.mime !== p_mime || ex.kind !== p_kind || ex.size_bytes !== p_size_bytes) return bad('invalid', { code: 'media_conflict' }); return { ok: true, status: 'exists', sha256: p_sha256, storage_path: ex.storage_path }; }
+      if (ex) { if (ex.mime !== p_mime || ex.kind !== p_kind || ex.size_bytes !== p_size_bytes) return bad('invalid', { code: 'media_conflict' }); return { ok: true, status: 'exists', storage_path: ex.storage_path }; }
       if (!obj) return bad('invalid', { code: 'object_missing' });
       if (obj.bytes.length !== p_size_bytes || obj.mime !== p_mime) return bad('invalid', { code: 'object_mismatch' });
       db.media.push({ id: uuid(), user_id: uid, sha256: p_sha256, kind: p_kind, mime: p_mime, size_bytes: p_size_bytes, width: p_width || null, height: p_height || null, name: String(p_name || '').slice(0, 120), storage_path: path, created_at: iso() });
-      return { ok: true, status: 'registered', sha256: p_sha256, storage_path: path };
+      return { ok: true, status: 'registered', storage_path: path };
     }
   };
   function setDeleted(uid, a, del) {
@@ -208,7 +208,7 @@ function createFakeSupabase(opt) {
       if (!MIMES[mime]) return { status: 415, body: { statusCode: '415', error: 'invalid_mime_type', message: 'mime type ' + mime + ' is not supported' } };
       const bytes = new Uint8Array(await new Response(body).arrayBuffer());
       if (bytes.length > MAX_IMG) return { status: 413, body: { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' } };
-      if (objects.has(key) && !(headers['x-upsert'] === 'true')) return { status: 400, body: { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' } };
+      if (objects.has(key) && !(headers['x-upsert'] === 'true')) return F.faults.dupStyle === 'asset400' ? { status: 400, body: { statusCode: '400', error: 'Asset Already Exists', message: 'The resource already exists' } } : F.faults.dupStyle === 'http409' ? { status: 409, body: { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' } } : { status: 400, body: { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' } };   // faults.dupStyle: 'asset400' (older Storage) | 'http409' (newer) | default 400 + statusCode 409
       const used = [...objects.values()].reduce((s, o) => s + o.bytes.length, 0);
       if (used + bytes.length > F.quotaBytes) return { status: 413, body: { statusCode: '413', error: 'exceed_storage_size_quota', message: 'Storage quota exceeded' } };
       objects.set(key, { bytes, mime }); return { status: 200, body: { Key: 'wx-studio-media/' + key } };
