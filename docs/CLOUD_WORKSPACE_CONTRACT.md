@@ -28,7 +28,7 @@ Object path: `<user_id>/<sha256>.<ext>` (`png` | `jpg` | `webp`).
 - Versions: `id, show_id, rev, reason, protected, name, scene_count, doc_bytes, doc_hash, device_id, device_name, restored_from_rev, note, created_at`
 - Document of one show: `select doc, rev, name, updated_at from wx_studio_shows where id = eq.<id>`; of one version: `select doc, rev from wx_studio_show_versions where id = eq.<id>`.
 - Settings: `select settings, rev, updated_at from wx_studio_user_settings` (one row per user).
-- Workspace: `select device_id, device_name, show_id, scene_id, updated_at from wx_studio_workspace` (one row per user and device).
+- Workspace: `select device_id, device_name, active_show_id, active_scene_id, updated_at from wx_studio_workspace` (column names as created by the migration) (one row per user and device).
 - Media: `select sha256, kind, mime, size_bytes, storage_path from wx_studio_media where sha256 = eq.<hash>`.
 
 ## 2. RPCs
@@ -71,7 +71,7 @@ Conflict (nothing changed):
 ```
 
 Invalid: `{ "ok": false, "status": "invalid", "code": "...", "message": "...", "bytes"?: n, "max_bytes"?: n }` with `code` ∈
-`doc_too_large | doc_invalid | embedded_data_not_allowed | media_not_registered | local_only_reason_invalid | reason_invalid | schema_unsupported | show_deleted | base_rev_invalid | op_id_reused`.
+`doc_too_large | doc_invalid | embedded_data_not_allowed | media_not_registered | reason_invalid | meta_invalid | schema_unsupported | show_deleted | base_rev_invalid | op_id_reused` (the real migration reports a bad local-only marker as `doc_invalid`).
 Other: `{ "ok": false, "status": "not_found|forbidden|unauthenticated", "message": "..." }`.
 
 ### 2.2 Cloud document (`p_doc`)
@@ -198,3 +198,13 @@ No media is ever deleted automatically.
 - Local state per account lives under `u:<uid>:…` in IndexedDB `wxstudio-cloud` (sync record, pending op ids + payloads, last synced doc, known media hashes). Browser data for an account is namespaced (autosave key suffix `:u:<uid>`, `owner` field on library/recent records).
 - Test harness: `tests/helpers/fake_supabase.js` (executable form of this contract), `fake_supabase_server.js` (HTTP wrapper + fake email/password auth for browser checks).
 - Anything the real database does differently from this contract is a bug in one of the two and must be settled between the developers, not worked around in the client.
+
+---
+## 6. Reconciled with the implemented migrations (2026-10-20)
+
+Checked against ChatGPT's migrations `20261020021852…20261020023407` (branch `feature/cloud-workspace-db-v0-10-2`, commit 41d40ce) by running them unmodified in a local PostgreSQL (`tests/helpers/pg_supabase.js`). Differences from Draft 1 that the client now follows:
+- Workspace columns are `active_show_id` / `active_scene_id` (RPC parameter names unchanged).
+- `doc_hash` is computed by PostgreSQL over normalized `jsonb::text`; the client never compares it with a JavaScript hash. After a lost response it compares the current cloud document structurally (key-order independent) with the document it sent, and only if `last_op_id` is one of its own operation ids.
+- `wx_studio_delete_show` / `wx_studio_undelete_show` are idempotent, keep the replaced revision as a protected version, and reset the replay token (a retry of an older save on a deleted show returns `show_deleted`).
+- Version reasons also include `delete`-side `pre-overwrite` copies and `undelete`.
+- Register-media failure codes are `mime_not_allowed | media_invalid | media_conflict | object_missing | object_mismatch`; the client turns anything other than a known size/type problem into a local-only `upload_failed` marker and retries later.

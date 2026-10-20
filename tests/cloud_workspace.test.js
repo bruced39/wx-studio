@@ -173,7 +173,7 @@ test('account isolation: user B never sees or opens user A shows, settings or wo
 
 test('workspace: per-device row; no local work auto-opens; real local work gets a Resume offer, never a silent replacement', async () => {
   const fake = createFakeSupabase(); const a = await client(fake, 'u1', { deviceId: 'A', deviceName: 'Home PC' }); a.state.scene = 's2'; a.eng.markDirty(); await a.eng.syncNow(); await a.eng.pushWorkspace();
-  assert.equal(fake.db.workspace[0].device_id, 'A'); assert.equal(fake.db.workspace[0].scene_id, 's2');
+  assert.equal(fake.db.workspace[0].device_id, 'A'); assert.equal(fake.db.workspace[0].active_scene_id, 's2');
   const fresh = await client(fake, 'u1', { deviceId: 'B', deviceName: 'Laptop', realWork: false });
   let r = await fresh.eng.restoreSession(); assert.equal(r.action, 'opened'); assert.equal(fresh.state.scene, 's2'); assert.equal(fresh.state.show.name, 'Evening show');
   const worker = await client(fake, 'u1', { deviceId: 'C', deviceName: 'Office', realWork: true, show: mkShow({ name: 'Local only work' }) });

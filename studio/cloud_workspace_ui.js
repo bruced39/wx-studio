@@ -35,7 +35,7 @@
   /* ---------- small helpers ---------- */
   const when = iso => { try { return new Date(iso).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return String(iso || ''); } };
   const userEmail = () => { const u = P.user(); return (u && u.email) || 'your account'; };
-  const REASON = { autosave: 'Autosave', manual: 'Saved by you', close: 'When you left the page', import: 'Opened a file / new show', restore: 'Restored', overwrite: 'Kept one computer’s version', 'pre-overwrite': 'Before another computer’s version replaced it', 'keep-both': 'Kept both copies' };
+  const REASON = { autosave: 'Autosave', manual: 'Saved by you', close: 'When you left the page', import: 'Opened a file / new show', restore: 'Restored', overwrite: 'Kept one computer’s version', 'pre-overwrite': 'Before another computer’s version replaced it', 'keep-both': 'Kept both copies', undelete: 'Brought back from Deleted shows' };
   const btn = (text, fn, cls) => h('button', { className: cls || '', text, on: { click: fn } });
   const err = m => h('div', { className: 'hint', style: 'color:#ff8a8a;overflow-wrap:anywhere', text: m });
   let dialogKind = '';

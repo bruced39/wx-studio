@@ -353,7 +353,7 @@
     /* Decide what to open on sign-in. Returns {action:'none'|'continue'|'opened'|'resume-offer', ...}. Never replaces real local work silently. */
     E.restoreSession = async function () {
       if (!uid || !rec) return { action: 'none' };
-      const shows = await E.listShows(false), ws = (await api.select('wx_studio_workspace', 'select=device_id,device_name,show_id,scene_id,updated_at&order=updated_at.desc')) || [];
+      const shows = await E.listShows(false), ws = ((await api.select('wx_studio_workspace', 'select=device_id,device_name,active_show_id,active_scene_id,updated_at&order=updated_at.desc')) || []).map(w => ({ device_id: w.device_id, device_name: w.device_name, show_id: w.active_show_id, scene_id: w.active_scene_id, updated_at: w.updated_at }));
       const alive = id => shows.find(s => s.id === id), real = host.hasRealLocalWork();
       if (rec.showId && alive(rec.showId)) { await E.checkRemote(); return { action: 'continue', showId: rec.showId }; }
       const own = ws.find(w => w.device_id === E.deviceId && alive(w.show_id)), other = ws.find(w => w.device_id !== E.deviceId && alive(w.show_id));

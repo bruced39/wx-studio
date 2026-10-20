@@ -14,13 +14,16 @@ PORT = 8791; LOCAL = 'http://127.0.0.1:%d' % PORT; FAKE = 'https://fake-project.
 res = []
 def chk(name, ok, info=''):
     res.append((name, bool(ok), info)); print(('PASS ' if ok else 'FAIL ') + name, info if not ok or info else '')
-srv = subprocess.Popen(['node', str(ROOT / 'tests/helpers/fake_supabase_server.js'), str(PORT)])
-for _ in range(50):
+srv = subprocess.Popen(['node', str(ROOT / 'tests/helpers/fake_supabase_server.js'), str(PORT)])   # WX_BACKEND=pg (+ WX_MIGRATIONS_DIR) runs the REAL v0.10.2 SQL in a local PostgreSQL instead of the in-memory fake
+for _ in range(300):
     try: urllib.request.urlopen(LOCAL + '/__admin/state'); break
     except Exception: time.sleep(0.1)
+def ids():
+    return json.loads(urllib.request.urlopen(LOCAL + '/__admin/ids').read())
 def adm(path='state', data=None):
     rq = urllib.request.Request(LOCAL + '/__admin/' + path, data=json.dumps(data).encode() if data is not None else None, method='POST' if data is not None else 'GET')
     return json.loads(urllib.request.urlopen(rq).read())
+_ids = None
 HDR = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-upsert, prefer, x-client-info, accept-profile', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'}
 def route(r):
     q = r.request
@@ -28,6 +31,7 @@ def route(r):
     try: resp = r.fetch(url=q.url.replace(FAKE, LOCAL))
     except Exception: r.abort(); return
     h = dict(resp.headers); h.update(HDR); r.fulfill(response=resp, headers=h)
+UA, UB = ids()['a'], ids()['b']
 CONF = "window.WX_CLOUD_CONFIG={url:'" + FAKE + "',publishableKey:'sb_publishable_fake'};"
 IMG = """()=>{const c=document.createElement('canvas');c.width=64;c.height=36;const x=c.getContext('2d');x.fillStyle='#c33';x.fillRect(0,0,64,36);x.fillStyle='#fff';x.fillRect(10,10,20,10);return c.toDataURL('image/png');}"""
 MKSHOW = """([name,img])=>{const E=WX.E,mk=(n,bg)=>E.newScene({name:n,duration:4,bg,title:{show:false,text:'',sub:''},objects:[]});
@@ -66,12 +70,12 @@ with sync_playwright() as p:
     doc = st['shows'][0]['doc'] if st['shows'] else {}
     chk('cloud document keeps engine v:1 beside cloud_schema:1 and contains no embedded image data', doc.get('v') == 1 and doc.get('cloud_schema') == 1 and 'data:' not in json.dumps(doc))
     asset = (doc.get('assets') or {}).get('img_test', {})
-    chk('image was uploaded to the private bucket and registered before the document referenced it', str(asset.get('media', '')).startswith('sha256:') and len(st['media']) == 1 and len(st['objects']) == 1 and st['objects'][0].startswith('user-a/'), asset)
+    chk('image was uploaded to the private bucket and registered before the document referenced it', str(asset.get('media', '')).startswith('sha256:') and len(st['media']) == 1 and len(st['objects']) == 1 and st['objects'][0].startswith(UA + '/'), asset)
     for _ in range(20):
         st = adm()
         if st['workspace']: break
         a.wait_for_timeout(500)   # (sleep through Playwright so route handlers keep running)
-    chk('workspace row records this device and scene', len(st['workspace']) == 1 and st['workspace'][0]['show_id'] == st['shows'][0]['id'])
+    chk('workspace row records this device and scene', len(st['workspace']) == 1 and st['workspace'][0]['active_show_id'] == st['shows'][0]['id'])
     a.screenshot(path=S + 'cw_signed_in.png')
 
     # ================= computer 2: empty browser auto-opens the newest cloud show =================
@@ -109,7 +113,7 @@ with sync_playwright() as p:
     a.evaluate("(()=>{WX.S.show.name='Edited offline';WX.commit();})()")
     ok = wait(a, "()=>document.getElementById('cloudState').querySelector('.cl').textContent.startsWith('Offline')", 25000)
     chk('offline shows "Offline – saved locally"', ok, chip(a))
-    chk('offline edit is still autosaved in this browser', 'Edited offline' in (a.evaluate("localStorage.getItem('wx.studio.autosave.v1:u:user-a')") or ''))
+    chk('offline edit is still autosaved in this browser', 'Edited offline' in (a.evaluate("localStorage.getItem('wx.studio.autosave.v1:u:" + UA + "')") or ''))
     adm('faults', {'offline': False}); a.evaluate("WXCloudUI.engine.syncNow({force:true})")
     ok = wait(a, "()=>document.getElementById('cloudState').querySelector('.cl').textContent==='Saved to cloud'", 20000)
     chk('reconnecting syncs the offline edit', ok and adm()['shows'][0]['doc']['name'] == 'Edited offline', chip(a))
@@ -135,15 +139,15 @@ with sync_playwright() as p:
     chk('a different account is offered the leftover local copy only through the explicit wizard', 'Add it to my account' in w, w[:100])
     # choose "Keep it separate"
     a.evaluate("document.querySelectorAll('#modal input[type=radio]')[1].click()"); click_btn(a, 'Continue'); a.wait_for_timeout(2500)
-    chk("account B does not see account A's show", a.evaluate("WX.S.show.name") != 'Edited offline' and len([s for s in adm()['shows'] if s['user_id'] == 'user-b']) == 0, a.evaluate("WX.S.show.name"))
-    chk("account B's local storage is separate", a.evaluate("localStorage.getItem('wx.studio.ns.v1')") == 'user-b' and 'Edited offline' not in (a.evaluate("localStorage.getItem('wx.studio.autosave.v1:u:user-b')") or ''))
+    chk("account B does not see account A's show", a.evaluate("WX.S.show.name") != 'Edited offline' and len([s for s in adm()['shows'] if s['user_id'] == UB]) == 0, a.evaluate("WX.S.show.name"))
+    chk("account B's local storage is separate", a.evaluate("localStorage.getItem('wx.studio.ns.v1')") == UB and 'Edited offline' not in (a.evaluate("localStorage.getItem('wx.studio.autosave.v1:u:" + UB + "')") or ''))
     a.evaluate("document.getElementById('saveState').click()"); a.wait_for_timeout(400)
     chk("account B's Recent autosaves do not list account A's copies", 'Before loading the cloud version' not in modal_text(a)); click_btn(a, 'Close')
 
     # ================= clear on sign-out (shared computer) =================
     b.evaluate("WXCloudUI.signOutDialog()"); b.wait_for_timeout(300)
     b.evaluate("document.querySelectorAll('#modal input[type=radio]')[1].click()"); click_btn(b, 'Sign out'); b.wait_for_timeout(2500)
-    keys = b.evaluate("Object.keys(localStorage).filter(k=>k.includes(':u:user-a'))")
+    keys = b.evaluate("Object.keys(localStorage).filter(k=>k.includes(':u:" + UA + "'))")
     chk("'Clear my account data' removes the account's local storage", keys == [], keys)
     chk('cloud copy is untouched by clearing local data', len(adm()['shows']) >= 1)
 
@@ -155,9 +159,9 @@ with sync_playwright() as p:
     d.screenshot(path=S + 'cw_resume_offer.png')
     click_btn(d, 'Keep this computer’s show')
     for _ in range(40):
-        if len([x for x in adm()['shows'] if x['user_id'] == 'user-a']) >= 2: break
+        if len([x for x in adm()['shows'] if x['user_id'] == UA]) >= 2: break
         d.wait_for_timeout(500)
-    names = sorted(x['doc']['name'] for x in adm()['shows'] if x['user_id'] == 'user-a')
+    names = sorted(x['doc']['name'] for x in adm()['shows'] if x['user_id'] == UA)
     chk('keeping local work saves it as its own cloud show; the other show is untouched', 'Office work' in names and len(names) == 2 and d.evaluate("WX.S.show.name") == 'Office work', names)
 
     # ================= narrow layout =================
@@ -168,5 +172,7 @@ with sync_playwright() as p:
     chk('no page errors in any window', not errs, errs[:3])
     br.close()
 srv.terminate()
+try: srv.wait(15)
+except Exception: srv.kill()
 bad = [r for r in res if not r[1]]
 print('\n%d checks, %d failed' % (len(res), len(bad))); sys.exit(1 if bad else 0)

@@ -144,20 +144,20 @@ function createFakeSupabase(opt) {
       if (p_scene_id !== null && p_scene_id !== undefined && (typeof p_scene_id !== 'string' || p_scene_id.length > 64)) return bad('invalid', { code: 'doc_invalid', message: 'scene id' });
       let w = db.workspace.find(r => r.user_id === uid && r.device_id === p_device_id);
       if (!w) { w = { user_id: uid, device_id: p_device_id }; db.workspace.push(w); }
-      Object.assign(w, { device_name: p_device_name || '', show_id: p_show_id, scene_id: p_scene_id || null, updated_at: iso() });
+      Object.assign(w, { device_name: p_device_name || '', active_show_id: p_show_id, active_scene_id: p_scene_id || null, updated_at: iso() });
       return { ok: true, status: 'saved', updated_at: w.updated_at };
     },
     wx_studio_register_media(uid, a) {
       const { p_sha256, p_kind, p_mime, p_size_bytes, p_name, p_width, p_height } = a;
-      if (!/^[0-9a-f]{64}$/.test(String(p_sha256))) return bad('invalid', { code: 'bad_hash' });
-      if (p_kind !== 'image') return bad('invalid', { code: 'kind_not_allowed' });
+      if (!/^[0-9a-f]{64}$/.test(String(p_sha256))) return bad('invalid', { code: 'media_invalid' });
+      if (p_kind !== 'image') return bad('invalid', { code: 'mime_not_allowed' });
       if (!MIMES[p_mime]) return bad('invalid', { code: 'mime_not_allowed' });
-      if (!Number.isInteger(p_size_bytes) || p_size_bytes <= 0 || p_size_bytes > MAX_IMG) return bad('invalid', { code: 'too_large' });
+      if (!Number.isInteger(p_size_bytes) || p_size_bytes <= 0 || p_size_bytes > MAX_IMG) return bad('invalid', { code: 'media_invalid' });
       const path = uid + '/' + p_sha256 + '.' + MIMES[p_mime], obj = objects.get(path);
       const ex = db.media.find(r => r.user_id === uid && r.sha256 === p_sha256);
-      if (ex) { if (ex.mime !== p_mime || ex.kind !== p_kind || ex.size_bytes !== p_size_bytes) return bad('invalid', { code: 'conflicts_with_existing' }); return { ok: true, status: 'exists', sha256: p_sha256, storage_path: ex.storage_path }; }
+      if (ex) { if (ex.mime !== p_mime || ex.kind !== p_kind || ex.size_bytes !== p_size_bytes) return bad('invalid', { code: 'media_conflict' }); return { ok: true, status: 'exists', sha256: p_sha256, storage_path: ex.storage_path }; }
       if (!obj) return bad('invalid', { code: 'object_missing' });
-      if (obj.bytes.length !== p_size_bytes || obj.mime !== p_mime) return bad('invalid', { code: 'metadata_mismatch' });
+      if (obj.bytes.length !== p_size_bytes || obj.mime !== p_mime) return bad('invalid', { code: 'object_mismatch' });
       db.media.push({ id: uuid(), user_id: uid, sha256: p_sha256, kind: p_kind, mime: p_mime, size_bytes: p_size_bytes, width: p_width || null, height: p_height || null, name: String(p_name || '').slice(0, 120), storage_path: path, created_at: iso() });
       return { ok: true, status: 'registered', sha256: p_sha256, storage_path: path };
     }
@@ -166,9 +166,11 @@ function createFakeSupabase(opt) {
     const row = db.shows.find(r => r.id === a.p_show_id);
     if (!row || row.user_id !== uid) return bad('not_found', { message: 'show not found' });
     if (!Number.isInteger(a.p_base_rev) || row.rev !== a.p_base_rev) return bad('conflict', { current_rev: row.rev, updated_at: row.updated_at, device_name: row.device_name });
-    if (del && row.deleted_at) return bad('invalid', { code: 'show_deleted', message: 'already deleted' });
-    if (!del && !row.deleted_at) return bad('invalid', { code: 'not_deleted', message: 'show is not deleted' });
-    row.deleted_at = del ? iso() : null; row.rev += 1; row.updated_at = iso();
+    if (del && row.deleted_at) return { ok: true, status: 'deleted', show_id: row.id, rev: row.rev, updated_at: row.updated_at, deleted_at: row.deleted_at };   // idempotent (as in the real RPC)
+    if (!del && !row.deleted_at) return { ok: true, status: 'restored', show_id: row.id, rev: row.rev, updated_at: row.updated_at };
+    if (del) addVersion(row, 'pre-overwrite', true, {});                        // the real RPC keeps the deleted revision as a protected copy
+    row.deleted_at = del ? iso() : null; row.rev += 1; row.updated_at = iso(); row.last_op_id = uuid(); row.last_op_hash = '0'.repeat(64);   // delete / undelete invalidate replay tokens
+    if (!del) addVersion(row, 'undelete', true, {});
     return { ok: true, status: del ? 'deleted' : 'restored', show_id: row.id, rev: row.rev, updated_at: row.updated_at };
   }
 
@@ -177,7 +179,7 @@ function createFakeSupabase(opt) {
   const SELECTABLE = {
     shows: ['id', 'name', 'rev', 'scene_count', 'doc_bytes', 'schema_version', 'device_id', 'device_name', 'created_at', 'updated_at', 'deleted_at', 'doc', 'media_refs'],
     versions: ['id', 'show_id', 'rev', 'reason', 'protected', 'name', 'scene_count', 'doc_bytes', 'doc_hash', 'device_id', 'device_name', 'restored_from_rev', 'note', 'created_at', 'doc'],
-    settings: ['settings', 'rev', 'updated_at'], workspace: ['device_id', 'device_name', 'show_id', 'scene_id', 'updated_at'],
+    settings: ['settings', 'rev', 'updated_at'], workspace: ['device_id', 'device_name', 'active_show_id', 'active_scene_id', 'updated_at'],
     media: ['sha256', 'kind', 'mime', 'size_bytes', 'width', 'height', 'name', 'storage_path', 'created_at']
   };
   function select(uid, table, params) {
