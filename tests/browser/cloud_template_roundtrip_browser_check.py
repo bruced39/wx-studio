@@ -39,7 +39,7 @@ def sign_in(pg):
 
 BUILD = """()=>{const E=WX.E,sc=E.sceneFromTemplate('storm-night',{title:'STORM UPDATE',lines:['Damaging wind gusts tonight across eastern Massachusetts','Coastal flooding at high tide','Power outages possible']}); sc.objects=E.buildTemplate('storm-night',{lines:['Damaging wind gusts tonight across eastern Massachusetts','Coastal flooding at high tide','Power outages possible']});
   const flow=E.newObject('flow',{pts:[[300,700],[600,640],[900,660],[1300,600]],style:'chevron',color:'#ffd23f',size:46,spacing:2.6,speed:0.9}); flow.geo=true; flow.z0=7.5; flow.id='flow_rt';
-  const jet=E.newObject('jet',{pts:[[100,300],[700,250],[1300,330],[1800,280]],style:'ribbon',color:'#d5dbe6',width:70,speed:1,outline:false,fade:0.45,flowText:true,words:'JET STREAM',label:'Polar jet'}); jet.geo=true; jet.z0=7.5; jet.id='jet_rt';
+  const jet=E.newObject('jet',{pts:[[100,300],[700,250],[1300,330],[1800,280]],style:'ribbon',color:'#d5dbe6',width:70,speed:1,outline:false,fade:45,flowText:'text',words:'JET STREAM',label:'Polar jet'}); jet.geo=true; jet.z0=7.5; jet.id='jet_rt';
   sc.objects.push(flow,jet);
   WX.loadShow({name:'Storm round trip',accent:'#2f9bff',scenes:[sc],assets:{}}); return true}"""
 # order-independent copy of the scenes + a picture of the first frame
@@ -58,6 +58,16 @@ with sync_playwright() as p:
     tplLen = a.evaluate("(WX_TPL.tpl_storm_night||'').length")
     chk('the template scene has its bundled background attached locally', snapA['bg'] == 'tpl_storm_night' and snapA['bgLen'] == tplLen and tplLen > 10000, (snapA['bg'], snapA['bgLen'], tplLen))
     chk('scene contains the headline text, Flow and Jet', 'flow:flow_rt' in snapA['ids'] and 'jet:jet_rt' in snapA['ids'] and any(i.startswith('text:') for i in snapA['ids']), snapA['ids'])
+    # the fixture really exercises moving words + soft edges (editor contract: flowText 'text', fade 0-100): words move over time and differ from arrows / hard edges
+    RJ = """([over,t])=>{const E=WX.E,j=Object.assign({},WX.S.show.scenes[0].objects.find(o=>o.id==='jet_rt'),over||{});j.anim={in:'none',delay:0,dur:0.1};
+      const sc=E.newScene({name:'j',duration:6,bg:{type:'solid',color:'#12408a',kenburns:false},title:{show:false,text:'',sub:''},objects:[j]}),show={name:'j',accent:'#2f9bff',scenes:[sc],assets:{}};
+      const c=document.createElement('canvas');c.width=1920;c.height=1080;const x=c.getContext('2d');E.renderScene(x,show,sc,t,{editing:false});return Array.from(x.getImageData(0,180,1920,260).data).filter((v,i)=>i%4===0&&i%16===0)}"""
+    diff = lambda u, v: sum(abs(p - q) for p, q in zip(u, v))
+    w1, w2 = a.evaluate(RJ, [None, 1.0]), a.evaluate(RJ, [None, 1.6]); arrows = a.evaluate(RJ, [{'flowText': ''}, 1.0]); hard = a.evaluate(RJ, [{'fade': 0}, 1.0])
+    chk('Jet words move over time (frame at 1.0 s differs from 1.6 s)', diff(w1, w2) > 20000, diff(w1, w2))
+    chk('Jet with flowText "text" draws different pixels than the arrow version', diff(w1, arrows) > 20000, diff(w1, arrows))
+    chk('fade 45 (percent) draws softer edges than fade 0', diff(w1, hard) > 20000, diff(w1, hard))
+    a.screenshot(path='/tmp/jet_words_check.png')
     ok = False
     for _ in range(60):
         st = adm(); sh = st['shows']
@@ -71,7 +81,7 @@ with sync_playwright() as p:
     chk('computer 1 shows no incomplete / local-only warning', chip(a) == 'Saved to cloud', chip(a))
     sc = doc['scenes'][0]; flow = next((o for o in sc['objects'] if o.get('id') == 'flow_rt'), {}); jet = next((o for o in sc['objects'] if o.get('id') == 'jet_rt'), {})
     chk('Flow fields stored (chevron look, pts, z0, size, spacing, speed)', flow.get('style') == 'chevron' and flow.get('z0') == 7.5 and len(flow.get('pts', [])) == 4 and flow.get('size') == 46 and flow.get('spacing') == 2.6 and flow.get('speed') == 0.9, flow)
-    chk('Jet fields stored (words, soft edges, outline off, z0)', jet.get('flowText') is True and jet.get('words') == 'JET STREAM' and jet.get('fade') == 0.45 and jet.get('outline') is False and jet.get('z0') == 7.5 and len(jet.get('pts', [])) == 4, jet)
+    chk('Jet fields stored (words, soft edges, outline off, z0)', jet.get('flowText') == 'text' and jet.get('words') == 'JET STREAM' and jet.get('fade') == 45 and jet.get('outline') is False and jet.get('z0') == 7.5 and len(jet.get('pts', [])) == 4, jet)
     head = next((o for o in sc['objects'] if o.get('type') == 'text' and o.get('fitBox')), {})
     chk('fit-box headline stored (fitBox, autoFit, maxLines, wrapW, centre x/y)', head.get('fitBox') and head.get('autoFit') is not False and head.get('maxLines') == 2 and head.get('wrapW') and head.get('x') and head.get('y'), head)
     t2 = sc.get('title2') or {}

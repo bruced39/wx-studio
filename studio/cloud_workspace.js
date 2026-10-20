@@ -93,6 +93,11 @@
       if (c.reason === 'offline' || c.reason === 'auth') throw e;
       if (c.reason === 'too_large') return { ok: false, reason: 'too_large', detail: c.detail };
       if (c.reason !== 'exists') return { ok: false, reason: 'upload_failed', detail: c.reason === 'storage_full' ? 'cloud storage is full' : c.detail };
+      /* An object is already stored at this content-addressed path (an earlier upload that was never registered). The registration RPC only checks its size / MIME /
+         owner, so read the stored bytes back and check their SHA-256 before trusting it. A mismatch is never "fixed" by overwriting. */
+      let stored; try { stored = await ctx.api.download(path); }
+      catch (e2) { if (e2.code === 'offline' || e2.code === 'auth') throw e2; return { ok: false, reason: 'upload_failed', detail: 'the image already in cloud storage could not be read back to verify it (' + (e2.message || e2.code) + ')' }; }
+      if ((await sha256(stored)) !== sha) return { ok: false, reason: 'upload_failed', final: true, detail: 'a different file is already stored at this image’s cloud path (left untouched); your local image is kept' };
     }
     const r = await ctx.api.rpc('wx_studio_register_media', { p_sha256: sha, p_kind: 'image', p_mime: mime, p_size_bytes: bytes.length, p_name: String(name || '').slice(0, 120), p_width: null, p_height: null });
     if (r && r.ok) { known.add(sha); return { ok: true }; }
@@ -123,11 +128,11 @@
       if (m.bytes > MAX_IMAGE) { assets[id] = { local_only: true, reason: 'too_large', ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'too_large' }); continue; }
       const sha = m.sha, prior = ctx.failed[sha];
       let res;
-      if (prior && (prior.reason === 'too_large' || prior.reason === 'mime_not_allowed')) res = prior;
+      if (prior && (prior.final || prior.reason === 'too_large' || prior.reason === 'mime_not_allowed')) res = prior;
       else if (ctx.known.has(sha)) res = { ok: true };
       else { p = p || parseDataUrl(data); res = await ensureUploaded(ctx, sha, p.bytes, m.mime, id); }
       if (res.ok) { delete ctx.failed[sha]; assets[id] = { media: 'sha256:' + sha, ...entry }; if (ctx.placeholders[id]) delete ctx.placeholders[id]; }
-      else { ctx.failed[sha] = { reason: res.reason, detail: res.detail }; assets[id] = { local_only: true, reason: res.reason, ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: res.reason, detail: res.detail }); }
+      else { ctx.failed[sha] = { reason: res.reason, detail: res.detail, final: !!res.final }; assets[id] = { local_only: true, reason: res.reason, ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: res.reason, detail: res.detail }); }
     }
     // Unresolved references this computer has no bytes for are carried forward untouched (never turned into a local-only marker, never dropped).
     for (const id of Object.keys(ctx.placeholders || {})) if (!(id in assets) && !((show.assets || {})[id] && parseDataUrl(show.assets[id]))) assets[id] = ctx.placeholders[id];

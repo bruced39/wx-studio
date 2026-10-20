@@ -27,7 +27,7 @@ function templateShow(extra) {
       objects: [
         { id: 'o1', type: 'text', text: 'Damaging wind gusts tonight across eastern Massachusetts', x: 960, y: 560, size: 64, fitBox: true, autoFit: true, maxLines: 2, fitH: 130, wrapW: 1500, color: '#ffffff', font: 'Barlow', weight: 700, align: 'center' },
         { id: 'o2', type: 'flow', pts: [[300, 700], [600, 640], [900, 660], [1300, 600]], z0: 7.5, geo: true, style: 'chevron', color: '#ffd23f', size: 46, spacing: 2.6, speed: 0.9 },
-        { id: 'o3', type: 'jet', pts: [[100, 300], [700, 250], [1300, 330], [1800, 280]], z0: 7.5, geo: true, style: 'ribbon', color: '#d5dbe6', width: 70, speed: 1, arrowColor: '#ffffff', outline: false, fade: 0.45, flowText: true, words: 'JET STREAM', label: 'Polar jet' }
+        { id: 'o3', type: 'jet', pts: [[100, 300], [700, 250], [1300, 330], [1800, 280]], z0: 7.5, geo: true, style: 'ribbon', color: '#d5dbe6', width: 70, speed: 1, arrowColor: '#ffffff', outline: false, fade: 45, flowText: 'text', words: 'JET STREAM', label: 'Polar jet' }
       ]
     }]
   }, extra || {});
@@ -138,12 +138,28 @@ for (const B of BACKENDS) {
       const data = png(3500, 31), p = CW.parseDataUrl(data), sha = await CW.sha256(p.bytes), uid = B.uidA, path = uid + '/' + sha + '.png';
       const pre = await client(s, uid, { deviceId: 'P' }); await pre.api.upload(path, p.bytes, 'image/png');       // upload happened, registration never did
       assert.equal(storageCalls(s).filter(c => c.method === 'POST').length >= 1, true);
-      const posts0 = storageCalls(s).filter(c => c.method === 'POST').length;
+      const posts0 = storageCalls(s).filter(c => c.method === 'POST').length, gets0 = storageCalls(s).filter(c => c.method === 'GET' && c.path.includes(sha)).length;
       const a = await client(s, uid, { show: { v: 1, name: 'Dup', accent: '#2f9bff', bugText: 'WX', logo: null, assets: { img: data }, scenes: [{ id: 's1', name: 'Open', duration: 6, objects: [] }] }, deviceId: 'A' });
       a.eng.markDirty(); const r = await a.eng.syncNow(); assert.equal(r.ok, true, String(style) + ' ' + JSON.stringify(r));
       assert.equal(storageCalls(s).filter(c => c.method === 'POST').length, posts0 + 1, 'one (rejected) attempt, no overwrite');
       assert.equal((await mediaRows(s)).length, 1); assert.match((await showRow(s)).doc.assets.img.media, /^sha256:/); assert.equal(a.eng.status().kind, 'cloud');
+      assert.equal(storageCalls(s).filter(c => c.method === 'GET' && c.path.includes(sha)).length - gets0, 1, 'the stored object was read back and its SHA-256 checked before it was registered');
     }
+  });
+
+  T('duplicate upload with the right size but wrong bytes: not registered, not overwritten, local image kept, reported as upload_failed, not retried every save', async s => {
+    const data = png(3500, 31), p = CW.parseDataUrl(data), sha = await CW.sha256(p.bytes), uid = B.uidA, path = uid + '/' + sha + '.png';
+    const evil = bytes(p.bytes.length, 999); assert.equal(evil.length, p.bytes.length); assert.notEqual(await CW.sha256(evil), sha);
+    const pre = await client(s, uid, { deviceId: 'P' }); await pre.api.upload(path, evil, 'image/png');
+    const show = { v: 1, name: 'Tampered', accent: '#2f9bff', bugText: 'WX', logo: null, assets: { img: data }, scenes: [{ id: 's1', name: 'Open', duration: 6, objects: [] }] };
+    const a = await client(s, uid, { show, deviceId: 'A' }); a.eng.markDirty(); const r = await a.eng.syncNow(); assert.equal(r.ok, true, JSON.stringify(r));
+    const doc = (await showRow(s)).doc; assert.equal(doc.assets.img.local_only, true); assert.equal(doc.assets.img.reason, 'upload_failed'); assert.equal(doc.assets.img.media, undefined);
+    assert.equal((await mediaRows(s)).length, 0, 'never registered'); assert.equal(a.eng.status().kind, 'incomplete');
+    assert.equal(a.st.show.assets.img, data, 'the local image is untouched');
+    assert.equal(await CW.sha256(await a.api.download(path)), await CW.sha256(evil), 'the object in storage was not overwritten');
+    const gets = () => storageCalls(s).filter(c => c.method === 'GET' && c.path.includes(sha)).length, posts = () => storageCalls(s).filter(c => c.method === 'POST').length, g0 = gets(), p0 = posts();
+    a.st.show.name = 'Tampered 2'; a.eng.markDirty(); assert.equal((await a.eng.syncNow()).ok, true);
+    assert.equal(gets(), g0, 'the bad object is not downloaded again on every autosave'); assert.equal(posts(), p0, 'and no further upload is attempted');
   });
 }
 
