@@ -221,9 +221,34 @@
   /* ---------- measurement / bounds (screen space) ---------- */
   const mctx = (typeof document !== 'undefined') ? document.createElement('canvas').getContext('2d') : null;
   function fontFor(o) { return `${o.weight || 700} ${o.size || 40}px ${o.font === 'sans' ? SANS : FONT()}`; }
+  function wrapLines(lines, wrapW) {      // uses the font already set on mctx
+    const out = []; lines.forEach(ln => { let cur = ''; ln.split(/\s+/).forEach(wd => { const t2 = cur ? cur + ' ' + wd : wd; if (cur && mctx.measureText(t2).width > wrapW) { out.push(cur); cur = wd; } else cur = t2; }); out.push(cur); }); return out;
+  }
+  /* v0.10.1.2 "fit box" text (used by the bar templates): o.x is the CENTRE x and o.y the CENTRE y of the text block, o.wrapW the box width and
+     o.fitH the box height. With autoFit (default) the size shrinks until the text fits in maxLines lines (default 2) inside the box; o.size is the
+     largest size it may use. The block is centred on the capital letters, not on the line box, so it looks centred in the bar. */
+  const fitCache = new Map();
+  function fitResolve(o) {
+    if (!o.fitBox || !mctx) return o;
+    const txt = String(autoText(o)), maxL = o.maxLines > 0 ? o.maxLines : 2, bw = o.wrapW > 0 ? o.wrapW : 1000, bh = o.fitH > 0 ? o.fitH : 1e9, s0 = Math.max(10, o.size || 40), auto = o.autoFit !== false;
+    const key = [txt, s0, bw, bh, maxL, o.weight, o.font, auto].join('\u0001'); let hit = fitCache.get(key);
+    if (!hit) {
+      let sz = s0, lines = [];
+      for (; sz >= 10; sz--) {
+        mctx.font = fontFor({ weight: o.weight, size: sz, font: o.font }); lines = wrapLines(txt.split('\n'), bw);
+        if (!auto) break;
+        const widest = Math.max(...lines.map(l => mctx.measureText(l).width));
+        if (lines.length <= maxL && widest <= bw + 0.5 && lines.length * sz * 1.15 <= bh) break;
+      }
+      mctx.textBaseline = 'top'; const hm = mctx.measureText('H'), cH = (hm.actualBoundingBoxAscent != null) ? ((hm.actualBoundingBoxDescent || 0) - hm.actualBoundingBoxAscent) / 2 : sz * 0.55;
+      mctx.textBaseline = 'alphabetic';
+      hit = { size: sz, n: lines.length, cH }; if (fitCache.size > 300) fitCache.clear(); fitCache.set(key, hit);
+    }
+    return Object.assign({}, o, { size: hit.size, wrapW: bw, fitBox: false, y: o.y - hit.cH - (hit.n - 1) * hit.size * 1.15 / 2 });
+  }
   function textMetrics(o) {
     let lines = String(autoText(o)).split('\n'); mctx.font = fontFor(o);
-    if (o.wrapW > 0) { const out = []; lines.forEach(ln => { let cur = ''; ln.split(/\s+/).forEach(wd => { const t2 = cur ? cur + ' ' + wd : wd; if (cur && mctx.measureText(t2).width > o.wrapW) { out.push(cur); cur = wd; } else cur = t2; }); out.push(cur); }); lines = out; }
+    if (o.wrapW > 0) lines = wrapLines(lines, o.wrapW);
     const w = o.wrapW > 0 ? o.wrapW : Math.max(10, ...lines.map(l => mctx.measureText(l).width)), lh = o.size * 1.15;
     return { lines, w, h: lines.length * lh, lh };
   }
@@ -304,7 +329,7 @@
   function ptsBox(pts, pad) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; pts.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }); if (x0 > x1) return { x: 0, y: 0, w: 1, h: 1 }; return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 }; }
   E.bounds = function (o) {
     switch (o.type) {
-      case 'text': { const m = textMetrics(o), p = o.box ? o.size * 0.35 : 4; const x0 = o.align === 'center' ? o.x - m.w / 2 : o.align === 'right' ? o.x - m.w : o.x; return { x: x0 - p, y: o.y - p, w: m.w + p * 2, h: m.h + p * 2 }; }
+      case 'text': { o = fitResolve(o); const m = textMetrics(o), p = o.box ? o.size * 0.35 : 4; const x0 = o.align === 'center' ? o.x - m.w / 2 : o.align === 'right' ? o.x - m.w : o.x; return { x: x0 - p, y: o.y - p, w: m.w + p * 2, h: m.h + p * 2 }; }
       case 'icon': return { x: o.x - o.size / 2, y: o.y - o.size / 2, w: o.size, h: o.size };
       case 'hl': return g.Sym.hlBounds(o.x, o.y, o.size);
       case 'front': return ptsBox(o.pts, o.size * 1.2);
@@ -329,7 +354,7 @@
   function drawObj(c, o, t, p, show) {
     switch (o.type) {
       case 'text': {
-        const m = textMetrics(o); c.save(); c.font = fontFor(o); c.textBaseline = 'top'; c.textAlign = o.align || 'left';
+        o = fitResolve(o); const m = textMetrics(o); c.save(); c.font = fontFor(o); c.textBaseline = 'top'; c.textAlign = o.align || 'left';
         if (o.box) drawTextBox(c, o, E.bounds(o));
         let fill = o.color;
         if (o.grad || o.gloss) { const gr = c.createLinearGradient(0, o.y, 0, o.y + m.h), c2 = o.color2 || o.color; if (o.gloss) { gr.addColorStop(0, mixHex(o.color, '#ffffff', 0.65)); gr.addColorStop(0.46, o.color); gr.addColorStop(0.5, mixHex(c2, '#000000', 0.18)); gr.addColorStop(1, c2); } else { gr.addColorStop(0, o.color); gr.addColorStop(1, c2); } fill = gr; }
@@ -533,8 +558,22 @@
      starts 14 px inside the box. For a wider/narrower banner the two plain stretches [260,480] and [600,860] are widened/narrowed while the caps, glow
      dots and the end under the logo keep their shape and height (so the banner never gets taller or shorter because of its length). */
   const TB2 = { cuts: [0, 260, 480, 600, 860, 1100], zones: [1, 3], boxL: 18, silverInset: 14, silverCY: 0.43 };
+  /* v0.10.1.2: "text only" banner (T.textOnly): the banner artwork is already in the scene background (the bar templates), so only the title text is
+     drawn - centred in T.region (the silver panel: l, r, cy, h) and shrunk to fit its width. Same fonts, layer style, entrance and offsets as banner #2. */
+  function drawTitle2Text(c, T, t, editing) {
+    const R = T.region || { l: 186, r: 1272, cy: 102, h: 88 }; let txt = String(T.text || ''); if (!txt) return; if (T.upper !== false) txt = txt.toUpperCase();
+    let p = 1; if (!editing) { const d = T.delay == null ? 0.2 : T.delay; if (t < d) return; p = ease.out(clamp((t - d) / 0.7, 0, 1)); }
+    const mode = (!T.anim || T.anim === 'auto') ? 'fade' : T.anim, fam = '"' + (T.font || 'Roboto Condensed') + '", "Barlow Condensed", Arial Narrow, sans-serif', weight = T.weight || 700;
+    const dx = T.dx || 0, pad = R.pad != null ? R.pad : 0.03 * (R.r - R.l), availL = R.l + dx + pad, availR = R.r + dx - pad, availW = Math.max(40, availR - availL);
+    let size = T.size > 0 ? T.size : R.h * 0.9; c.save(); c.font = `${weight} ${size}px ${fam}`; let tw = c.measureText(txt).width;
+    if (tw > availW) { size = size * availW / tw; c.font = `${weight} ${size}px ${fam}`; tw = c.measureText(txt).width; }
+    c.textBaseline = 'middle'; c.textAlign = 'left'; const mh = c.measureText('H'), capShift = ((mh.actualBoundingBoxAscent || size * 0.35) - (mh.actualBoundingBoxDescent || 0)) / 2;
+    const tx = T.align === 'left' ? availL : T.align === 'right' ? availR - tw : availL + (availW - tw) / 2, ty = R.cy + (T.ty || 0) + capShift;
+    if (mode === 'fade') c.globalAlpha *= p; else if (mode === 'in-left') c.translate(-(1 - p) * (availR + 200), 0); else if (mode === 'in-right') c.translate((1 - p) * (W - availL + 200), 0); else if (mode === 'in-top') c.translate(0, -(1 - p) * (R.cy + R.h + 300));
+    E.drawFxLines(c, [txt], tx, ty, size * 1.1, T.fx, T.color || '#07345a', size); c.restore();
+  }
   function drawTitle2(c, show, scene, t, editing) {
-    const T = scene.title2; if (!T || !T.show) return; const A = g.WX_TB2; if (!A) return; const bar = tb2Img('bar'), logo = tb2Img('logo'); if (!bar) return;
+    const T = scene.title2; if (!T || !T.show) return; if (T.textOnly) { drawTitle2Text(c, T, t, editing); return; } const A = g.WX_TB2; if (!A) return; const bar = tb2Img('bar'), logo = tb2Img('logo'); if (!bar) return;
     const m = show.safe != null ? show.safe : 48, bb = A.bar.box, bw0 = bb[2] - bb[0], bh0 = bb[3] - bb[1], fixedBox = 584, zoneSrc = 480;
     const stretch = !!T.autoWidth || T.height > 0;       // old shows (neither set) keep the original uniform scaling exactly
     const maxW = W - 2 * m;
@@ -795,10 +834,31 @@
 
 
   /* ---------- scene templates ---------- */
-  E.TEMPLATES = [['storm', 'Storm Update (red panels)'], ['headlines', 'Weather Headlines (glass panels)'], ['impacts', 'Storm Impacts (over current map)']];
+  /* v0.10.1.2: the headline / storm templates use your finished artwork (studio/tpl_art.js, `WX_TPL`): the banner and the four bars are part of the
+     background picture, and the title and the bar text are live text laid over it - centred, shrunk to fit and wrapped to two lines.
+     Geometry is in 1920x1080 stage pixels (measured from the artwork). */
+  const STD_BANNER = { l: 186, r: 1272, cy: 102, h: 88 };
+  const barRows = (x, w, h, ys) => ys.map(y => ({ x, y, w, h }));
+  E.TPL_ART = {
+    'hl-sky': { asset: 'tpl_hl_sky', title: 'Weather Headlines', banner: { l: 258, r: 1318, cy: 110, h: 88 }, titleSize: 96, bars: barRows(349, 1220, 136, [290, 472, 653, 842]), padX: 46, padY: 16, textSize: 54, kind: 'glass' },
+    'hl-night': { asset: 'tpl_hl_night', title: 'Weather Headlines', banner: STD_BANNER, titleSize: 84, bars: barRows(418, 1085, 169, [250, 452, 655, 858]), padX: 74, padY: 18, textSize: 64, kind: 'blue' },
+    'hl-day': { asset: 'tpl_hl_day', title: 'Weather Headlines', banner: STD_BANNER, titleSize: 84, bars: barRows(418, 1085, 169, [250, 452, 655, 858]), padX: 74, padY: 18, textSize: 64, kind: 'blue' },
+    'storm-night': { asset: 'tpl_storm_night', title: 'Storm Update', banner: STD_BANNER, titleSize: 84, bars: barRows(415, 1089, 169, [250, 452, 655, 858]), padX: 76, padY: 18, textSize: 64, kind: 'red' },
+    'storm-day': { asset: 'tpl_storm_day', title: 'Storm Update', banner: STD_BANNER, titleSize: 84, bars: barRows(415, 1089, 169, [250, 452, 655, 858]), padX: 76, padY: 18, textSize: 64, kind: 'red' }
+  };
+  E.TEMPLATES = [['hl-sky', 'Weather Headlines – sky (glass boxes)'], ['hl-night', 'Weather Headlines – night (blue bars)'], ['hl-day', 'Weather Headlines – day (blue bars)'],
+    ['storm-night', 'Storm Update – night (red bars)'], ['storm-day', 'Storm Update – day (red bars)'], ['impacts', 'Storm Impacts (over current map)']];
   E.buildTemplate = function (kind, o) {
     const objs = [], lines = (o.lines || []).filter(x => String(x).trim()), m = o.safe || 48;
     const add = (type, props, delay) => { const ob = E.newObject(type, props); ob.anim = { in: props.anim || 'fade', delay: delay || 0, dur: 0.6 }; delete ob.anim.undefined; objs.push(ob); return ob; };
+    const art = E.TPL_ART[kind];
+    if (art) {
+      lines.slice(0, art.bars.length).forEach((ln, i) => {
+        const b = art.bars[i], t = add('text', { x: b.x + b.w / 2, y: b.y + b.h / 2, text: String(ln).toUpperCase(), size: art.textSize, align: 'center', color: '#ffffff', weight: 800, wrapW: b.w - 2 * art.padX, fitBox: true, fitH: b.h - 2 * art.padY, maxLines: 2, autoFit: true, anim: 'fade' }, 0.5 + i * 0.35);
+        t.fx = E.fxDefault(); t.fx.stroke.on = false; t.fx.shadow = Object.assign({}, t.fx.shadow, { on: true, color: '#000000', opacity: art.kind === 'glass' ? 55 : 70, angle: 90, dist: 3, size: 6 });
+      });
+      return objs;
+    }
     const title = add('text', { x: m, y: m - 4, text: (o.title || 'STORM UPDATE').toUpperCase(), size: 110, align: 'left', anim: 'in-left' }, 0); E.applyTextPreset(title, 'titlebar');
     if (kind === 'storm' || kind === 'headlines') {
       const y0 = 260, step = lines.length > 4 ? 150 : 200;
@@ -811,7 +871,10 @@
     return objs;
   };
   E.sceneFromTemplate = function (kind, o, bg) {
-    return E.newScene({ name: (E.TEMPLATES.find(t => t[0] === kind) || [0, 'Template'])[1].replace(/ \(.*/, ''), duration: 10, bg: bg || { type: 'image', asset: 'bgdefault', kenburns: false, fit: 'fill' }, title: { show: false, text: '', sub: '' }, objects: E.buildTemplate(kind, o) });
+    const art = E.TPL_ART[kind], nm = (E.TEMPLATES.find(t => t[0] === kind) || [0, 'Template'])[1].replace(/ –.*| \(.*/, '');
+    const sc = E.newScene({ name: art ? nm + (/night/.test(kind) ? ' (night)' : /day/.test(kind) ? ' (day)' : '') : nm, duration: 10, bg: art ? { type: 'image', asset: art.asset, kenburns: false, fit: 'fill' } : (bg || { type: 'image', asset: 'bgdefault', kenburns: false, fit: 'fill' }), title: { show: false, text: '', sub: '' }, objects: E.buildTemplate(kind, o) });
+    if (art) sc.title2 = Object.assign(E.title2Default(), { show: true, textOnly: true, region: Object.assign({}, art.banner), text: o.title || art.title, size: art.titleSize, align: 'center', anim: 'fade', delay: 0.1 });
+    return sc;
   };
 
   g.Engine = E;

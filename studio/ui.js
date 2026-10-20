@@ -25,7 +25,7 @@
   function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
-  function ensureBG(sh) { if (g.WX_BGDEFAULT && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bgdefault')) { sh.assets = sh.assets || {}; sh.assets.bgdefault = g.WX_BGDEFAULT; } if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } }
+  function ensureBG(sh) { if (g.WX_BGDEFAULT && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bgdefault')) { sh.assets = sh.assets || {}; sh.assets.bgdefault = g.WX_BGDEFAULT; } if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } if (g.WX_TPL && sh && sh.scenes) Object.keys(g.WX_TPL).forEach(k => { if (sh.scenes.some(x => x.bg && x.bg.asset === k)) { sh.assets = sh.assets || {}; sh.assets[k] = g.WX_TPL[k]; } }); }
   const libHas = (k, v) => { try { return bgList.some(b => b.asset === k && b.data === v); } catch (e) { return false; } };
   /* v0.10.0: autosave reports its outcome. A failed write (storage full or blocked) used to be swallowed silently. */
   function saveStatus(ok, why) {
@@ -34,7 +34,7 @@
     else { el.textContent = '⚠ Not saved'; el.style.color = '#ff6b6b'; el.style.cursor = 'pointer'; el.style.textDecoration = ''; el.title = 'Autosave failed: ' + why + ' Click to download a copy of your show now.'; el.onclick = () => $('#bSave').click(); el.dataset.state = 'failed'; if (!saveStatus.warned) { saveStatus.warned = true; toast('Autosave failed – ' + why + ' Use Save to keep your work.'); } }
   }
   /* Built-in and library images are re-attached on load, so autosave and recent-autosave copies leave them out. */
-  const slimReplacer = (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v;
+  const slimReplacer = (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (g.WX_TPL && /^tpl_/.test(k) && g.WX_TPL[k] === v) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v;
   function autosave() {
     try { localStorage.setItem(KEY, JSON.stringify(S.show, slimReplacer)); saveStatus(true); recentSoon(); }
     catch (e) { saveStatus(false, e && e.name === 'QuotaExceededError' ? 'this browser’s storage is full.' : 'this browser is blocking storage.'); }
@@ -430,7 +430,8 @@
     if (T === 'text') { B('auto', 'select', { label: 'Auto text', rerender: true, options: [['', 'Manual'], ['valid', 'Valid time'], ['datetime', 'Date + time'], ['date', 'Date'], ['clock', 'Clock']] }); if (!o.auto) B('text', 'area', { label: 'Text' }); B('size', 'range', { min: 16, max: 300 }); B('color', 'color'); B('weight', 'select', { options: OPT.weight }); B('align', 'select', { options: OPT.align }); B('font', 'select', { options: [['display', 'Condensed'], ['sans', 'Standard']] }); B('box', 'check', { label: 'Background box', rerender: true });
       if (o.box) B('boxStyle', 'select', { label: 'Box style', options: [['plain', 'Plain tint'], ['titlebar', 'Title bar'], ['red', 'Red glossy'], ['glass', 'Glass']] });
       p.append(h('div', { className: 'h', text: 'Text style' }), fld('Preset', h('select', { on: { change: e => { E.applyTextPreset(o, e.target.value); commit(); renderPanels(); } } }, E.TEXT_PRESETS.map(x => h('option', { value: x[0], text: x[1] })))));
-      if (o.wrapW == null) o.wrapW = 0; B('wrapW', 'range', { min: 0, max: 1800, step: 20, label: 'Wrap width (0=off)' });
+      if (o.fitBox) { if (o.autoFit == null) o.autoFit = true; B('autoFit', 'check', { label: 'Auto-fit text to its bar (size = largest allowed)', rerender: true }); if (o.autoFit !== false) B('maxLines', 'range', { min: 1, max: 4, label: 'Max lines' }); B('wrapW', 'range', { min: 100, max: 1800, step: 10, label: 'Text width (px)' }); B('fitH', 'range', { min: 30, max: 400, step: 2, label: 'Text height (px)' }); }
+      else { if (o.wrapW == null) o.wrapW = 0; B('wrapW', 'range', { min: 0, max: 1800, step: 20, label: 'Wrap width (0=off)' }); }
       if (o.strokeW == null) o.strokeW = 0; B('strokeW', 'range', { min: 0, max: 24, label: 'Outline' }); if (o.strokeW > 0) B('strokeColor', 'color', { label: 'Outline color' });
       if (!o.color2) o.color2 = o.color; B('grad', 'check', { label: 'Gradient fill', rerender: true }); if (o.grad || o.gloss) B('color2', 'color', { label: 'Bottom color' });
       B('gloss', 'check', { label: 'Gloss highlight', rerender: true });
@@ -884,7 +885,20 @@
     ], false));
     if (!sc.title2) sc.title2 = Object.assign(E.title2Default(), { show: false });
     const T2 = sc.title2; if (!T2.fx) T2.fx = E.fxDefault();
-    p.append(mapAccordion('titleBanner2', 'Title banner #2 (your banner + logo)', [
+    if (T2.textOnly) p.append(mapAccordion('titleBanner2', 'Banner title (text on your banner artwork)', [
+      bind(T2, 'show', 'check', { label: 'Show' }),
+      bind(T2, 'text', 'text', { label: 'Title' }),
+      bind(T2, 'align', 'select', { label: 'Text align', options: [['center', 'Center'], ['left', 'Left'], ['right', 'Right']] }),
+      bind(T2, 'size', 'range', { min: 0, max: 200, label: 'Font size (largest; shrinks to fit, 0 = auto)' }),
+      bind(T2, 'dx', 'range', { min: -600, max: 600, step: 2, label: 'Left / right offset' }),
+      bind(T2, 'ty', 'range', { min: -60, max: 60, step: 1, label: 'Up / down offset' }),
+      bind(T2, 'upper', 'check', { label: 'ALL CAPS' }),
+      bind(T2, 'color', 'color', { label: 'Text color' }),
+      bind(T2, 'anim', 'select', { label: 'Entrance', options: [['auto', 'Fade'], ['in-left', 'Slide from left'], ['in-right', 'Slide from right'], ['in-top', 'Slide from top'], ['fade', 'Fade'], ['none', 'None']] }),
+      bind(T2, 'delay', 'range', { min: 0, max: 10, step: 0.1, label: 'Delay (s)' }),
+      h('div', { className: 'btnrow' }, h('button', { text: 'Text layer style… (stroke, shadow, glow)', on: { click: () => openFxWindow(T2.fx, 'Layer Style – Banner title') } }))
+    ], true));
+    else p.append(mapAccordion('titleBanner2', 'Title banner #2 (your banner + logo)', [
       bind(T2, 'show', 'check', { label: 'Show' }),
       bind(T2, 'text', 'text', { label: 'Title' }),
       bind(T2, 'pos', 'select', { label: 'Position', options: [['ul', 'Upper left'], ['ur', 'Upper right'], ['full', 'Full width']] }),
@@ -1743,12 +1757,20 @@
     modal('7-Day Forecast Builder', body, [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => { const dd = days.map(d => Object.assign({}, d, { hi: Math.round(d.hi), lo: Math.round(d.lo) })); let sc; if (meta.layout === 'bw' && g.WX_BG7DAY) { S.show.assets.bg7day = g.WX_BG7DAY; sc = E.sceneFromBW(dd, 'bg7day'); } else sc = E.sceneFrom7Day(dd, meta.title, meta.sub); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
   }
   function templatesDialog() {
-    const st = { kind: 'storm', title: 'Storm Update', lines: ['Timing: latest track and timing may have slowed the start time for rainfall Fri/Sat AM', 'Change in the track and speed will shift where the heaviest rain occurs', 'Confidence remains high that southeastern MA, Cape & Islands will see the strongest wind gusts', 'Coastal flooding & beach erosion still remain along the coast. Power outages still possible.'] };
-    const defs = { storm: ['Storm Update', st.lines], headlines: ['Weather Headlines', ['Bands of rain move in Cape/Islands 11A-12P, Boston 2-3P, Billerica Fri eve', 'Peak wind & rain Friday night into Saturday', 'Widespread 2-4" rainfall in the east, locally higher coast/SE MA', 'Strongest winds Fri night-Sat 40-50+, power outages? 30-40 mph inland']], impacts: ['Storm Impacts', ['Friday-Monday', 'Rain 1.00" west', 'Heavy rain 2-4"+ east', 'Strong winds 40+ mph Cape']] };
+    const STORM = ['Timing: latest track and timing may have slowed the start time for rainfall Fri/Sat AM', 'Change in the track and speed will shift where the heaviest rain occurs', 'Confidence remains high that southeastern MA, Cape & Islands will see the strongest wind gusts', 'Coastal flooding & beach erosion still remain along the coast. Power outages still possible.'];
+    const HEAD = ['Bands of rain move in Cape/Islands 11A-12P, Boston 2-3P, Billerica Fri eve', 'Peak wind & rain Friday night into Saturday', 'Widespread 2-4" rainfall in the east, locally higher coast/SE MA', 'Strongest winds Fri night-Sat 40-50+, power outages? 30-40 mph inland'];
+    const defs = { 'hl-sky': ['Weather Headlines', HEAD], 'hl-night': ['Weather Headlines', HEAD], 'hl-day': ['Weather Headlines', HEAD], 'storm-night': ['Storm Update', STORM], 'storm-day': ['Storm Update', STORM], impacts: ['Storm Impacts', ['Friday-Monday', 'Rain 1.00" west', 'Heavy rain 2-4"+ east', 'Strong winds 40+ mph Cape']] };
+    const st = { kind: 'storm-night', title: defs['storm-night'][0], lines: defs['storm-night'][1].slice() };
     const tIn = h('input', { type: 'text', value: st.title, oninput: e => st.title = e.target.value }), tas = [0, 1, 2, 3, 4].map(i => h('textarea', { rows: 2, value: st.lines[i] || '', oninput: e => { st.lines[i] = e.target.value; } }));
-    const kindSel = h('select', { onchange: e => { st.kind = e.target.value; const d = defs[st.kind]; st.title = d[0]; st.lines = d[1].slice(); tIn.value = st.title; tas.forEach((t, i) => { t.value = st.lines[i] || ''; }); } }, E.TEMPLATES.map(t => h('option', { value: t[0], text: t[1] })));
-    modal('Scene templates', h('div', {}, fld('Template', kindSel), fld('Title', tIn), h('div', { className: 'hint', text: st.kind === 'impacts' ? 'Impacts: first line is the time frame (lower left); the next lines become red panels. It keeps the current scene background (your map).' : 'One line per panel (up to 5). Text is capitalized automatically. Everything stays editable afterwards.' }), ...tas.map(t => fld('', t, true))),
-      [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => { const bg = st.kind === 'impacts' ? JSON.parse(JSON.stringify(cur().bg)) : null; if (!bg && g.WX_BGDEFAULT) S.show.assets.bgdefault = g.WX_BGDEFAULT; const sc = E.sceneFromTemplate(st.kind, { title: st.title, lines: st.lines, safe: SAFE() }, bg); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
+    const hint = h('div', { className: 'hint' }), hintFor = () => { hint.textContent = st.kind === 'impacts' ? 'Impacts: first line is the time frame (lower left); the next lines become red panels. It keeps the current scene background (your map).' : 'One line per bar (4 bars). The banner and bars come from your artwork; the title sits centred in the white banner area and each line is centred in its bar, shrinking to fit on up to 2 lines. Text is capitalized automatically and everything stays editable afterwards.'; tas.forEach((t, i) => { t.style.display = (E.TPL_ART[st.kind] && i > 3) ? 'none' : ''; const lab = t.parentElement; if (lab && lab.style) lab.style.display = t.style.display; }); };
+    const kindSel = h('select', { onchange: e => { st.kind = e.target.value; const d = defs[st.kind]; st.title = d[0]; st.lines = d[1].slice(); tIn.value = st.title; tas.forEach((t, i) => { t.value = st.lines[i] || ''; }); hintFor(); } }, E.TEMPLATES.map(t => h('option', { value: t[0], text: t[1], selected: t[0] === st.kind })));
+    modal('Scene templates', h('div', {}, fld('Template', kindSel), fld('Title', tIn), hint, ...tas.map(t => fld('', t, true))),
+      [h('button', { text: 'Cancel', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Create scene', on: { click: () => {
+        const art = E.TPL_ART[st.kind]; if (art && !(g.WX_TPL && g.WX_TPL[art.asset])) { toast('Template artwork is missing from this build.'); return; }
+        const bg = st.kind === 'impacts' ? JSON.parse(JSON.stringify(cur().bg)) : null; S.show.assets = S.show.assets || {};
+        if (art) S.show.assets[art.asset] = g.WX_TPL[art.asset]; else if (!bg && g.WX_BGDEFAULT) S.show.assets.bgdefault = g.WX_BGDEFAULT;
+        const sc = E.sceneFromTemplate(st.kind, { title: st.title, lines: st.lines, safe: SAFE() }, bg); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
+    hintFor();
   }
   function mapboxSettings() {
     const tok = h('input', { type: 'password', value: g.MB.token(), placeholder: 'pk.eyJ1…', style: 'width:100%' }), sc = h('select', {}, [['1', 'Native / sharp (recommended)'], ['1.25', 'Slightly larger labels'], ['1.5', 'Large labels'], ['2', 'Extra large labels']].map(o => h('option', { value: o[0], text: o[1], selected: +o[0] === g.MB.scale })));
