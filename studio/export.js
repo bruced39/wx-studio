@@ -59,12 +59,13 @@
   X.canExport = items => !items.some(i => i.level === 'error');
 
   /* Browser: collect the facts for X.preflightItems. */
-  X.gatherFacts = async function (show, st) {
+  X.gatherFacts = async function (show, st, off) {
+    off = off || 0;     // v0.10.1.5: when only some scenes are exported, report their numbers as in the full show
     const E = g.Engine, f = { webcodecs: X.supportsWebCodecs(), h264: null, mapboxScenes: [], mapboxToken: !!(g.MB && g.MB.hasToken && g.MB.hasToken()), missing: [] };
     if (f.webcodecs) f.h264 = await X.pickCodec(st.width, st.height, st.fps, st.bitrate);
     const assets = show.assets || {};
     show.scenes.forEach((sc, i) => {
-      const n = i + 1, b = sc.bg || {};
+      const n = i + 1 + off, b = sc.bg || {};
       if (b.type === 'mapbox') f.mapboxScenes.push(n);
       if (b.type === 'video') { const v = E && E.videos && E.videos[b.vid]; if (!v || v.err) f.missing.push({ scene: n, kind: 'video', name: (v && v.name) || b.vid || 'unknown' }); }
       if (b.type === 'image' && b.asset && !assets[b.asset]) f.missing.push({ scene: n, kind: 'image', name: b.asset });
@@ -77,7 +78,7 @@
       for (let i = 0; i < show.scenes.length; i++) {
         const sc = show.scenes[i]; if (!(sc.dataLoop && sc.dataLoop.on)) continue;
         try { if (D.ensure) await Promise.race([D.ensure(sc), new Promise(r => setTimeout(r, 6000))]); } catch (e) { /* readiness reports the failure */ }
-        f.weather.push(Object.assign({ scene: i + 1 }, D.exportReadiness(sc)));
+        f.weather.push(Object.assign({ scene: i + 1 + off }, D.exportReadiness(sc)));
       }
     }
     return f;
