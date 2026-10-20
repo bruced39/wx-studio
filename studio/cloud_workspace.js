@@ -106,15 +106,21 @@
     const assets = {}, issues = [];
     for (const id of Object.keys(show.assets || {})) {
       if (BUILTIN_ASSETS.includes(id)) continue;
-      const data = show.assets[id], p = parseDataUrl(data);
-      if (!p) { if (ctx.placeholders[id]) continue; assets[id] = { local_only: true, reason: 'unavailable', mime: 'image/png', bytes: 0, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'unavailable' }); continue; }
-      const entry = { mime: p.mime, bytes: p.bytes.length };
-      if (!IMG_EXT[p.mime]) { assets[id] = { local_only: true, reason: 'mime_not_allowed', ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'mime_not_allowed' }); continue; }
-      if (p.bytes.length > MAX_IMAGE) { assets[id] = { local_only: true, reason: 'too_large', ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'too_large' }); continue; }
-      const memoKey = id + '|' + data.length + '|' + data.slice(-48); let sha = ctx.hashMemo[memoKey];
-      if (!sha) { sha = await sha256(p.bytes); ctx.hashMemo[memoKey] = sha; }
-      const prior = ctx.failed[sha];
-      let res = prior && (prior.reason === 'too_large' || prior.reason === 'mime_not_allowed') ? prior : await ensureUploaded(ctx, sha, p.bytes, p.mime, id);
+      const data = show.assets[id], mk = typeof data === 'string' ? id + '|' + data.length + '|' + data.slice(0, 64) + '|' + data.slice(-64) : '';
+      let m = mk ? ctx.hashMemo[mk] : null, p = null;       // images are decoded and hashed once, not on every autosave
+      if (!m) {
+        p = parseDataUrl(data);
+        if (!p) { if (ctx.placeholders[id]) continue; assets[id] = { local_only: true, reason: 'unavailable', mime: 'image/png', bytes: 0, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'unavailable' }); continue; }
+        m = { mime: p.mime, bytes: p.bytes.length }; if (IMG_EXT[m.mime] && m.bytes <= MAX_IMAGE) m.sha = await sha256(p.bytes); ctx.hashMemo[mk] = m;
+      }
+      const entry = { mime: m.mime, bytes: m.bytes };
+      if (!IMG_EXT[m.mime]) { assets[id] = { local_only: true, reason: 'mime_not_allowed', ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'mime_not_allowed' }); continue; }
+      if (m.bytes > MAX_IMAGE) { assets[id] = { local_only: true, reason: 'too_large', ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: 'too_large' }); continue; }
+      const sha = m.sha, prior = ctx.failed[sha];
+      let res;
+      if (prior && (prior.reason === 'too_large' || prior.reason === 'mime_not_allowed')) res = prior;
+      else if (ctx.known.has(sha)) res = { ok: true };
+      else { p = p || parseDataUrl(data); res = await ensureUploaded(ctx, sha, p.bytes, m.mime, id); }
       if (res.ok) { delete ctx.failed[sha]; assets[id] = { media: 'sha256:' + sha, ...entry }; if (ctx.placeholders[id]) delete ctx.placeholders[id]; }
       else { ctx.failed[sha] = { reason: res.reason, detail: res.detail }; assets[id] = { local_only: true, reason: res.reason, ...entry, source_device_id: ctx.deviceId }; issues.push({ id, reason: res.reason, detail: res.detail }); }
     }
@@ -187,7 +193,8 @@
       emit('status', E.status());
       const loop = () => { tickT = timers.set(async () => { try { await E.tick(); } catch (e) { /* ticks never throw */ } loop(); }, o.tickMs || 20000); }; loop();
     };
-    E.uid = () => uid; E.record = () => rec;
+    E.uid = () => uid; E.record = () => rec; E.baseDoc = () => baseDoc; E.state = () => state;
+    E.noteRestore = function () { if (rec) { rec.nextReason = 'restore'; E.markDirty(); } };     // a recent-autosave copy replaced this show: next save is a protected 'restore' version
 
     /* ----- local changes → debounced sync ----- */
     E.markDirty = function () {

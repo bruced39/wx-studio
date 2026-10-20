@@ -189,3 +189,12 @@ No media is ever deleted automatically.
 - Status is exactly one of: **Saved locally**, **Syncing**, **Saved to cloud**, **Sync failed**, or "Cloud document saved — N media only on <device>" (incomplete). Complete means the document is saved and every referenced image is uploaded and no video/GIF/audio is local-only.
 - Cached data is tagged by account; one account cannot see another account's cached shows, images, videos, settings or recent autosaves. Signing out keeps the local show (default) or, on request, clears that account's local data (shared computers).
 - Portable `.wxshow` / `.wxshow.json` Save and Open are unchanged.
+
+---
+## 5. Client implementation notes (v0.10.2, informational)
+
+- Files: `studio/cloud_workspace.js` (engine), `studio/cloud_workspace_ui.js` (dialogs), additive hooks in `studio/ui.js`, `onAuthChange` in `studio/cloud_presets.js`.
+- The client only calls the six RPCs above, SELECTs the columns listed in §1 (own rows, via RLS), and the `wx-studio-media` bucket (upload `POST`, `GET /object/authenticated/…`). It never writes tables directly.
+- Local state per account lives under `u:<uid>:…` in IndexedDB `wxstudio-cloud` (sync record, pending op ids + payloads, last synced doc, known media hashes). Browser data for an account is namespaced (autosave key suffix `:u:<uid>`, `owner` field on library/recent records).
+- Test harness: `tests/helpers/fake_supabase.js` (executable form of this contract), `fake_supabase_server.js` (HTTP wrapper + fake email/password auth for browser checks).
+- Anything the real database does differently from this contract is a bug in one of the two and must be settled between the developers, not worked around in the client.

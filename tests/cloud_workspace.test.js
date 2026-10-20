@@ -222,3 +222,18 @@ test('engine state survives a reload: pending op id and base revision are persis
   const again = await client(fake, 'u1', { kv, show: a.state.show }); assert.equal(again.eng.record().pending.opId, op);
   const r = await again.eng.syncNow({ force: true }); assert.equal(r.ok, true); assert.equal(rpcCalls(fake, 'wx_studio_save_show').pop().body.p_op_id, op); assert.equal(fake.db.shows[0].rev, 1);
 });
+
+test('re-opening your own partially synced show keeps this computer\'s original image (no placeholder, no downgrade)', async () => {
+  const fake = createFakeSupabase(), d = png(640, 31); const a = await client(fake, 'u1', { deviceId: 'A', show: mkShow({ assets: { x: d } }) });
+  fake.failNext(/storage\/v1\/object/, { status: 500, body: { message: 'boom' } }); a.eng.markDirty(); await a.eng.syncNow();
+  assert.equal(fake.db.shows[0].doc.assets.x.reason, 'upload_failed');
+  const o = await a.eng.openShow(a.eng.record().showId); assert.equal(o.missing.length, 0); assert.equal(a.state.show.assets.x, d, 'original bytes kept');
+  assert.equal(Object.keys(a.eng.record().placeholders).length, 0);
+});
+
+test('only an unchanged-hash image is decoded/hashed once across many autosaves', async () => {
+  const fake = createFakeSupabase(); const c = await client(fake, 'u1', { show: mkShow({ assets: { x: png(4000, 41) } }) });
+  c.eng.markDirty(); await c.eng.syncNow(); const reg = rpcCalls(fake, 'wx_studio_register_media').length, sel = fake.calls.filter(x => x.path.includes('wx_studio_media')).length;
+  for (let i = 0; i < 3; i++) { c.state.show.name = 'edit ' + i; c.eng.markDirty(); await c.eng.syncNow(); }
+  assert.equal(rpcCalls(fake, 'wx_studio_register_media').length, reg); assert.equal(fake.calls.filter(x => x.path.includes('wx_studio_media')).length, sel, 'no repeat media lookups');
+});
