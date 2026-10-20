@@ -25,6 +25,35 @@ function h264Samples(w, h, fps, seconds) {
   return { avcC, samples };
 }
 
+
+/* A REAL encoder-style stream: x264 with B-frames, read back from an ffmpeg MP4 in DECODE order with PRESENTATION timestamps –
+ * exactly what WebCodecs hands to the muxer. opts.chrome adds what Chrome/Edge hardware encoders put in the samples (AUD, SPS, PPS, SEI
+ * in-band) and a malformed avcC like the one in a user's unplayable export (reserved bits missing, NAL header byte doubled).
+ * Returns { avcC (what the encoder "reports"), goodAvcC, samples:[{data,key,tsUs,durUs}], refFile (reference MP4), frames }.        */
+function h264Reordered(w, h, fps, seconds, opts) {
+  opts = opts || {};
+  const f = tmp('bf_ref.mp4'), r = run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=size=${w}x${h}:rate=${fps}`, '-t', String(seconds), '-c:v', 'libx264', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-g', String(opts.gop || fps), '-bf', String(opts.bf === undefined ? 2 : opts.bf), '-b:v', '4M', '-movflags', '+faststart', f]);
+  if (r.status !== 0) throw new Error('ffmpeg failed: ' + r.stderr);
+  const pk = JSON.parse(run('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'packet=pts_time,dts_time,pos,size,flags', '-of', 'json', f]).stdout).packets;
+  const d = fs.readFileSync(f), i = d.indexOf('avcC'), L = d.readUInt32BE(i - 4), goodAvcC = new Uint8Array(d.subarray(i + 4, i - 4 + L));
+  const spsLen = (goodAvcC[6] << 8) | goodAvcC[7], sps = goodAvcC.subarray(8, 8 + spsLen), ppsLen = (goodAvcC[8 + spsLen + 1] << 8) | goodAvcC[8 + spsLen + 2], pps = goodAvcC.subarray(8 + spsLen + 3, 8 + spsLen + 3 + ppsLen);
+  const nal = n => { const l = Buffer.alloc(4); l.writeUInt32BE(n.length); return Buffer.concat([l, Buffer.from(n)]); };
+  let avcC = goodAvcC;
+  const samples = pk.map(p => {
+    let data = new Uint8Array(d.subarray(Number(p.pos), Number(p.pos) + Number(p.size)));
+    const key = String(p.flags).startsWith('K');
+    if (opts.chrome) data = new Uint8Array(Buffer.concat([nal(Buffer.from([0x09, key ? 0x10 : 0x50])), ...(key ? [nal(sps), nal(pps), nal(Buffer.from([0x06, 0x05, 0x02, 0xf8, 0x61, 0x80]))] : []), Buffer.from(data)]));
+    return { data, key, tsUs: Math.round(Number(p.pts_time) * 1e6), durUs: Math.round(1e6 / fps) };
+  });
+  if (opts.badAvcC) {                                  // as seen from a Windows hardware encoder: 01 64 00 28 | 03 | 01 | 001b 67 67 64 … | 01 | 0005 68 68 …
+    avcC = new Uint8Array(Buffer.concat([Buffer.from([1, sps[1], sps[2], sps[3], 0x03, 0x01]), Buffer.from([(sps.length + 1) >> 8, (sps.length + 1) & 255, sps[0]]), Buffer.from(sps), Buffer.from([1, 0, pps.length + 1, pps[0]]), Buffer.from(pps)]));
+  }
+  return { avcC, goodAvcC, samples, refFile: f, frames: samples.length, reordered: pk.some((p, k) => k && Number(p.pts_time) < Number(pk[k - 1].pts_time)) };
+}
+
+/* md5 of every decoded frame, in display order (to prove two files hold identical pictures) */
+const frameHashes = file => { const r = run('ffmpeg', ['-v', 'error', '-i', file, '-f', 'framemd5', '-']); return r.stdout.split('\n').filter(l => l && l[0] !== '#').map(l => l.split(',').pop().trim()); };
+
 /* ADTS AAC-LC -> { asc, frames:[Uint8Array raw AAC], sampleRate, channels } */
 function aacFrames(seconds, freq) {
   const f = tmp('t.aac'); const r = run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `sine=frequency=${freq || 440}:sample_rate=48000`, '-t', String(seconds), '-ac', '2', '-c:a', 'aac', '-b:a', '192k', '-f', 'adts', f]);
@@ -42,4 +71,4 @@ function aacFrames(seconds, freq) {
 const probe = (file, extra) => { const r = run('ffprobe', ['-v', 'error', '-of', 'json', '-show_streams', '-show_format', ...(extra || []), file]); if (r.status !== 0) throw new Error('ffprobe failed: ' + r.stderr); return JSON.parse(r.stdout); };
 const decodeErrors = file => run('ffmpeg', ['-v', 'error', '-i', file, '-f', 'null', '-']).stderr.trim();
 const writeTmp = (name, bytes) => { const f = tmp(name); fs.writeFileSync(f, Buffer.from(bytes)); return f; };
-module.exports = { haveFfmpeg, h264Samples, aacFrames, probe, decodeErrors, writeTmp, run, tmp };
+module.exports = { haveFfmpeg, h264Samples, h264Reordered, frameHashes, aacFrames, probe, decodeErrors, writeTmp, run, tmp };

@@ -15,25 +15,26 @@ def chk(name, ok, info=''):
 TMP = tempfile.mkdtemp(prefix='wxexp_media_')
 have_ff = bool(shutil.which('ffmpeg') and shutil.which('ffprobe'))
 
-# canned real H.264 (1920x1080 @30, 45 frames) for the fake encoder
+# canned real H.264 (1920x1080 @30, 45 frames) for the fake encoder. v0.10.1.6: shaped like Chrome/Edge's real encoder output –
+# B-frames (decode order != display order), in-band AUD/SPS/PPS/SEI and a malformed avcC – the case that made a real export unplayable.
 canned = None
 if have_ff:
-    js = r"""const M=require('./tests/helpers/media.js');const v=M.h264Samples(1920,1080,30,1.5);
-    console.log(JSON.stringify({avcC:Buffer.from(v.avcC).toString('base64'),samples:v.samples.map(s=>({d:Buffer.from(s.data).toString('base64'),k:s.key}))}))"""
+    js = r"""const M=require('./tests/helpers/media.js');const v=M.h264Reordered(1920,1080,30,1.5,{chrome:true,badAvcC:true});
+    console.log(JSON.stringify({avcC:Buffer.from(v.avcC).toString('base64'),samples:v.samples.map(s=>({d:Buffer.from(s.data).toString('base64'),k:s.key,t:s.tsUs}))}))"""
     canned = json.loads(subprocess.run(['node', '-e', js], cwd=ROOT, capture_output=True, text=True, check=True).stdout)
     # a short VP9/VP8 WebM with a finite duration for verify()
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-t', '2', '-c:v', 'libvpx', '-b:v', '1M', TMP + '/t.webm'], check=True)
 
 FAKE = r"""(canned)=>{
-  const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)); const samples=canned.samples.map(s=>({d:b64(s.d),k:s.k})), avcC=b64(canned.avcC);
+  const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)); const samples=canned.samples.map(s=>({d:b64(s.d),k:s.k,t:s.t})), avcC=b64(canned.avcC);
   window.__fake={frames:[],configs:[],n:0,planes:null,closed:0};
   window.VideoEncoder=class{constructor(o){this.o=o;this.encodeQueueSize=0;this.i=0}
     static async isConfigSupported(c){return {supported:/^avc1/.test(c.codec),config:c}}
     configure(c){window.__fake.configs.push(c)}
     encode(frame,opts){const f=window.__fake,i=this.i++;f.n++;f.frames.push({fmt:frame.format,w:frame.codedWidth,h:frame.codedHeight,cs:frame.colorSpace&&{p:frame.colorSpace.primaries,t:frame.colorSpace.transfer,m:frame.colorSpace.matrix,fr:frame.colorSpace.fullRange},ts:frame.timestamp,dur:frame.duration,key:!!(opts&&opts.keyFrame)});
       if(i===3&&frame.format==='I420'){const buf=new Uint8Array(frame.allocationSize());frame.copyTo(buf).then(()=>{f.planes=buf});}
-      const s=samples[Math.min(i,samples.length-1)],k=(i%60===0);
-      this.o.output({byteLength:s.d.length,copyTo:b=>b.set(s.d),timestamp:frame.timestamp,duration:frame.duration,type:i===0?'key':'delta'},i===0?{decoderConfig:{description:avcC}}:{})}
+      const s=samples[Math.min(i,samples.length-1)];
+      this.o.output({byteLength:s.d.length,copyTo:b=>b.set(s.d),timestamp:s.t,duration:frame.duration,type:s.k?'key':'delta'},i===0?{decoderConfig:{description:avcC}}:{})}
     async flush(){} close(){window.__fake.closed++}};
 }"""
 
@@ -141,6 +142,10 @@ with sync_playwright() as p:
         pr = json.loads(subprocess.run(['ffprobe', '-v', 'error', '-of', 'json', '-count_frames', '-show_streams', '-show_format', TMP + '/out.mp4'], capture_output=True, text=True).stdout)
         v = pr['streams'][0]
         chk('ffprobe: H.264 1920×1080 30 fps, 45 frames, 1.5 s, BT.709 tagged', v['codec_name'] == 'h264' and v['width'] == 1920 and v['height'] == 1080 and v['r_frame_rate'] == '30/1' and int(v['nb_read_frames']) == 45 and abs(float(pr['format']['duration']) - 1.5) < 0.05 and v.get('color_space') == 'bt709' and v.get('color_range') == 'tv', {k: v.get(k) for k in ['codec_name', 'width', 'height', 'r_frame_rate', 'nb_read_frames', 'color_space', 'color_range']})
+        raw_bytes = open(TMP + '/out.mp4', 'rb').read()
+        chk('MP4 carries decode/composition times for the reordered frames (ctts + edit list)', b'ctts' in raw_bytes and b'elst' in raw_bytes)
+        pk = [float(x.split(',')[0]) for x in subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v', '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', TMP + '/out.mp4'], capture_output=True, text=True).stdout.split()]
+        chk('frames are shown at exactly 0, 1/30, 2/30 … 44/30 s', sorted(pk) == [round(i / 30, 6) for i in range(45)] or all(abs(a - i / 30) < 1e-4 for i, a in enumerate(sorted(pk))), sorted(pk)[:5])
         dec = subprocess.run(['ffmpeg', '-v', 'error', '-i', TMP + '/out.mp4', '-f', 'null', '-'], capture_output=True, text=True).stderr.strip()
         chk('ffmpeg decodes the exported MP4 with no errors', dec == '', dec[:200])
         # dialog result: verification line (Chromium cannot play H.264 -> 'unverified', never a false failure)
