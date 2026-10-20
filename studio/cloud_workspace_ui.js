@@ -66,12 +66,14 @@
     pw.addEventListener('keydown', e => { if (e.key === 'Enter') go(false); });
     return h('div', { style: 'display:grid;gap:8px' }, h('div', { className: 'hint', text: note }), em, pw, h('div', { className: 'btnrow' }, btn('Sign in', () => go(false), 'pri'), btn('Create account', () => go(true))), msg);
   }
+  /* Which Supabase project this build talks to (public values only: host + the last 4 characters of the publishable key) — lets you check a dev build is pointed at the right project. */
+  const projectLine = () => { let host = ''; try { host = new URL(cfg.url).host; } catch (e) { host = String(cfg.url || '(none)'); } const k = String(cfg.publishableKey || ''); return h('div', { className: 'hint', 'data-cloud-project': host, text: 'Cloud project: ' + host + ' · publishable key …' + k.slice(-4) }); };
   function accountDialog() {
     const st = eng.status(), body = h('div', { className: 'cwbox' });
     if (!st.signedIn) {
       const ns = B.ns();
       body.append(signInForm(ns ? 'Your work stays saved on this computer. Sign in to continue syncing it to your cloud workspace.' : 'Your show is saved in this browser. Sign in to keep your shows and settings in the cloud and open them from any computer. Signing in never replaces work you already have here without asking.'));
-      open('account', 'Cloud workspace', body, [btn('Close', closeModal)]); return;
+      body.append(projectLine()); open('account', 'Cloud workspace', body, [btn('Close', closeModal)]); return;
     }
     const c = chipState();
     body.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow' }, h('div', { style: 'font-weight:700', text: userEmail() }), h('div', { className: 'hint', text: c.label })), h('i', { className: 'cd', style: 'width:12px;height:12px;border-radius:50%;background:' + ({ cloud: '#3ecf8e', incomplete: '#f5b942', syncing: '#2f9bff', failed: '#ff6b6b', conflict: '#ff6b6b' }[c.k] || '#7f93ad') })));
@@ -85,7 +87,7 @@
     body.append(h('div', { className: 'hint', text: 'This computer’s name (shown on other computers when a show was saved here):' }), h('div', { className: 'cwrow' }, nm, btn('Rename', () => { const v = nm.value.trim().slice(0, 60) || guess(); ls.set('wx.studio.deviceName.v1', v); eng.deviceName = v; toast('Computer named “' + v + '”'); })));
     const ig = (eng.record() && eng.record().settingsIgnored) || []; if (ig.length) body.append(h('div', { className: 'hint', text: 'Some settings were not synced: ' + ig.map(i => i.key + ' (' + (i.code || i.reason || 'not allowed') + ')').join(', ') }));
     body.append(h('div', { className: 'hint', text: 'Synced: your current show, the scene you were on, and a short list of settings (map defaults, export choices, snap options, your public map token). Private keys are never sent. Videos and GIFs stay on this computer in v0.10.2.' }));
-    open('account', 'Cloud workspace', body, [btn('Sign out…', signOutDialog, 'dng'), btn('Close', closeModal)]);
+    body.append(projectLine()); open('account', 'Cloud workspace', body, [btn('Sign out…', signOutDialog, 'dng'), btn('Close', closeModal)]);
   }
   function reportOpen(r, title) {
     const lines = []; if (r.missing && r.missing.length) lines.push(r.missing.length + ' image(s) in this show are not available on this computer (' + r.missing.slice(0, 4).map(m => m.id + ': ' + ({ too_large: 'too large to upload', mime_not_allowed: 'unsupported type', upload_failed: 'upload failed', unavailable: 'unavailable', hash_mismatch: 'download damaged', download_failed: 'could not download', builtin_missing: 'bundled artwork missing from this version of WX Studio', builtin_changed: 'bundled artwork differs in this version of WX Studio' }[m.reason] || m.reason)).join('; ') + '). Their place is kept so nothing is lost.');
