@@ -940,7 +940,7 @@
       bind(T2, 'delay', 'range', { min: 0, max: 10, step: 0.1, label: 'Delay (s)' }),
       h('div', { className: 'btnrow' }, h('button', { text: 'Text layer style… (stroke, shadow, glow)', on: { click: () => openFxWindow(T2.fx, 'Layer Style – Banner title') } }))
     ], true));
-    else p.append(mapAccordion('titleBanner2', 'Title banner #2 (your banner + logo)', [
+    else p.append(mapAccordion('titleBanner2', 'Banner & Logo', [
       bind(T2, 'show', 'check', { label: 'Show' }),
       bind(T2, 'text', 'text', { label: 'Title' }),
       bind(T2, 'pos', 'select', { label: 'Position', options: [['ul', 'Upper left'], ['ur', 'Upper right'], ['full', 'Full width']] }),
@@ -957,9 +957,9 @@
       bind(T2, 'color', 'color', { label: 'Text color' }),
       bind(T2, 'anim', 'select', { label: 'Entrance', options: [['auto', 'Automatic (from its edge)'], ['in-left', 'Slide from left'], ['in-right', 'Slide from right'], ['in-top', 'Slide from top'], ['fade', 'Fade'], ['none', 'None']] }),
       bind(T2, 'delay', 'range', { min: 0, max: 10, step: 0.1, label: 'Delay (s)' }),
-      h('div', { className: 'btnrow' }, h('button', { text: 'Text layer style… (stroke, shadow, glow)', on: { click: () => openFxWindow(T2.fx, 'Layer Style – Title banner #2') } }))
+      h('div', { className: 'btnrow' }, h('button', { text: 'Text layer style… (stroke, shadow, glow)', on: { click: () => openFxWindow(T2.fx, 'Layer Style – Banner & Logo') } }))
     ].filter(Boolean), false));
-    p.append(mapAccordion('titleBanner','Title banner #1',[
+    p.append(mapAccordion('titleBanner','Standard Banner',[
       bind(sc.title, 'show', 'check', { label: 'Show' }),
       bind(sc.title, 'text', 'text', { label: 'Title' }),
       bind(sc.title, 'sub', 'text', { label: 'Subtitle' }),
@@ -1765,7 +1765,8 @@
       if (sel === 'goverlay') pane.append(col(fx.goverlay, 'c1', 'Color 1'), col(fx.goverlay, 'c2', 'Color 2'), num(fx.goverlay, 'angle', -180, 180, 'Angle', '°'), num(fx.goverlay, 'opacity', 0, 100, 'Opacity', '%'), h('div', { className: 'hint', text: 'Angle 90° = color 1 at the top, color 2 at the bottom.' }));
       if (sel === 'glow') pane.append(col(fx.glow, 'color', 'Color'), num(fx.glow, 'opacity', 0, 100, 'Opacity', '%'), num(fx.glow, 'size', 0, 60, 'Size', 'px'));
     }
-    function drawList() { list.innerHTML = ''; ROWS.forEach(([k, l]) => { const cb = h('input', { type: 'checkbox', checked: !!fx[k].on }); cb.onchange = () => { fx[k].on = cb.checked; sel = k; drawList(); drawPane(); changed(); done(); }; list.append(h('div', { style: 'display:flex;align-items:center;gap:8px;padding:7px 8px;cursor:pointer;border-bottom:1px solid #222;' + (sel === k ? 'background:#555' : ''), on: { click: () => { sel = k; drawList(); drawPane(); } } }, cb, h('span', { text: l }))); }); }
+    function drawList() { list.innerHTML = ''; ROWS.forEach(([k, l]) => { const cb = h('input', { type: 'checkbox', checked: !!fx[k].on }); cb.onclick = e => e.stopPropagation();   /* v0.10.1.5: the row's click rebuilt the list and removed this checkbox before its change event, so ticking an effect did nothing */
+    cb.onchange = () => { fx[k].on = cb.checked; sel = k; drawList(); drawPane(); changed(); done(); }; list.append(h('div', { style: 'display:flex;align-items:center;gap:8px;padding:7px 8px;cursor:pointer;border-bottom:1px solid #222;' + (sel === k ? 'background:#555' : ''), on: { click: () => { sel = k; drawList(); drawPane(); } } }, cb, h('span', { text: l }))); }); }
     const head = h('div', { style: 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #222;cursor:move;font-size:15px;font-weight:700', text: title || 'Layer Style' }, h('span', { text: '✕', style: 'cursor:pointer', on: { click: () => { done(); W2.remove(); } } }));
     let dr = null; head.onpointerdown = e => { dr = [e.clientX, e.clientY, W2.offsetLeft, W2.offsetTop]; head.setPointerCapture(e.pointerId); }; head.onpointermove = e => { if (dr) { W2.style.left = dr[2] + e.clientX - dr[0] + 'px'; W2.style.top = dr[3] + e.clientY - dr[1] + 'px'; W2.style.right = 'auto'; } }; head.onpointerup = () => { dr = null; };
     const btns = h('div', { style: 'display:flex;gap:8px;justify-content:flex-end;padding:0 10px 10px' }, h('button', { text: 'Reset (Photopea style)', on: { click: () => { Object.keys(fx).forEach(k => delete fx[k]); Object.assign(fx, E.fxDefault()); drawList(); drawPane(); changed(); done(); } } }), h('button', { text: 'Cancel', on: { click: () => { Object.keys(fx).forEach(k => delete fx[k]); Object.assign(fx, JSON.parse(snap)); changed(); done(); W2.remove(); } } }), h('button', { className: 'pri', text: 'OK', on: { click: () => { done(); W2.remove(); } } }));
@@ -1833,14 +1834,27 @@
     const X = g.Exporter, ac = new AbortController(), bar = h('i'), msg = h('div', { className: 'hint', text: '' }), res = h('div'), pf = h('div', { className: 'expcheck' }), sum = h('div', { className: 'hint' });
     const prefs = expPrefs(); if (!['x', 'facebook', 'custom'].includes(prefs.preset)) prefs.preset = 'x';
     const size = h('select', {}, X.CUSTOM_SIZES.map(o => h('option', { value: o[0], text: o[1], selected: o[0] === prefs.size }))), br = h('select', {}, X.CUSTOM_QUALITY.map(o => h('option', { value: o[0], text: o[1], selected: o[0] === String(prefs.mbps) })));
-    const customRows = h('div', {}, fld('Size', size), fld('Quality', br)), tot = E.total(S.show), go = h('button', { className: 'pri', text: 'Start export' }), test = h('button', { text: 'Test export (2 s)', title: 'Makes a 2-second test video to check this browser can encode and play MP4' });
-    let busy = false, token = 0, cur = null;
+    const customRows = h('div', {}, fld('Size', size), fld('Quality', br)), go = h('button', { className: 'pri', text: 'Start export' }), test = h('button', { text: 'Test export (2 s)', title: 'Makes a 2-second test video to check this browser can encode and play MP4' });
+    let busy = false, token = 0, cur = null, tot = E.total(S.show);
+    /* v0.10.1.5: choose what to render – the whole show (default, as before), only the scene you are on, or a range of scenes. */
+    const nmOf = i => `${i + 1} · ${(S.show.scenes[i] && S.show.scenes[i].name) || 'Scene'}`, nScenes = S.show.scenes.length, here = Math.min(S.si, nScenes - 1);
+    const scope = h('select', {}, [['all', `Whole show (${nScenes} scene${nScenes === 1 ? '' : 's'})`], ['one', 'This scene only – ' + nmOf(here)]].concat(nScenes > 1 ? [['range', 'A range of scenes…']] : []).map(o => h('option', { value: o[0], text: o[1] })));
+    const opts = sel => S.show.scenes.map((sc, i) => h('option', { value: i, text: nmOf(i), selected: i === sel })), from = h('select', {}, opts(here)), to = h('select', {}, opts(here));
+    const rangeRow = h('div', { style: 'display:none;gap:8px' }, h('div', { style: 'flex:1' }, fld('From scene', from)), h('div', { style: 'flex:1' }, fld('To scene', to)));
+    function target() {
+      const sc = S.show.scenes, n = sc.length; let a = 0, b = n - 1;
+      if (scope.value === 'one') a = b = here; else if (scope.value === 'range') { a = +from.value; b = +to.value; if (a > b) { const t = a; a = b; b = t; } }
+      const whole = a === 0 && b === n - 1, sub = whole ? S.show : Object.assign({}, S.show, { scenes: sc.slice(a, b + 1) });
+      const clean = x => String(x || '').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_'), showName = clean(S.show.name) || 'weather';
+      const stem = whole ? showName : a === b ? (clean(sc[a].name) || 'scene_' + (a + 1)) : showName + '_scenes_' + (a + 1) + '-' + (b + 1);
+      return { show: sub, a, b, whole, stem, text: whole ? '' : a === b ? `Scene ${a + 1} only · ` : `Scenes ${a + 1}–${b + 1} · ` };
+    }
     const btns = X.PRESETS.map(p => ({ id: p.id, label: p.label })).concat([{ id: 'custom', label: 'Custom' }]).map(o => h('button', { text: o.label, 'data-preset': o.id, style: 'flex:1;padding:10px 6px;font-weight:700', on: { click: () => { if (busy) return; prefs.preset = o.id; expSave(prefs); sync(); } } }));
     const settings = () => X.presetSettings(prefs.preset, { size: prefs.size, mbps: prefs.mbps });
     const ICON = { ok: ['✓', '#4cd08a'], info: ['ℹ', '#7fb2e6'], warn: ['⚠', '#ffc24a'], error: ['✖', '#ff6b6b'] };
     async function refreshChecks() {
       const my = ++token, st = settings(); pf.innerHTML = ''; pf.append(h('div', { className: 'hint', text: 'Checking…' })); go.disabled = true;
-      let items; try { items = X.preflightItems(await X.gatherFacts(S.show, st), st, tot); } catch (e) { items = [{ level: 'warn', text: 'Could not run the checks: ' + (e && e.message || e) }]; }
+      let items; try { const tg = target(); tot = E.total(tg.show); items = X.preflightItems(await X.gatherFacts(tg.show, st, tg.a), st, tot); } catch (e) { items = [{ level: 'warn', text: 'Could not run the checks: ' + (e && e.message || e) }]; }
       if (my !== token) return; cur = items; pf.innerHTML = '';
       items.forEach(it => pf.append(h('div', { style: 'display:flex;gap:8px;margin:3px 0;font-size:13px;line-height:1.35' }, h('span', { text: ICON[it.level][0], style: 'color:' + ICON[it.level][1] + ';font-weight:700;width:14px;flex:none' }), h('span', { text: it.text }))));
       go.disabled = busy || !X.canExport(items);
@@ -1849,15 +1863,16 @@
     function offerWebM() { if (res.querySelector('.webmoffer')) return; res.append(h('div', { className: 'webmoffer hint', style: 'margin-top:8px' }, 'If you only need a quick draft to look at, this browser can record a WebM. It is not suitable for posting to X or Facebook. ', h('button', { text: 'Make a WebM draft', on: { click: () => run(true) } }))); }
     function sync() {
       btns.forEach(b => b.className = b.dataset.preset === prefs.preset ? 'pri' : '');
-      customRows.style.display = prefs.preset === 'custom' ? '' : 'none'; const st = settings();
-      sum.textContent = `${st.width}×${st.height} · ${st.fps} fps · ${(st.bitrate / 1e6)} Mbps · H.264 MP4 · ${X.fmtDuration(tot)} (${tot.toFixed(1)} s)`; expBtnTitle(); refreshChecks();
+      customRows.style.display = prefs.preset === 'custom' ? '' : 'none'; rangeRow.style.display = scope.value === 'range' ? 'flex' : 'none'; const st = settings(), tg = target(); tot = E.total(tg.show);
+      sum.textContent = `${tg.text}${st.width}×${st.height} · ${st.fps} fps · ${(st.bitrate / 1e6)} Mbps · H.264 MP4 · ${X.fmtDuration(tot)} (${tot.toFixed(1)} s)`; expBtnTitle(); refreshChecks();
     }
+    scope.onchange = from.onchange = to.onchange = () => { if (!busy) sync(); };
     size.onchange = () => { prefs.size = size.value; expSave(prefs); sync(); }; br.onchange = () => { prefs.mbps = br.value; expSave(prefs); sync(); };
     async function run(draft) {
-      busy = true; go.disabled = true; test.disabled = true; const st = settings(); stopPlay(); msg.textContent = 'Rendering…'; msg.style.color = ''; res.innerHTML = ''; bar.style.width = '0%';
+      busy = true; go.disabled = true; test.disabled = true; const st = settings(), tg = target(); stopPlay(); msg.textContent = 'Rendering…'; msg.style.color = ''; res.innerHTML = ''; bar.style.width = '0%';
       try {
-        const r = await X.run(S.show, { width: st.width, height: st.height, bitrate: st.bitrate, fps: st.fps, signal: ac.signal, allowWebM: !!draft, onProgress: p => { bar.style.width = (p * 100).toFixed(0) + '%'; msg.textContent = `Rendering… ${(p * 100).toFixed(0)}%`; } });
-        const url = URL.createObjectURL(r.blob), name = (S.show.name || 'weather').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + (r.kind === 'mp4' ? '_' + st.id : '_draft') + '.' + r.ext;
+        const r = await X.run(tg.show, { width: st.width, height: st.height, bitrate: st.bitrate, fps: st.fps, signal: ac.signal, allowWebM: !!draft, onProgress: p => { bar.style.width = (p * 100).toFixed(0) + '%'; msg.textContent = `Rendering… ${(p * 100).toFixed(0)}%`; } });
+        const url = URL.createObjectURL(r.blob), name = tg.stem + (r.kind === 'mp4' ? '_' + st.id : '_draft') + '.' + r.ext;
         msg.textContent = `Done – ${(r.blob.size / 1048576).toFixed(1)} MB. ${r.note}`; saveFile(r.blob, name); msg.textContent += ' Saved to your Downloads folder.';
         const chk = h('div', { className: 'hint', text: r.kind === 'mp4' ? 'Checking the finished file…' : 'This is a draft recording – not checked.' }); res.append(chk, h('video', { src: url, controls: true, style: 'width:100%;max-width:640px;border-radius:8px;margin-top:8px' }), h('div', { className: 'mb' }, h('a', { href: url, download: name }, h('button', { text: 'Download again' }))));
         if (r.kind === 'mp4') { const v = await X.verify(r.blob, { width: r.width, height: r.height, duration: r.seconds, fps: r.fps }); chk.textContent = v.text; chk.style.color = v.status === 'verified' ? '#4cd08a' : v.status === 'failed' ? '#ff6b6b' : '#ffc24a'; chk.dataset.status = v.status; }
@@ -1873,7 +1888,7 @@
       const r = await X.selfTest(p => { bar.style.width = (p * 100).toFixed(0) + '%'; }); msg.textContent = r.text; msg.style.color = r.ok ? '#4cd08a' : '#ff6b6b'; if (r.code === 'NO_H264') offerWebM();
       busy = false; test.disabled = false; go.disabled = cur ? !X.canExport(cur) : false;
     };
-    modal('Export video', h('div', {}, h('div', { style: 'display:flex;gap:6px;margin-bottom:8px' }, btns), customRows, sum, pf, h('div', { className: 'prog' }, bar), msg, res), [h('button', { text: 'Close', on: { click: () => { ac.abort(); token++; closeModal(); } } }), test, go]);
+    modal('Export video', h('div', {}, h('div', { style: 'display:flex;gap:6px;margin-bottom:8px' }, btns), customRows, fld('Scenes to export', scope), rangeRow, sum, pf, h('div', { className: 'prog' }, bar), msg, res), [h('button', { text: 'Close', on: { click: () => { ac.abort(); token++; closeModal(); } } }), test, go]);
     sync();
   }
   /* ---------- still image export (PNG/JPG) for X / Facebook ---------- */

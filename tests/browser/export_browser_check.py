@@ -89,7 +89,7 @@ with sync_playwright() as p:
     ev("document.querySelector('#modal button[data-preset=facebook]').click()"); pg.wait_for_timeout(300)
     chk('Facebook preset selects', active_preset() == 'facebook')
     ev("document.querySelector('#modal button[data-preset=custom]').click()"); pg.wait_for_timeout(300)
-    vis = ev("[...document.querySelectorAll('#modal select')].map(s=>s.offsetParent!==null)"); chk('custom shows size and quality choices', vis == [True, True], vis)
+    vis = ev("[...document.querySelectorAll('#modal select')].map(s=>s.offsetParent!==null)"); chk('custom shows size and quality choices (then the v0.10.1.5 scene picker; its From/To range selects stay hidden)', vis == [True, True, True, False, False], vis)
     ev("(()=>{const s=document.querySelectorAll('#modal select');s[0].value='1280x720';s[0].dispatchEvent(new Event('change'));s[1].value='6';s[1].dispatchEvent(new Event('change'))})()"); pg.wait_for_timeout(300)
     summ = ev("document.querySelector('#modal .hint').textContent"); chk('custom 720p / 6 Mbps summary', '1280×720' in summ and '6 Mbps' in summ, summ)
     close_dialog(); pg.wait_for_timeout(200)
