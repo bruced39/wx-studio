@@ -170,7 +170,7 @@
     const info = await X.encodeFrames(show, Object.assign({}, o, { codec, fps, width: W, height: H, bitrate }), (bytes, ts, dur, key, desc) => { if (desc && !haveDesc) { mux.setDescription(desc); haveDesc = true; } mux.addSample(bytes, ts, dur, key); });
     if (info.color !== 'bt709') mux.setColor(false);   // never tag colours we did not control
     const blob = new Blob([mux.finalize()], { type: 'video/mp4' });
-    return { blob, kind: 'mp4', ext: 'mp4', codec, width: W, height: H, fps, frames: info.frames, seconds: info.frames / fps, color: info.color, note: `H.264 MP4, ${W}x${H}, ${fps} fps` };
+    return { blob, mux: mux.info, kind: 'mp4', ext: 'mp4', codec, width: W, height: H, fps, frames: info.frames, seconds: info.frames / fps, color: info.color, note: `H.264 MP4, ${W}x${H}, ${fps} fps` };
   };
 
   /* Play the finished file back in a <video> to confirm it opens, has the right size and length, and its first and last
