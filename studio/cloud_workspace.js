@@ -214,7 +214,9 @@
     E.noteRestore = function () { if (rec) { rec.nextReason = 'restore'; E.markDirty(); } };     // a recent-autosave copy replaced this show: next save is a protected 'restore' version
 
     /* ----- local changes → debounced sync ----- */
+    let seenChg = host.changeSeq ? host.changeSeq() : 0;     // last change counter of the editor that this engine has been told about
     E.markDirty = function () {
+      seenChg = host.changeSeq ? host.changeSeq() : seenChg;
       seq++; if (!uid || !rec || state === 'conflict') { return; }
       if (rec.claim === 'later' || o.paused && o.paused()) { return; }
       rec.dirty = true; save();
@@ -414,6 +416,7 @@
     };
     E.tick = async function () {
       if (!uid || !rec) return;
+      if (host.changeSeq && host.changeSeq() !== seenChg) E.markDirty();   // safety net: an edit whose notification never arrived is still synced (and the status stops saying "Saved")
       try { await E.pushSettings(); } catch (e) { /* retried on the next tick */ }
       try { await E.pushWorkspace(); } catch (e) { /* retried */ }
       if (state === 'offline' || state === 'failed') return;

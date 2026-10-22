@@ -17,7 +17,7 @@
   const WX = g.WX, S = WX.S, WF = g.WXShowFile;
 
   const host = {
-    getShow: () => S.show, builtinAssets: () => B.builtinAssets(), getSceneId: () => B.sceneId(), hasRealLocalWork: B.hasRealLocalWork, renameShow: B.renameShow,
+    getShow: () => S.show, changeSeq: () => B.changeSeq(), builtinAssets: () => B.builtinAssets(), getSceneId: () => B.sceneId(), hasRealLocalWork: B.hasRealLocalWork, renameShow: B.renameShow,
     loadShow: async (sh, o) => { B.loadCloudShow(sh, o); },
     localOnlyMedia: () => {
       const out = [], here = new Set();

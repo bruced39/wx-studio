@@ -74,10 +74,16 @@ with sync_playwright() as p:
     st = ev("(()=>{const e=document.getElementById('saveState');return [e.dataset.state,e.textContent]})()")
     chk('autosave success shows Saved hh:mm', st[0] == 'saved' and st[1].startswith('Saved '), st)
     ev("window.__realSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='wx.studio.autosave.v1'){const e=new Error('full');e.name='QuotaExceededError';throw e}return window.__realSet.call(this,k,v)};0")
+    # v0.10.2 storage fix: a full localStorage slot now falls back to the larger IndexedDB database (saved, with a note) ...
+    ev("WX.S.show.name='Autosave B0';document.getElementById('showName').dispatchEvent(new Event('change'))"); pg.wait_for_timeout(600)
+    st0 = ev("(()=>{const e=document.getElementById('saveState');return [e.dataset.state,e.title]})()")
+    chk('v0.10.2: localStorage full -> autosave falls back to the larger database and says so', st0[0] == 'saved' and 'larger storage' in st0[1], st0)
+    # ... and only when that is unavailable too is the failure shown (red, not silent)
+    ev("window.__realOpen=indexedDB.open.bind(indexedDB);indexedDB.open=function(n,v){if(n==='wxstudio-autosave')throw new DOMException('blocked','InvalidStateError');return window.__realOpen(n,v)};0")
     ev("WX.S.show.name='Autosave B';document.getElementById('showName').dispatchEvent(new Event('change'))"); pg.wait_for_timeout(100)
     st = ev("(()=>{const e=document.getElementById('saveState');return [e.dataset.state,e.textContent,e.style.color,e.title,document.getElementById('toast').textContent]})()")
     chk('autosave failure is shown (red, not silent) with a reason', st[0] == 'failed' and 'Not saved' in st[1] and 'full' in st[3] and 'Autosave failed' in st[4], st)
-    ev("Storage.prototype.setItem=window.__realSet;0"); ev("WX.S.show.name='Autosave C';document.getElementById('showName').dispatchEvent(new Event('change'))"); pg.wait_for_timeout(100)
+    ev("Storage.prototype.setItem=window.__realSet;indexedDB.open=window.__realOpen;0"); ev("WX.S.show.name='Autosave C';document.getElementById('showName').dispatchEvent(new Event('change'))"); pg.wait_for_timeout(100)
     chk('autosave recovers and shows Saved again', ev("document.getElementById('saveState').dataset.state") == 'saved')
 
     # ---------- 3. presets: X / Facebook / Custom, remembered ----------

@@ -73,3 +73,28 @@ In **My Shows…**, **Delete** **ZZ LIVE TEST 1** and any "(… copy)" show (thi
 
 ## F. What to send back
 The commit id from step A, the ✅/❌ list, and for any ❌ a screenshot of the chip/dialog plus (if possible) the Network row for the failing request (status and response body). Do **not** send passwords, tokens or the `Authorization` header.
+
+## G. Updating an existing test installation to the storage-fix branch (nothing is deleted)
+
+Your shows, images, login and autosaves live in the **browser** (profile storage for `http://localhost:8502`), not in the `wx-studio-livetest` folder. Updating the folder with `git` never touches them. Do not click "clear browsing data" and keep using the same address and the same browser profiles.
+
+**1. Before updating, in the browser tab that still has your show open (do not reload it yet):** click the red **⚠ Not saved** label (or **Save**) and keep the `.wxshow` file the browser downloads. It contains the show with its images. This is your backup.
+
+**2. Update the folder (PowerShell). Stop the running app first with Ctrl+C in its window:**
+
+```powershell
+cd $HOME\Documents\wx-studio-livetest
+git status                                   # expect: nothing to commit (secrets.toml is git-ignored). If files are listed, run: git stash
+git fetch origin
+git checkout claude/v0.10.2-storage-fix
+git pull --ff-only origin claude/v0.10.2-storage-fix
+git log --oneline -1                         # note this commit id
+.\.venv\Scripts\Activate.ps1
+streamlit run app.py --server.port 8502
+```
+
+**3. In each browser profile:** open `http://localhost:8502` and press **Ctrl+F5** once. Sign in is kept. If a show is missing its newest image, use **Open** on the `.wxshow` backup from step 1; the editor then syncs it to the cloud (the chip goes *Syncing* → *Saved to cloud*).
+
+**4. Quick check:** add a scene, **Upload background…** with a large (about 2 MB) image. The label should say **Saved** (hover: "larger storage" if the small slot was full) and, within seconds, the chip says *Saved to cloud*. Open the show in the other profile: the same image appears.
+
+To go back, run `git checkout claude/v0.10.2-release-test` in the same folder (your browser data stays as it is).

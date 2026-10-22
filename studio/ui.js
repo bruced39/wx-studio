@@ -39,16 +39,54 @@
   }
   const libHas = (k, v) => { try { return bgList.some(b => b.asset === k && b.data === v); } catch (e) { return false; } };
   /* v0.10.0: autosave reports its outcome. A failed write (storage full or blocked) used to be swallowed silently. */
-  function saveStatus(ok, why) {
+  function saveStatus(ok, why) {      // ok = true: why may be 'ext' (saved in the larger browser database because the small autosave slot is full)
     const el = $('#saveState'); if (!el) return;
-    if (ok) { const d = new Date(); el.textContent = 'Saved ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); el.style.color = '#7f93ad'; el.style.cursor = 'pointer'; el.style.textDecoration = 'underline dotted'; el.title = 'Autosaved in this browser. Click to see recent autosaves and restore an earlier copy. Use Save to keep a file.'; el.onclick = recentDialog; el.dataset.state = 'saved'; saveStatus.warned = false; }
+    if (ok) { const d = new Date(); el.textContent = 'Saved ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); el.style.color = '#7f93ad'; el.style.cursor = 'pointer'; el.style.textDecoration = 'underline dotted'; el.title = (why === 'ext' ? 'Autosaved in this browser’s larger storage (the show is too big for the small autosave slot). ' : 'Autosaved in this browser. ') + 'Click to see recent autosaves and restore an earlier copy. Use Save to keep a file.'; el.onclick = recentDialog; el.dataset.state = 'saved'; saveStatus.warned = false; }
     else { el.textContent = '⚠ Not saved'; el.style.color = '#ff6b6b'; el.style.cursor = 'pointer'; el.style.textDecoration = ''; el.title = 'Autosave failed: ' + why + ' Click to download a copy of your show now.'; el.onclick = () => $('#bSave').click(); el.dataset.state = 'failed'; if (!saveStatus.warned) { saveStatus.warned = true; toast('Autosave failed – ' + why + ' Use Save to keep your work.'); } }
   }
   /* Built-in and library images are re-attached on load, so autosave and recent-autosave copies leave them out. */
   const slimReplacer = (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (g.WX_TPL && /^tpl_/.test(k) && g.WX_TPL[k] === v) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v;
+  /* v0.10.2 (storage fix): the small localStorage autosave slot (about 5 MB per site) fills up as soon as a show holds a few large images. A full slot
+     used to (1) lose the autosave AND (2) skip the cloud notification that came after it, so the cloud kept an out-of-date copy while showing "Saved".
+     Now: the change is ALWAYS announced to the cloud engine first; localStorage stays the normal place (unchanged format, so nothing migrates); when it
+     refuses, the same JSON goes to a separate IndexedDB database ('wxstudio-autosave') and a tiny marker key tells the next start to read it from there.
+     Nothing is deleted: the older localStorage copy stays as it was, and a stale database record is simply ignored until it is overwritten.          */
+  let chgSeq = 0; const stashQ = { busy: false, json: null, n: 0, why: '' }, STUB = '{"wxIdbStub":1}', idbFlag = () => akey() + ':idb';
+  const isQuota = e => !!e && (/quota/i.test(e.name || '') || e.code === 22 || e.code === 1014);
+  const autoDB = () => new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-autosave', 1); r.onupgradeneeded = () => r.result.createObjectStore('cur', { keyPath: 'key' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('blocked')); } catch (e) { rej(e); } });
+  const autoTx = async (mode, fn) => { const d = await autoDB(); return new Promise((res, rej) => { let out; const t = d.transaction('cur', mode); try { out = fn(t.objectStore('cur')); } catch (e) { d.close(); rej(e); return; } t.oncomplete = () => { d.close(); res(out && out.result); }; t.onerror = t.onabort = () => { d.close(); rej(t.error || new Error('aborted')); }; }); };
+  const autoPut = (key, json) => autoTx('readwrite', s2 => s2.put({ key, json, t: Date.now(), size: json.length }));
+  const autoGet = key => autoTx('readonly', s2 => s2.get(key));
+  const autoDel = key => autoTx('readwrite', s2 => s2.delete(key));
+  /* Put the JSON into the larger database and leave the marker; the newest request wins, writes never overlap. */
+  function stash(json, n, why) {
+    stashQ.json = json; stashQ.n = n; stashQ.why = why; if (stashQ.busy) return; stashQ.busy = true;
+    (async () => {
+      while (stashQ.json !== null) {
+        const j = stashQ.json, k = stashQ.n, w = stashQ.why, key = akey(), flag = idbFlag(); stashQ.json = null;
+        try {
+          await autoPut(key, j);
+          if (k !== chgSeq) continue;                                  // a newer change arrived (and either was stashed too, or fitted into localStorage)
+          let marked = false;
+          try { localStorage.setItem(flag, String(Date.now())); marked = true; }
+          catch (e) { try { localStorage.setItem(key, STUB); marked = true; } catch (e2) { /* nothing more can be done here */ } }   // a smaller value always fits: it frees space
+          if (marked) saveStatus(true, 'ext'); else saveStatus(false, w);
+        } catch (e) { if (k === chgSeq) saveStatus(false, w); }
+      }
+      stashQ.busy = false;
+    })();
+  }
   function autosave() {
-    try { localStorage.setItem(akey(), JSON.stringify(S.show, slimReplacer)); saveStatus(true); recentSoon(); if (S.hp > 0) markTouched(); try { if (HK.changed) HK.changed(); } catch (e) { /* cloud must never break autosave */ } }
-    catch (e) { saveStatus(false, e && e.name === 'QuotaExceededError' ? 'this browser’s storage is full.' : 'this browser is blocking storage.'); }
+    const n = ++chgSeq; let json = null, ok = false, why = 'this browser is blocking storage.';
+    try { json = JSON.stringify(S.show, slimReplacer); } catch (e) { why = 'the show could not be prepared for saving.'; }
+    if (json !== null) {
+      try { localStorage.setItem(akey(), json); ok = true; try { localStorage.removeItem(idbFlag()); } catch (e) { /* ignore */ } }
+      catch (e) { if (isQuota(e)) why = 'this browser’s storage is full.'; }
+    }
+    if (ok) saveStatus(true); else if (json !== null) stash(json, n, why); else saveStatus(false, why);
+    try { recentSoon(); } catch (e) { /* ignore */ }
+    try { if (S.hp > 0) markTouched(); } catch (e) { /* ignore */ }
+    try { if (HK.changed) HK.changed(); } catch (e) { /* cloud must never break autosave */ }   // ALWAYS announced: the cloud copy does not depend on this browser's local storage
   }
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
   function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
@@ -2042,7 +2080,17 @@
 
   /* ---------- boot ---------- */
   function boot() {
-    bgLoad(); buildTools(); let sh = null; try { const raw = localStorage.getItem(akey()); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
+    bgLoad(); buildTools(); let sh = null, needExt = false;
+    try { const raw = localStorage.getItem(akey()); if (raw) { const p = JSON.parse(raw); if (p && p.wxIdbStub) needExt = true; else if (p && p.scenes && p.scenes.length) sh = p; } if (localStorage.getItem(idbFlag())) needExt = true; } catch (e) { sh = null; }
+    if (!needExt) return bootWith(sh, false);
+    /* The newest autosave lives in the larger database (the small slot was full). Read it before anything is committed; if it cannot be read, fall back to the localStorage copy. */
+    Promise.race([autoGet(akey()).catch(() => null), new Promise(r => setTimeout(() => r(null), 4000))]).then(rec => {
+      let x = null; try { x = rec && JSON.parse(rec.json); if (!x || !x.scenes || !x.scenes.length) x = null; } catch (e) { x = null; }
+      if (!x && !sh) setTimeout(() => toast('The large autosave could not be read in this browser – check Recent autosaves in the Saved menu.'), 1200);
+      bootWith(x || sh, !!x);
+    });
+  }
+  function bootWith(sh, fromExt) {
     if(sh){migrateMB(sh);migrateWDBroadcast(sh);}
     S.show=sh||newShowWithDefaultMap();
     const loadedDefault=applySavedDefaultOnStartup(S.show);
@@ -2052,7 +2100,7 @@
     if(!sh){try{if(localStorage.getItem(touchKey())===null)localStorage.setItem(touchKey(),'0');}catch(e){/* ignore */}}
     if(S.show.scenes[0]?.bg?.type==='mapbox')setTool('pan');
     if(sh){
-      toast(loadedDefault?'Last show restored with saved default Satellite map':'Last show restored; Satellite selected');
+      toast(fromExt?'Last show restored from this browser’s larger storage':loadedDefault?'Last show restored with saved default Satellite map':'Last show restored; Satellite selected');
       E.preload(S.show).then(()=>thumbSoon(true));
     }
     // The editor already paints its current Mapbox frame continuously.
@@ -2075,7 +2123,12 @@
   /* What this browser holds from before accounts existed (only meaningful while NS is null). */
   async function legacyInfo() {
     const out = { show: null, images: 0, videos: 0, recents: 0 }; if (NS) return out;
-    try { const raw = localStorage.getItem(KEY); if (raw && (touchFlag() === '1' || touchFlag() === null)) { const sh = JSON.parse(raw); if (sh && sh.scenes && sh.scenes.length) out.show = { name: sh.name || 'Untitled show', scenes: sh.scenes.length }; } } catch (e) { /* ignore */ }
+    try {
+      const raw = localStorage.getItem(KEY); let sh = null;
+      if (raw && (touchFlag() === '1' || touchFlag() === null)) { sh = JSON.parse(raw); if (sh && sh.wxIdbStub) sh = null; }
+      if ((!sh || localStorage.getItem(KEY + ':idb')) && (raw || localStorage.getItem(KEY + ':idb'))) { const r = await autoGet(KEY).catch(() => null); if (r) { try { const x = JSON.parse(r.json); if (x && x.scenes && x.scenes.length) sh = x; } catch (e) { /* ignore */ } } }   // the newest copy may live in the larger database
+      if (sh && sh.scenes && sh.scenes.length) out.show = { name: sh.name || 'Untitled show', scenes: sh.scenes.length };
+    } catch (e) { /* ignore */ }
     try { out.images = (await idbAll(bgDB, 'bgs')).filter(r => !r.owner).length; } catch (e) { /* ignore */ }
     try { out.videos = (await idbAll(vidDB, 'v')).filter(r => !r.owner).length; } catch (e) { /* ignore */ }
     try { out.recents = (await idbAll(recDB, 'snaps')).filter(r => !r.owner).length; } catch (e) { /* ignore */ }
@@ -2085,24 +2138,28 @@
   async function claimLegacy(uid) {
     const raw = localStorage.getItem(KEY), dest = KEY + ':u:' + uid;
     if (raw && localStorage.getItem(dest) === null) { localStorage.setItem(dest, raw); localStorage.setItem(dest + ':touched', '1'); localStorage.removeItem(KEY); localStorage.removeItem(KEY + ':touched'); }
+    try { const ext = await autoGet(KEY), had = await autoGet(dest); if (ext && !had) { await autoPut(dest, ext.json); if (localStorage.getItem(KEY + ':idb')) { localStorage.setItem(dest + ':idb', localStorage.getItem(KEY + ':idb')); localStorage.removeItem(KEY + ':idb'); } } } catch (e) { /* the copy in the larger database stays where it is */ }
     for (const [dbf, st] of LIBS) { const recs = (await idbAll(dbf, st)).filter(r => !r.owner); await idbPut(dbf, st, recs.map(r => Object.assign({}, r, { owner: uid }))); }
   }
   /* Shared-computer cleanup: removes everything this browser stored for one account. */
   async function clearAccountData(uid, settingsKeys) {
-    try { localStorage.removeItem(KEY + ':u:' + uid); localStorage.removeItem(KEY + ':u:' + uid + ':touched'); (settingsKeys || []).forEach(k => localStorage.removeItem(k)); } catch (e) { /* ignore */ }
+    try { localStorage.removeItem(KEY + ':u:' + uid); localStorage.removeItem(KEY + ':u:' + uid + ':touched'); localStorage.removeItem(KEY + ':u:' + uid + ':idb'); (settingsKeys || []).forEach(k => localStorage.removeItem(k)); } catch (e) { /* ignore */ }
     for (const [dbf, st] of LIBS) { try { const ids = (await idbAll(dbf, st)).filter(r => r.owner === uid).map(r => r.id); await idbDel(dbf, st, ids); } catch (e) { /* ignore */ } }
+    try { await autoDel(KEY + ':u:' + uid); } catch (e) { /* ignore */ }
   }
   /* Sign-out with "keep a local copy": the open show becomes the pre-account local copy; whatever was there is kept as a recent safety copy first. */
   async function keepLocalCopy() {
     const prev = localStorage.getItem(KEY), mine = JSON.stringify(S.show);
     if (prev && prev !== mine) { try { const sh = JSON.parse(prev); await idbPut(recDB, 'snaps', [{ id: 'pre' + Date.now().toString(36), t: Date.now(), kind: 'safety', label: 'Before sign-out copy', name: sh.name || 'Untitled show', scenes: (sh.scenes || []).length, size: prev.length, sig: sigOf(prev), json: prev }]); } catch (e) { /* ignore */ } }
-    localStorage.setItem(KEY, mine); localStorage.setItem(KEY + ':touched', '1');
+    try { localStorage.setItem(KEY, mine); localStorage.removeItem(KEY + ':idb'); }
+    catch (e) { await autoPut(KEY, mine); try { localStorage.setItem(KEY + ':idb', String(Date.now())); } catch (e2) { localStorage.setItem(KEY, STUB); } }   // too big for the small slot: kept in the larger database
+    localStorage.setItem(KEY + ':touched', '1');
   }
   function setNamespace(uid) { try { if (uid) localStorage.setItem(NS_KEY, uid); else localStorage.removeItem(NS_KEY); } catch (e) { /* ignore */ } }
   function loadCloudShow(sh, o) {
     loadShow(sh, { keepCustom: true }); const id = o && o.sceneId; if (id != null) { const i = S.show.scenes.findIndex(x => String(x.id) === String(id)); if (i > 0) { S.si = i; S.oid = null; refreshAll(); } }
   }
   g.WX = { S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog,
-    cloud: { hooks: HK, ns: () => NS, setNamespace, hasRealLocalWork, legacyInfo, claimLegacy, clearAccountData, keepLocalCopy, loadCloudShow, builtinAssets: builtinBGs, sceneId: () => (S.show.scenes[S.si] || {}).id, renameShow: n => { S.show.name = n; commit(); }, recentDialog, modal, closeModal, notice, toast, h, fmtMB, recentSnap, videos: () => E.videos } };
+    cloud: { hooks: HK, changeSeq: () => chgSeq, ns: () => NS, setNamespace, hasRealLocalWork, legacyInfo, claimLegacy, clearAccountData, keepLocalCopy, loadCloudShow, builtinAssets: builtinBGs, sceneId: () => (S.show.scenes[S.si] || {}).id, renameShow: n => { S.show.name = n; commit(); }, recentDialog, modal, closeModal, notice, toast, h, fmtMB, recentSnap, videos: () => E.videos } };
   boot();
 })(window);

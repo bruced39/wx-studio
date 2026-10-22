@@ -14,8 +14,9 @@ function fakeTimers() { let id = 0; const q = new Map(); return { set: (f, ms) =
 
 async function client(fake, uid, o) {
   o = o || {}; const kv = o.kv || CW.memoryKV(), timers = fakeTimers();
-  const state = { show: o.show || mkShow(), scene: 's1', local: !!o.realWork, settings: o.settings || {}, loaded: [], written: [] };
+  const state = { show: o.show || mkShow(), scene: 's1', local: !!o.realWork, settings: o.settings || {}, loaded: [], written: [], chg: 0 };
   const host = {
+    changeSeq: o.chg ? () => state.chg : undefined,
     getShow: () => state.show, getSceneId: () => state.scene, localOnlyMedia: () => o.lom || [], builtinAssets: () => o.builtin || {},
     hasRealLocalWork: () => state.local, renameShow: n => { state.show.name = n; },
     loadShow: async (s, opts) => { state.show = s; state.loaded.push(opts); if (opts && opts.sceneId) state.scene = opts.sceneId; state.local = true; },
@@ -236,4 +237,20 @@ test('only an unchanged-hash image is decoded/hashed once across many autosaves'
   c.eng.markDirty(); await c.eng.syncNow(); const reg = rpcCalls(fake, 'wx_studio_register_media').length, sel = fake.calls.filter(x => x.path.includes('wx_studio_media')).length;
   for (let i = 0; i < 3; i++) { c.state.show.name = 'edit ' + i; c.eng.markDirty(); await c.eng.syncNow(); }
   assert.equal(rpcCalls(fake, 'wx_studio_register_media').length, reg); assert.equal(fake.calls.filter(x => x.path.includes('wx_studio_media')).length, sel, 'no repeat media lookups');
+});
+
+test('v0.10.2 storage fix: an edit whose change notification never arrived is still synced by the periodic check, and the status stops saying "Saved to cloud"', async () => {
+  const fake = createFakeSupabase(), c = await client(fake, 'u1', { chg: true }), data = png(3000, 11);
+  c.state.chg++; c.eng.markDirty(); await c.eng.syncNow();
+  assert.equal(c.eng.status().label, 'Saved to cloud');
+  // the editor changed (new background image) but its local autosave threw, so markDirty was never called
+  c.state.show.assets.imgNew = data; c.state.show.scenes[1].bg = { type: 'image', asset: 'imgNew' }; c.state.chg++;
+  await c.eng.tick();
+  assert.notEqual(c.eng.status().label, 'Saved to cloud', 'the status must not claim success for an unsynced change');
+  const r = await c.eng.syncNow(); assert.equal(r.ok, true);
+  const row = fake.db.shows[0]; assert.equal(row.doc.scenes[1].bg.asset, 'imgNew'); assert.match(row.doc.assets.imgNew.media, /^sha256:/); assert.equal(fake.objects.size, 1);
+  assert.equal(c.eng.status().label, 'Saved to cloud');
+  // no change → the tick does not trigger another save
+  const n = rpcCalls(fake, 'wx_studio_save_show').length; await c.eng.tick(); await c.eng.syncNow();
+  assert.equal(rpcCalls(fake, 'wx_studio_save_show').length, n);
 });
