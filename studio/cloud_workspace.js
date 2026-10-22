@@ -188,7 +188,7 @@
     E.status = function () {
       const lom = host.localOnlyMedia ? host.localOnlyMedia().length : 0, ph = rec ? Object.keys(rec.placeholders).length : 0, li = rec ? rec.localOnlyImages : 0;
       const parts = []; if (li) parts.push(li + ' image' + (li > 1 ? 's' : '')); if (ph) parts.push(ph + ' image' + (ph > 1 ? 's' : '') + ' not on this computer'); if (lom) parts.push(lom + ' video/GIF/audio');
-      const base = { state, signedIn: !!uid, uid, error: lastError, incomplete: parts.length > 0, mediaNotes: parts, deviceName: E.deviceName, rev: rec && rec.baseRev, showId: rec && rec.showId, remoteNewer: rec && rec.remoteNewer, conflict: rec && rec.conflict, lastSyncedAt: rec && rec.lastSyncedAt, dirty: !!(rec && rec.dirty) };
+      const base = { state, signedIn: !!uid, uid, error: lastError, incomplete: parts.length > 0, mediaNotes: parts, deviceName: E.deviceName, rev: rec && rec.baseRev, showId: rec && rec.showId, remoteNewer: rec && rec.remoteNewer, conflict: rec && rec.conflict, lastSyncedAt: rec && rec.lastSyncedAt, dirty: !!(rec && rec.dirty), pending: !!(rec && rec.pending), issues: lastIssues.map(i => ({ id: i.id, reason: i.reason, detail: i.detail })), localOnlyImages: (rec && rec.localOnlyImages) || 0 };
       if (!uid) return Object.assign(base, { label: 'Saved locally', kind: 'local' });
       if (state === 'conflict') return Object.assign(base, { label: 'Conflict – choose', kind: 'conflict' });
       if (state === 'failed') return Object.assign(base, { label: 'Sync failed', kind: 'failed' });
@@ -230,7 +230,8 @@
       if (!uid || !rec) return { ok: false, status: 'signedout' };
       if (rec.conflict || state === 'conflict') return { ok: false, status: 'conflict' };
       if (rec.claim === 'later') return { ok: false, status: 'paused' };
-      if (!rec.dirty && !opts.force && rec.baseRev > 0 && !(lastIssues.some(i => i.reason === 'upload_failed' || i.reason === 'unavailable') && opts.retryMedia)) return { ok: true, status: 'idle' };
+      if (host.changeSeq && host.changeSeq() !== seenChg) { seenChg = host.changeSeq(); rec.dirty = true; }   // the editor changed without telling us: never answer "up to date" from a stale flag
+      if (!rec.dirty && !opts.force && !opts.verify && rec.baseRev > 0 && !(lastIssues.some(i => i.reason === 'upload_failed' || i.reason === 'unavailable') && opts.retryMedia)) return { ok: true, status: 'idle' };
       timers.clear(timer); const mySeq = seq; setState('syncing');
       try {
         if (!rec.showId) { rec.showId = uuid(); rec.baseRev = 0; baseDoc = null; rec.nextReason = rec.nextReason === 'autosave' ? (opts.reason || 'manual') : rec.nextReason; }
@@ -342,7 +343,9 @@
     /* Open-a-file / New: the replaced show was already synced; the next show gets a NEW cloud identity. */
     E.newIdentity = async function (reason) {
       if (!uid || !rec) return; timers.clear(timer);
-      if (rec.dirty || rec.pending) { try { await E.syncNow({ force: true }); } catch (e) { /* local safety copy is made by the host */ } }
+      /* v0.10.2 fix: do NOT sync here. By now the editor already shows the NEW show, so a sync would write the new (blank / imported) content over the
+         PREVIOUS cloud show's current version. The previous show is flushed by the host's beforeReplace hook BEFORE it is replaced (and a local safety copy is
+         made); whatever could not be flushed stays in that copy. */
       rec.showId = null; rec.baseRev = 0; rec.baseKey = ''; rec.pending = null; rec.conflict = null; rec.dirty = true; rec.placeholders = {}; rec.localOnlyImages = 0; rec.nextReason = reason || 'import'; rec.nextMeta = null; baseDoc = null; rec.remoteNewer = null; rec.remoteDeleted = false; await save(); state = 'idle'; emit('status', E.status()); E.schedule(debounce);
     };
 

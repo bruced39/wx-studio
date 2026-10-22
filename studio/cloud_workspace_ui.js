@@ -49,6 +49,8 @@
     let k = st.kind, label = st.label, title = st.label;
     if (st.remoteNewer && k !== 'conflict') { k = 'incomplete'; label = 'Newer version from ' + (st.remoteNewer.device_name || 'another computer'); title = label + ' – click to review and load it. Your version is not replaced.'; }
     else if (k === 'failed' && st.error) title = st.error;
+    else if (k === 'cloud') title = 'Saved to the cloud' + (st.rev ? ' – version ' + st.rev : '') + (st.lastSyncedAt ? ' at ' + when(st.lastSyncedAt) : '') + '. Click for your cloud workspace.';
+    else if (k === 'local') title = 'Saved on this computer; changes are waiting to sync to the cloud' + (st.rev ? ' (latest cloud version ' + st.rev + ')' : '') + '.';
     else if (k === 'incomplete') title = st.label + '. Videos, GIFs and any image that could not upload stay on that computer; Save as a .wxshow file to move them.';
     return { k, label: st.short || label, title };
   }
@@ -68,26 +70,106 @@
   }
   /* Which Supabase project this build talks to (public values only: host + the last 4 characters of the publishable key) — lets you check a dev build is pointed at the right project. */
   const projectLine = () => { let host = ''; try { host = new URL(cfg.url).host; } catch (e) { host = String(cfg.url || '(none)'); } const k = String(cfg.publishableKey || ''); return h('div', { className: 'hint', 'data-cloud-project': host, text: 'Cloud project: ' + host + ' · publishable key …' + k.slice(-4) }); };
-  function accountDialog() {
-    const st = eng.status(), body = h('div', { className: 'cwbox' });
-    if (!st.signedIn) {
+  /* ---------- Cloud workspace dialog (v0.10.2 UI fix) ----------
+     One dialog: account + status, Sync now with a visible result, and the My Shows / Deleted shows list right in it (My Shows by default).
+     Nothing here opens another dialog on its own: every list change happens in place, and results that arrive after the dialog was closed or
+     the tab was switched are ignored (token check), so stale content can never replace what is on screen. */
+  (() => { const st = document.createElement('style'); st.textContent = '.cwtabs{display:flex;gap:6px;flex-wrap:wrap}.cwtabs button{background:#1c2535;border:1px solid #42516a;color:#cbd6e6}.cwtabs button[aria-selected=true]{background:#2f9bff;border-color:#2f9bff;color:#fff}.cwspin{display:inline-block;width:12px;height:12px;border:2px solid #7fb2e6;border-top-color:transparent;border-radius:50%;animation:cwspin .8s linear infinite;vertical-align:-2px;margin-right:6px}@keyframes cwspin{to{transform:rotate(360deg)}}.cwres{padding:8px 10px;border-radius:6px;border:1px solid #42516a;line-height:1.4}.cwres[data-kind=ok],.cwres[data-kind=same]{border-color:#3ecf8e}.cwres[data-kind=incomplete]{border-color:#f5b942}.cwres[data-kind=error],.cwres[data-kind=conflict]{border-color:#ff6b6b}.cwres[data-kind=busy]{border-color:#2f9bff}.cwres b{display:block}'; document.head.append(st); })();
+  const localSaveOk = () => { const el = document.getElementById('saveState'); return !(el && el.dataset.state === 'failed'); };   // the editor's own "Saved hh:mm" / "⚠ Not saved" label
+  const timeOf = d => { try { return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }); } catch (e) { return String(d); } };
+  const MEDIA_WHY = { too_large: 'larger than the 8 MB limit', mime_not_allowed: 'not a PNG, JPEG or WebP image', upload_failed: 'the upload did not finish', unavailable: 'the image is not available on this computer', storage_full: 'the cloud storage is full', offline: 'there is no connection' };
+  let syncBusy = false, lastSync = null, view = null;       // lastSync keeps the newest Sync-now result so reopening the dialog still shows it
+  /* Turn the engine's answer into what the person should read. Never claims more than is true: "complete" only when the document AND every supported image are in the cloud. */
+  function classifySync(r, thrown) {
+    const st = eng.status(), at = new Date(), localOk = localSaveOk(), ver = st.rev ? 'cloud version ' + st.rev : '';
+    const safe = localOk ? 'Your latest changes are safely saved on this computer.' : 'Warning: this browser could not save a local copy of your latest changes – click “⚠ Not saved” (or Save) to download a file.';
+    const res = { at, rev: st.rev, localOk, lines: [] };
+    if (thrown || !r) { return Object.assign(res, { kind: 'error', title: 'Sync failed', lines: [String((thrown && thrown.message) || 'The cloud did not answer.'), safe] }); }
+    if (r.ok) {
+      const imgs = (st.issues || []).filter(i => i.reason !== 'offline');
+      if (imgs.length || st.localOnlyImages) {
+        const n = Math.max(imgs.length, st.localOnlyImages || 0);
+        res.kind = 'incomplete'; res.title = 'Sync incomplete';
+        res.lines.push('The show itself is saved in the cloud (' + (ver || 'latest version') + '), but ' + n + ' image' + (n > 1 ? 's' : '') + ' could not be uploaded, so another computer would see ' + (n > 1 ? 'them' : 'it') + ' missing:');
+        imgs.slice(0, 6).forEach(i => res.lines.push('• ' + i.id + ' – ' + (MEDIA_WHY[i.reason] || i.reason) + (i.detail && i.reason === 'upload_failed' ? ' (' + String(i.detail).slice(0, 120) + ')' : '')));
+        res.lines.push('The images stay on this computer. Try Sync now again, or use Save to keep everything in a .wxshow file.');
+      } else if (r.status === 'unchanged' || r.status === 'idle') {
+        res.kind = 'same'; res.title = 'Already up to date.'; res.lines.push('Nothing has changed since ' + (ver || 'the last cloud save') + (st.lastSyncedAt ? ' (saved ' + when(st.lastSyncedAt) + ')' : '') + '. Checked at ' + timeOf(at) + '.');
+      } else { res.kind = 'ok'; res.title = 'Cloud sync complete!'; res.lines.push('Completed at ' + timeOf(at) + (ver ? ' · ' + ver : '') + '.'); }
+      if (st.dirty && res.kind !== 'incomplete') res.lines.push('More changes were made while syncing; they will be sent automatically.');
+      if ((st.mediaNotes || []).some(x => /video|GIF|audio/i.test(x))) res.lines.push('Videos, GIFs and audio stay on this computer in v0.10.2.');
+      if (!localOk) res.lines.push(safe + ' (The cloud copy is up to date.)');
+      return res;
+    }
+    const sv = r.status;
+    if (sv === 'conflict') return Object.assign(res, { kind: 'conflict', title: 'Sync paused – this show changed on another computer', lines: ['Nothing was overwritten. Choose which version to keep.', safe], resolve: true });
+    if (sv === 'offline') return Object.assign(res, { kind: 'error', title: 'Not synced – no connection to the cloud', lines: ['It will retry automatically when the connection is back.', safe] });
+    if (sv === 'auth') return Object.assign(res, { kind: 'error', title: 'Not synced – please sign in again', lines: ['Your session has ended. Your work is not lost.', safe] });
+    if (sv === 'show_deleted') return Object.assign(res, { kind: 'error', title: 'Not synced – this cloud show was deleted elsewhere', lines: [safe] });
+    if (sv === 'paused') return Object.assign(res, { kind: 'error', title: 'Cloud sync is paused', lines: ['Finish the sign-in choice first (cloud chip), then try again.', safe] });
+    return Object.assign(res, { kind: 'error', title: 'Sync failed', lines: [String(r.message || st.error || r.code || sv || 'Unknown problem'), safe] });
+  }
+  async function runSync(reason) {
+    if (syncBusy) return; syncBusy = true; lastSync = null; if (view) view.render();
+    let r = null, thrown = null;
+    try { r = await eng.syncNow(reason === 'manual' ? { force: true, reason: 'manual', retryMedia: true } : { verify: true, retryMedia: true }); } catch (e) { thrown = e; }
+    syncBusy = false; lastSync = classifySync(r, thrown); if (reason === 'manual' && lastSync.kind === 'ok') lastSync.title = 'Version saved'; paintChip();
+    if (view && view.alive()) view.render(); else toast(lastSync.title);
+  }
+  function accountDialog(o) {
+    const st0 = eng.status(), body = h('div', { className: 'cwbox', 'data-cloud-dialog': 'workspace' });
+    if (!st0.signedIn) {
       const ns = B.ns();
       body.append(signInForm(ns ? 'Your work stays saved on this computer. Sign in to continue syncing it to your cloud workspace.' : 'Your show is saved in this browser. Sign in to keep your shows and settings in the cloud and open them from any computer. Signing in never replaces work you already have here without asking.'));
       body.append(projectLine()); open('account', 'Cloud workspace', body, [btn('Close', closeModal)]); return;
     }
-    const c = chipState();
-    body.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow' }, h('div', { style: 'font-weight:700', text: userEmail() }), h('div', { className: 'hint', text: c.label })), h('i', { className: 'cd', style: 'width:12px;height:12px;border-radius:50%;background:' + ({ cloud: '#3ecf8e', incomplete: '#f5b942', syncing: '#2f9bff', failed: '#ff6b6b', conflict: '#ff6b6b' }[c.k] || '#7f93ad') })));
-    if (st.error) body.append(err(st.error));
-    if (st.mediaNotes.length) body.append(h('div', { className: 'hint', text: 'The cloud copy of this show is saved, but ' + st.mediaNotes.join(', ') + ' ' + (st.mediaNotes.length > 1 ? 'are' : 'is') + ' not in the cloud. Save a .wxshow file to move everything to another computer.' }));
-    if (st.remoteNewer) body.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow', text: 'A newer version was saved by ' + (st.remoteNewer.device_name || 'another computer') + ' at ' + when(st.remoteNewer.updated_at) + '. Your version has not been changed.' }), btn('Load it', async () => { closeModal(); const r = await eng.loadRemoteNewer(); if (r && r.ok) reportOpen(r, 'Loaded the newer version'); }, 'pri')));
-    if (st.conflict) body.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow', text: 'This show has a sync conflict that needs a choice.' }), btn('Resolve…', () => conflictDialog(st.conflict), 'pri')));
-    const row = h('div', { className: 'btnrow' }, btn('My Shows…', myShows, 'pri'), btn('Version history…', versions), btn('Sync now', async () => { toast('Syncing…'); const r = await eng.syncNow({ force: true }); toast(r && r.ok ? 'Saved to the cloud' : 'Could not sync yet – your show is safe on this computer'); }), btn('Save a version now', saveVersion));
-    body.append(row);
+    let tab = o && o.tab === 'deleted' ? 'deleted' : 'shows', token = 0;
+    const top = h('div', { style: 'display:grid;gap:8px' }), actions = h('div', { className: 'btnrow' }), res = h('div', { role: 'status', 'aria-live': 'polite', 'data-cloud-sync-result': '' });
+    const tabs = h('div', { className: 'cwtabs', role: 'tablist' }), list = h('div', { className: 'cwlist', 'data-cloud-list': '' });
+    const mkTab = (id, label) => h('button', { role: 'tab', text: label, 'data-tab': id, on: { click: () => { if (tab !== id) { tab = id; paintTabs(); loadList(); } } } });
+    const tShows = mkTab('shows', 'My Shows'), tDel = mkTab('deleted', 'Deleted shows'); tabs.append(tShows, tDel);
+    const paintTabs = () => { [tShows, tDel].forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab))); };
+    const bSync = btn('Sync now', () => runSync('sync')), bVer = btn('Save a version now', () => runSync('manual')), bHist = btn('Version history…', versions);
+    bSync.setAttribute('data-cloud-sync', ''); actions.append(bSync, bVer, bHist);
+    const renderTop = () => {
+      const st = eng.status(), c = chipState(); top.replaceChildren();
+      top.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow' }, h('div', { style: 'font-weight:700', text: userEmail() }), h('div', { className: 'hint', 'data-cloud-status': '', text: c.label }), h('div', { className: 'hint', 'data-cloud-version': st.rev || 0, text: (st.rev ? 'Latest cloud version: ' + st.rev + (st.lastSyncedAt ? ' · saved ' + when(st.lastSyncedAt) : '') : 'Not saved to the cloud yet') + (st.dirty || st.pending ? ' · changes waiting to sync' : '') })), h('i', { className: 'cd', style: 'width:12px;height:12px;border-radius:50%;background:' + ({ cloud: '#3ecf8e', incomplete: '#f5b942', syncing: '#2f9bff', failed: '#ff6b6b', conflict: '#ff6b6b' }[c.k] || '#7f93ad') })));
+      if (st.error) top.append(err(st.error));
+      if (st.mediaNotes.length) top.append(h('div', { className: 'hint', text: 'The cloud copy of this show is saved, but ' + st.mediaNotes.join(', ') + ' ' + (st.mediaNotes.length > 1 ? 'are' : 'is') + ' not in the cloud. Save a .wxshow file to move everything to another computer.' }));
+      if (st.remoteNewer) top.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow', text: 'A newer version was saved by ' + (st.remoteNewer.device_name || 'another computer') + ' at ' + when(st.remoteNewer.updated_at) + '. Your version has not been changed.' }), btn('Load it', async () => { closeModal(); const r = await eng.loadRemoteNewer(); if (r && r.ok) reportOpen(r, 'Loaded the newer version'); }, 'pri')));
+      if (st.conflict) top.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow', text: 'This show has a sync conflict that needs a choice.' }), btn('Resolve…', () => conflictDialog(st.conflict), 'pri')));
+    };
+    const renderRes = () => {
+      res.replaceChildren(); bSync.disabled = bVer.disabled = syncBusy; bSync.textContent = syncBusy ? 'Syncing…' : 'Sync now';
+      if (syncBusy) { res.append(h('div', { className: 'cwres', 'data-kind': 'busy' }, h('b', {}, h('span', { className: 'cwspin' }), 'Syncing…'), h('span', { className: 'hint', text: 'Sending your show to the cloud. This can take a few seconds when images are uploaded.' }))); res.dataset.kind = 'busy'; return; }
+      if (!lastSync) { res.dataset.kind = ''; return; }
+      const L = lastSync; res.dataset.kind = L.kind;
+      res.append(h('div', { className: 'cwres', 'data-kind': L.kind }, h('b', { text: L.title }), ...L.lines.map(t => h('div', { className: 'hint', text: t })), L.resolve ? btn('Resolve…', () => conflictDialog(), 'pri') : null));
+    };
+    const rowFor = r => {
+      const cur = eng.record() && eng.record().showId;
+      return h('div', { className: 'cwrow', 'data-show-id': r.id }, h('div', { className: 'grow' }, h('div', { style: 'font-weight:600', text: r.name + (r.id === cur ? '  · open now' : '') }), h('div', { className: 'hint', text: when(r.updated_at) + ' · ' + r.scene_count + ' scene' + (r.scene_count === 1 ? '' : 's') + (r.device_name ? ' · from ' + r.device_name : '') })),
+        tab === 'deleted' ? btn('Restore', async () => { const x = await eng.undeleteShow(r.id); toast(x && x.ok ? 'Restored “' + r.name + '”' : 'Could not restore'); loadList(); }, 'pri')
+          : [r.id === cur ? null : btn('Open', () => openCloudShow(r), 'pri'), btn('Delete', async () => { if (!confirm('Delete “' + r.name + '” from your cloud workspace? You can restore it from Deleted shows.')) return; const x = await eng.deleteShow(r.id); toast(x && x.ok ? 'Deleted – restore it from Deleted shows' : 'Could not delete'); loadList(); }, 'dng')]);
+    };
+    async function loadList() {
+      const my = ++token, wantDeleted = tab === 'deleted'; list.dataset.state = 'loading'; list.dataset.tab = tab; list.replaceChildren(h('div', { className: 'hint', text: wantDeleted ? 'Loading deleted shows…' : 'Loading your shows…' }));
+      let rows; try { rows = await eng.listShows(wantDeleted); } catch (e) { if (my !== token) return; list.dataset.state = 'error'; list.replaceChildren(err('Could not load ' + (wantDeleted ? 'deleted shows' : 'your shows') + ': ' + (e && e.message || e)), btn('Try again', loadList)); return; }
+      if (my !== token) return;                                   // another tab was chosen, or the dialog was closed, while this was loading
+      list.replaceChildren();
+      if (!rows.length) { list.dataset.state = 'empty'; list.append(h('div', { className: 'hint', text: wantDeleted ? 'No deleted shows.' : 'No shows in the cloud yet. Your current show will appear here after it syncs.' })); return; }
+      list.dataset.state = 'ready'; rows.forEach(r => list.append(rowFor(r)));
+    }
+    body.append(top, actions, res, tabs, list);
     const nm = h('input', { type: 'text', value: eng.deviceName, maxLength: 60, style: 'flex:1;min-width:0' });
     body.append(h('div', { className: 'hint', text: 'This computer’s name (shown on other computers when a show was saved here):' }), h('div', { className: 'cwrow' }, nm, btn('Rename', () => { const v = nm.value.trim().slice(0, 60) || guess(); ls.set('wx.studio.deviceName.v1', v); eng.deviceName = v; toast('Computer named “' + v + '”'); })));
     const ig = (eng.record() && eng.record().settingsIgnored) || []; if (ig.length) body.append(h('div', { className: 'hint', text: 'Some settings were not synced: ' + ig.map(i => i.key + ' (' + (i.code || i.reason || 'not allowed') + ')').join(', ') }));
     body.append(h('div', { className: 'hint', text: 'Synced: your current show, the scene you were on, and a short list of settings (map defaults, export choices, snap options, your public map token). Private keys are never sent. Videos and GIFs stay on this computer in v0.10.2.' }));
     body.append(projectLine()); open('account', 'Cloud workspace', body, [btn('Sign out…', signOutDialog, 'dng'), btn('Close', closeModal)]);
+    const alive = () => document.body.contains(body) && dialogKind === 'account';
+    const off = eng.on(type => { if (!alive()) { off(); if (view && view.body === body) view = null; return; } if (type === 'status') { renderTop(); renderRes(); } });
+    view = { body, alive, render: () => { renderTop(); renderRes(); } };
+    paintTabs(); renderTop(); renderRes(); loadList();
   }
   function reportOpen(r, title) {
     const lines = []; if (r.missing && r.missing.length) lines.push(r.missing.length + ' image(s) in this show are not available on this computer (' + r.missing.slice(0, 4).map(m => m.id + ': ' + ({ too_large: 'too large to upload', mime_not_allowed: 'unsupported type', upload_failed: 'upload failed', unavailable: 'unavailable', hash_mismatch: 'download damaged', download_failed: 'could not download', builtin_missing: 'bundled artwork missing from this version of WX Studio', builtin_changed: 'bundled artwork differs in this version of WX Studio' }[m.reason] || m.reason)).join('; ') + '). Their place is kept so nothing is lost.');
@@ -96,16 +178,7 @@
   }
 
   /* ---------- My Shows ---------- */
-  async function myShows(trash) {
-    const body = h('div', { className: 'cwbox' }), list = h('div', { className: 'cwlist' }); body.append(list, h('div', { className: 'hint', text: 'Loading…' }));
-    open('shows', trash ? 'Deleted shows' : 'My Shows', body, [btn(trash ? 'Back to My Shows' : 'Deleted shows', () => myShows(!trash)), btn('Close', closeModal)]);
-    let rows; try { rows = await eng.listShows(!!trash); } catch (e) { body.lastChild.replaceWith(err('Could not load your shows: ' + (e && e.message || e))); return; }
-    body.lastChild.remove(); const cur = eng.record() && eng.record().showId;
-    if (!rows.length) list.append(h('div', { className: 'hint', text: trash ? 'No deleted shows.' : 'No shows in the cloud yet. Your current show will appear here after it syncs.' }));
-    rows.forEach(r => list.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow' }, h('div', { style: 'font-weight:600', text: r.name + (r.id === cur ? '  · open now' : '') }), h('div', { className: 'hint', text: when(r.updated_at) + ' · ' + r.scene_count + ' scene' + (r.scene_count === 1 ? '' : 's') + (r.device_name ? ' · from ' + r.device_name : '') })),
-      trash ? btn('Restore', async () => { const x = await eng.undeleteShow(r.id); toast(x && x.ok ? 'Restored “' + r.name + '”' : 'Could not restore'); myShows(true); }, 'pri')
-        : [r.id === cur ? null : btn('Open', () => openCloudShow(r), 'pri'), btn('Delete', async () => { if (!confirm('Delete “' + r.name + '” from your cloud workspace? You can restore it from Deleted shows.')) return; const x = await eng.deleteShow(r.id); toast(x && x.ok ? 'Deleted – restore it from Deleted shows' : 'Could not delete'); myShows(false); }, 'dng')])));
-  }
+  function myShows(trash) { accountDialog({ tab: trash === true ? 'deleted' : 'shows' }); }   // a click event (or anything else) is NOT 'deleted': only an explicit true opens Deleted shows
   async function openCloudShow(r) {
     if (B.hasRealLocalWork() && !confirm('Open “' + r.name + '”? The show that is open now is saved first and kept as a recent safety copy.')) return;
     closeModal(); toast('Opening “' + r.name + '”…');
@@ -123,10 +196,7 @@
     rows.forEach(v => list.append(h('div', { className: 'cwrow' }, h('div', { className: 'grow' }, h('div', { style: 'font-weight:600', text: (v.protected ? '🔒 ' : '') + (REASON[v.reason] || v.reason) + ' · version ' + v.rev }), h('div', { className: 'hint', text: when(v.created_at) + ' · ' + v.name + ' · ' + v.scene_count + ' scenes' + (v.device_name ? ' · ' + v.device_name : '') })),
       btn('Restore', async () => { if (!confirm('Restore version ' + v.rev + '? It becomes the newest version; what is open now stays in history.')) return; closeModal(); try { await B.recentSnap('safety', 'Before restoring cloud version ' + v.rev); const r = await eng.restoreVersion(v); toast(r && r.ok ? 'Restored version ' + v.rev : 'Restored locally; the cloud will update when it can reconnect'); } catch (e) { notice('Could not restore that version', [String(e && e.message || e), 'Nothing was changed.']); } }, 'pri'))));
   }
-  async function saveVersion() {
-    const rec = eng.record(); if (!rec) return; toast('Saving a version…'); rec.dirty = true; const r = await eng.syncNow({ force: true, reason: 'manual' });
-    toast(r && r.ok ? (r.status === 'unchanged' ? 'Already saved – nothing has changed since the last version' : 'Version saved') : 'Could not reach the cloud – your show is safe on this computer');
-  }
+  const saveVersion = () => runSync('manual');
 
   /* ---------- conflict ---------- */
   function conflictDialog(c) {

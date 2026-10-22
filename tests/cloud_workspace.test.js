@@ -254,3 +254,26 @@ test('v0.10.2 storage fix: an edit whose change notification never arrived is st
   const n = rpcCalls(fake, 'wx_studio_save_show').length; await c.eng.tick(); await c.eng.syncNow();
   assert.equal(rpcCalls(fake, 'wx_studio_save_show').length, n);
 });
+
+test('v0.10.2 fix: starting a new show never overwrites the previous cloud show with the new content', async () => {
+  const fake = createFakeSupabase(), c = await client(fake, 'u1', { realWork: true });
+  c.state.show.name = 'ZZ LIVE TEST 1'; c.eng.markDirty(); await c.eng.syncNow();
+  const first = fake.db.shows[0]; assert.equal(first.rev, 1); assert.equal(first.name, 'ZZ LIVE TEST 1');
+  // the host replaces the show (File > New): the editor now holds the NEW show and tells the engine about the change, then about the replacement
+  c.state.show = mkShow({ name: 'My Weather Show' }); c.eng.markDirty();
+  await c.eng.newIdentity('import');
+  assert.equal(fake.db.shows.length, 1, 'no second show yet'); assert.equal(fake.db.shows[0].rev, 1, 'previous cloud show untouched');
+  assert.equal(fake.db.shows[0].name, 'ZZ LIVE TEST 1');
+  await c.eng.syncNow();
+  assert.equal(fake.db.shows.length, 2); const names = fake.db.shows.map(r => r.name).sort(); assert.deepEqual(names, ['My Weather Show', 'ZZ LIVE TEST 1']);
+  assert.equal(fake.db.shows.find(r => r.name === 'ZZ LIVE TEST 1').rev, 1);
+});
+
+test('v0.10.2 Sync now (verify): compares the real content – "unchanged" sends nothing, a silently changed show is saved', async () => {
+  const fake = createFakeSupabase(), c = await client(fake, 'u1', {}), data = png(2500, 5);
+  c.eng.markDirty(); await c.eng.syncNow(); const n0 = rpcCalls(fake, 'wx_studio_save_show').length;
+  const same = await c.eng.syncNow({ verify: true }); assert.equal(same.ok, true); assert.equal(same.status, 'unchanged'); assert.equal(rpcCalls(fake, 'wx_studio_save_show').length, n0, 'nothing is sent when nothing changed');
+  c.state.show.assets.imgSilent = data; c.state.show.scenes[0].bg = { type: 'image', asset: 'imgSilent' };   // no markDirty, no change counter: only the content proves it
+  const r = await c.eng.syncNow({ verify: true }); assert.equal(r.ok, true); assert.notEqual(r.status, 'unchanged'); assert.equal(fake.db.shows[0].doc.scenes[0].bg.asset, 'imgSilent'); assert.equal(fake.objects.size, 1);
+  assert.equal(c.eng.status().label, 'Saved to cloud');
+});
