@@ -13,7 +13,7 @@
   /* IndexedDB when available, memory otherwise (private windows): sync still works for the session, it just can't survive a reload. */
   const kv = (() => { let mem = CWm.memoryKV(), idb = null, bad = false; try { idb = CWm.idbKV('wxstudio-cloud'); } catch (e) { bad = true; } const wrap = fn => async (...a) => { if (idb && !bad) { try { return await idb[fn](...a); } catch (e) { bad = true; } } return mem[fn](...a); }; return { get: wrap('get'), set: wrap('set'), del: wrap('del'), keys: wrap('keys') }; })();
   const getSession = async () => { try { return await P.ensureSession(); } catch (e) { return null; } };
-  const api = CWm.createApi({ url: cfg.url, key: cfg.publishableKey, getSession });
+  const api = CWm.createApi({ url: cfg.url, key: cfg.publishableKey, getSession, timeoutMs: typeof g.WX_CLOUD_TIMEOUT_MS === 'number' ? g.WX_CLOUD_TIMEOUT_MS : undefined });   // timeoutMs override is for tests only
   const WX = g.WX, S = WX.S, WF = g.WXShowFile;
 
   const host = {
@@ -78,7 +78,7 @@
   const localSaveOk = () => { const el = document.getElementById('saveState'); return !(el && el.dataset.state === 'failed'); };   // the editor's own "Saved hh:mm" / "⚠ Not saved" label
   const timeOf = d => { try { return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }); } catch (e) { return String(d); } };
   const MEDIA_WHY = { too_large: 'larger than the 8 MB limit', mime_not_allowed: 'not a PNG, JPEG or WebP image', upload_failed: 'the upload did not finish', unavailable: 'the image is not available on this computer', storage_full: 'the cloud storage is full', offline: 'there is no connection' };
-  let syncBusy = false, lastSync = null, view = null;       // lastSync keeps the newest Sync-now result so reopening the dialog still shows it
+  let syncBusy = false, syncStart = 0, lastSync = null, view = null;       // lastSync keeps the newest Sync-now result so reopening the dialog still shows it
   /* Turn the engine's answer into what the person should read. Never claims more than is true: "complete" only when the document AND every supported image are in the cloud. */
   function classifySync(r, thrown) {
     const st = eng.status(), at = new Date(), localOk = localSaveOk(), ver = st.rev ? 'cloud version ' + st.rev : '';
@@ -103,6 +103,7 @@
     }
     const sv = r.status;
     if (sv === 'conflict') return Object.assign(res, { kind: 'conflict', title: 'Sync paused – this show changed on another computer', lines: ['Nothing was overwritten. Choose which version to keep.', safe], resolve: true });
+    if (sv === 'offline' && r.timedOut) return Object.assign(res, { kind: 'error', title: 'Not synced – the cloud did not answer', lines: ['The request was stopped after waiting too long (the connection may have gone quiet). Nothing was lost and nothing was overwritten; it will retry automatically, or click Sync now again.', safe] });
     if (sv === 'offline') return Object.assign(res, { kind: 'error', title: 'Not synced – no connection to the cloud', lines: ['It will retry automatically when the connection is back.', safe] });
     if (sv === 'auth') return Object.assign(res, { kind: 'error', title: 'Not synced – please sign in again', lines: ['Your session has ended. Your work is not lost.', safe] });
     if (sv === 'show_deleted') return Object.assign(res, { kind: 'error', title: 'Not synced – this cloud show was deleted elsewhere', lines: [safe] });
@@ -110,10 +111,11 @@
     return Object.assign(res, { kind: 'error', title: 'Sync failed', lines: [String(r.message || st.error || r.code || sv || 'Unknown problem'), safe] });
   }
   async function runSync(reason) {
-    if (syncBusy) return; syncBusy = true; lastSync = null; if (view) view.render();
+    if (syncBusy) return; syncBusy = true; syncStart = Date.now(); lastSync = null; if (view) view.render();
+    const slowT = setTimeout(() => { if (syncBusy && view && view.alive()) view.render(); }, 15200);
     let r = null, thrown = null;
     try { r = await eng.syncNow(reason === 'manual' ? { force: true, reason: 'manual', retryMedia: true } : { verify: true, retryMedia: true }); } catch (e) { thrown = e; }
-    syncBusy = false; lastSync = classifySync(r, thrown); if (reason === 'manual' && lastSync.kind === 'ok') lastSync.title = 'Version saved'; paintChip();
+    clearTimeout(slowT); syncBusy = false; lastSync = classifySync(r, thrown); if (reason === 'manual' && lastSync.kind === 'ok') lastSync.title = 'Version saved'; paintChip();
     if (view && view.alive()) view.render(); else toast(lastSync.title);
   }
   function accountDialog(o) {
@@ -141,7 +143,7 @@
     };
     const renderRes = () => {
       res.replaceChildren(); bSync.disabled = bVer.disabled = syncBusy; bSync.textContent = syncBusy ? 'Syncing…' : 'Sync now';
-      if (syncBusy) { res.append(h('div', { className: 'cwres', 'data-kind': 'busy' }, h('b', {}, h('span', { className: 'cwspin' }), 'Syncing…'), h('span', { className: 'hint', text: 'Sending your show to the cloud. This can take a few seconds when images are uploaded.' }))); res.dataset.kind = 'busy'; return; }
+      if (syncBusy) { res.append(h('div', { className: 'cwres', 'data-kind': 'busy' }, h('b', {}, h('span', { className: 'cwspin' }), 'Syncing…'), h('span', { className: 'hint', text: 'Sending your show to the cloud. This can take a few seconds when images are uploaded.' }), Date.now() - syncStart >= 15000 ? h('span', { className: 'hint', 'data-cloud-slow': '', text: 'Still working – this is taking longer than usual. Your changes are safe on this computer. If the cloud does not answer, the attempt stops by itself after at most half a minute per request and is retried; you do not need to reload.' }) : null)); res.dataset.kind = 'busy'; return; }
       if (!lastSync) { res.dataset.kind = ''; return; }
       const L = lastSync; res.dataset.kind = L.kind;
       res.append(h('div', { className: 'cwres', 'data-kind': L.kind }, h('b', { text: L.title }), ...L.lines.map(t => h('div', { className: 'hint', text: t })), L.resolve ? btn('Resolve…', () => conflictDialog(), 'pri') : null));

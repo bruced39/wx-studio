@@ -49,15 +49,34 @@
   /* ---------- Supabase REST client (public key + the user's session) ---------- */
   CW.createApi = function (o) {
     const url = String(o.url || '').replace(/\/+$/, ''), key = String(o.key || ''), doFetch = o.fetch || ((u, i) => g.fetch(u, i));
+    /* v0.10.2: EVERY request is bounded. Without this a connection that goes quiet (typical right after a laptop/Wi-Fi/offline->online switch) leaves
+       the request pending forever; because syncs run one after another, "Sync now" then queued behind it and the spinner never ended.
+       A timeout is reported as 'offline' (+ timedOut) – the pending save is KEPT, so the retry re-sends the same operation id (the server replays it
+       if it had actually executed, and still answers 'conflict' for a stale base). Nothing local is touched. */
+    const setT = o.setTimeout || ((f, ms) => g.setTimeout(f, ms)), clearT = o.clearTimeout || (t => g.clearTimeout(t));
+    const limitFor = (init, binary) => {
+      if (typeof o.timeoutMs === 'number') return o.timeoutMs;
+      const n = init && init.body && (init.body.length || init.body.byteLength) || 0;
+      return binary ? 180000 : n > 65536 ? Math.min(600000, 45000 + Math.ceil(n / 20000) * 1000) : 30000;
+    };
     async function req(path, init, binary) {
-      const s = await o.getSession(); if (!s || !s.access_token) throw new CwError('auth', 'Sign in to use the cloud workspace.');
-      let r;
-      try { r = await doFetch(url + path, Object.assign({}, init, { headers: Object.assign({ apikey: key, Authorization: 'Bearer ' + s.access_token }, (init && init.headers) || {}) })); }
-      catch (e) { throw new CwError('offline', 'The cloud could not be reached.', { cause: e }); }
-      const text = binary && r.ok ? null : await r.text().catch(() => '');
-      if (!r.ok) { let body = null; try { body = JSON.parse(text); } catch (e) { /* not json */ } throw new CwError(r.status === 401 || r.status === 403 && !(body && /row-level/i.test(body.message || '')) ? 'auth' : 'http', (body && (body.message || body.error || body.msg)) || ('HTTP ' + r.status), { status: r.status, body, text }); }
-      if (binary) return new Uint8Array(await r.arrayBuffer());
-      return text ? JSON.parse(text) : null;
+      const ms = limitFor(init, binary), ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      let timer = null, timedOut = false;
+      const limit = new Promise((_, rej) => { timer = setT(() => { timedOut = true; try { ctl && ctl.abort(); } catch (e) { /* ignore */ } rej(new CwError('offline', 'The cloud did not answer within ' + Math.round(ms / 1000) + ' seconds, so the request was stopped. Your changes are safe on this computer; syncing will retry.', { timedOut: true })); }, ms); });
+      const run = (async () => {
+        const s = await o.getSession(); if (!s || !s.access_token) throw new CwError('auth', 'Sign in to use the cloud workspace.');
+        let r;
+        try { r = await doFetch(url + path, Object.assign({}, init, ctl ? { signal: ctl.signal } : {}, { headers: Object.assign({ apikey: key, Authorization: 'Bearer ' + s.access_token }, (init && init.headers) || {}) })); }
+        catch (e) { throw new CwError('offline', 'The cloud could not be reached.', { cause: e }); }
+        const text = binary && r.ok ? null : await r.text().catch(() => '');
+        if (!r.ok) { let body = null; try { body = JSON.parse(text); } catch (e) { /* not json */ } throw new CwError(r.status === 401 || r.status === 403 && !(body && /row-level/i.test(body.message || '')) ? 'auth' : 'http', (body && (body.message || body.error || body.msg)) || ('HTTP ' + r.status), { status: r.status, body, text }); }
+        if (binary) return new Uint8Array(await r.arrayBuffer());
+        return text ? JSON.parse(text) : null;
+      })();
+      run.catch(() => { /* a request that loses the race must not become an unhandled rejection */ });
+      try { return await Promise.race([run, limit]); }
+      catch (e) { if (timedOut && e && !e.timedOut) throw new CwError('offline', 'The cloud did not answer in time. Your changes are safe on this computer; syncing will retry.', { timedOut: true, cause: e }); throw e; }
+      finally { if (timer !== null) clearT(timer); }
     }
     return {
       rpc: (name, args) => req('/rest/v1/rpc/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) }),
@@ -285,7 +304,7 @@
       await save(); setState('conflict'); emit('conflict', rec.conflict); return { ok: false, status: 'conflict' };
     }
     async function handleError(e) {
-      if (e && e.code === 'offline') { setState('offline', e.message); retryLater(); return { ok: false, status: 'offline' }; }
+      if (e && e.code === 'offline') { setState('offline', e.message); retryLater(); return e.timedOut ? { ok: false, status: 'offline', timedOut: true, message: e.message } : { ok: false, status: 'offline' }; }
       if (e && e.code === 'auth') { setState('failed', 'Sign in again to continue syncing. Your show is safe on this computer.'); return { ok: false, status: 'auth' }; }
       setState('failed', (e && e.message) || String(e)); retryLater(); return { ok: false, status: 'error', message: e && e.message };
     }

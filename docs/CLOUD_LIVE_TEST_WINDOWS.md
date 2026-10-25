@@ -180,3 +180,31 @@ The commit id from `git log --oneline -1`, the ✅/❌ list, and for each ❌ a 
 - [ChatGPT] The live Supabase migration history does not yet list `20261021114902_explicit_wx_studio_weather_palette_api_grants.sql` (it is already in this branch; the palettes table currently has authenticated access). Apply/record it in the live project before the final release.
 - [Claude, after your authorization] VERSION 0.10.2, one coordinated AI_HANDOFF entry, one normal merge of the tested release branch into `main` after refreshing `main`.
 - Not included in v0.10.2: cloud video/GIF (v0.10.3).
+
+## I. Targeted retest of the stuck-sync fix (about 10 minutes, branch `claude/v0.10.2-sync-timeout`)
+
+Why: in the live test, *Sync now* in Firefox spun for over a minute after reconnecting. The cause was a cloud request that never got an answer and had no time limit; every request now stops after at most 30 s (larger image uploads get more time), keeps your pending save, and retries safely. Automated tests reproduce the hang and pass; this retest confirms it in real browsers.
+
+Update the test copy (stop the app first, back up with File ▸ Save as before):
+
+```powershell
+cd $HOME\Documents\wx-studio-livetest
+git status
+git fetch origin
+git checkout claude/v0.10.2-sync-timeout
+git pull --ff-only origin claude/v0.10.2-sync-timeout
+git log --oneline -1                         # must match the commit id in Claude's report
+.\.venv\Scripts\Activate.ps1
+streamlit run app.py --server.port 8502
+```
+Ctrl+F5 in both profiles, then with a disposable show (for example `ZZ LIVE TEST 1`), profiles **A** (Firefox) and **B** (Chrome) both showing it as *Saved to cloud*:
+
+| # | Do this | Expected |
+|---|---|---|
+| I1 | A: DevTools ▸ Network ▸ **Offline**. Edit text. | Chip *Offline – saved locally* / *Saved locally*; text stays. |
+| I2 | B: edit the same show; wait for *Saved to cloud*. | – |
+| I3 | A: set throttling back to **No throttling**. Wait ~10 s, then open the chip ▸ **Sync now**. | Either the **conflict dialog** appears right away (Keep both / Use cloud version / Keep mine…) **or**, if the connection is slow to recover, the dialog shows *Syncing…*, after about 15 s *“Still working – this is taking longer than usual…”*, and within about half a minute per attempt **Not synced – the cloud did not answer** (changes safe on this computer). **It must never spin for more than about a minute, and a reload must not be needed.** |
+| I4 | If I3 ended with *did not answer*, click **Sync now** again. | The conflict dialog (or *Cloud sync complete!*). Nothing lost. |
+| I5 | In the conflict dialog choose **Keep mine…**. | B’s version is kept in Version history; A’s text is in the cloud; chip *Saved to cloud*. |
+
+Send back ✅/❌ for I1–I5 and a screenshot of any message that appears. A ❌ on I3 (spinner longer than about a minute) is a release blocker.

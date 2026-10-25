@@ -23,7 +23,7 @@ async function client(fake, uid, o) {
     readSettings: () => Object.assign({}, state.settings), writeSettings: p => { for (const k of Object.keys(p)) { if (p[k] === null) delete state.settings[k]; else state.settings[k] = p[k]; } state.written.push(p); }
   };
   const session = { access_token: fake.token(uid), user: { id: uid } };
-  const api = CW.createApi({ url: fake.url, key: fake.key, fetch: fake.fetch, getSession: async () => (o.signedOut ? null : session) });
+  const api = CW.createApi({ url: fake.url, key: fake.key, fetch: o.fetch || fake.fetch, timeoutMs: o.timeoutMs, getSession: async () => (o.signedOut ? null : session) });
   const eng = CW.createEngine({ api, kv, host, deviceId: o.deviceId || 'dev-' + uid, deviceName: o.deviceName || 'Home PC', timers, debounceMs: 3000, backoff: [5000, 10000, 20000], auth: { session: async () => (o.signedOut ? null : session) } });
   await eng.attach(); return { eng, state, kv, timers, host };
 }
@@ -290,4 +290,49 @@ test('v0.10.2 server "unchanged": a forced save of an identical show is a succes
   b.state.show.name = 'From B'; b.eng.markDirty(); await b.eng.syncNow();
   const r2 = await a.eng.syncNow({ force: true, reason: 'manual' });
   assert.equal(r2.status, 'conflict'); assert.equal(fake.db.shows[0].doc.name, 'From B', 'cloud untouched');
+});
+
+/* ---- v0.10.2: a request that never answers must not leave "Sync now" stuck ---- */
+const never = () => new Promise(() => { });
+test('hung save request: times out as offline (timedOut), keeps the pending save, does not block the next sync, retry reuses the op id', async () => {
+  const fake = createFakeSupabase(); let hang = false, hangs = 0;
+  const f = (u, i) => { if (hang && /rpc\/wx_studio_save_show/.test(u)) { hangs++; return never(); } return fake.fetch(u, i); };
+  const c = await client(fake, 'u1', { fetch: f, timeoutMs: 120 });
+  c.eng.markDirty(); assert.equal((await c.eng.syncNow()).ok, true); const rev = fake.db.shows[0].rev;
+  c.state.show.name = 'Edited offline'; c.eng.markDirty(); hang = true;
+  const t0 = Date.now(); const r = await c.eng.syncNow({ force: true });                  // would never return before the fix
+  assert.equal(r.ok, false); assert.equal(r.status, 'offline'); assert.equal(r.timedOut, true); assert.ok(Date.now() - t0 < 3000);
+  assert.equal(c.eng.status().kind, 'offline'); assert.ok(c.eng.record().pending, 'pending save kept'); assert.equal(c.state.show.name, 'Edited offline', 'local show untouched');
+  const op = c.eng.record().pending.opId;
+  const r2 = await c.eng.syncNow({ force: true }); assert.equal(r2.timedOut, true, 'the next click is not queued behind the hung one'); assert.equal(hangs, 2);
+  hang = false; const r3 = await c.eng.syncNow({ force: true }); assert.equal(r3.ok, true);
+  assert.equal(rpcCalls(fake, 'wx_studio_save_show').pop().body.p_op_id, op, 'same operation id on retry'); assert.equal(fake.db.shows[0].rev, rev + 1); assert.equal(fake.db.shows[0].name, 'Edited offline'); assert.equal(c.eng.status().label, 'Saved to cloud');
+});
+
+test('hung request whose save DID reach the server: retry is recognised as our own save (no conflict, one revision)', async () => {
+  const fake = createFakeSupabase(); let swallow = false;
+  const f = async (u, i) => { if (swallow && /rpc\/wx_studio_save_show/.test(u)) { await fake.fetch(u, i); return never(); } return fake.fetch(u, i); };   // server executed, answer never arrives
+  const c = await client(fake, 'u1', { fetch: f, timeoutMs: 120 }); c.eng.markDirty(); await c.eng.syncNow();
+  c.state.show.name = 'Lost answer'; c.eng.markDirty(); swallow = true; const r = await c.eng.syncNow({ force: true }); assert.equal(r.timedOut, true); assert.equal(fake.db.shows[0].rev, 2, 'server did execute it');
+  swallow = false; const r2 = await c.eng.syncNow({ force: true }); assert.equal(r2.ok, true); assert.notEqual(r2.status, 'conflict'); assert.equal(fake.db.shows[0].rev, 2, 'no extra revision'); assert.equal(c.eng.status().label, 'Saved to cloud');
+});
+
+test('hung request with another computer\'s newer save: after the timeout the retry still ends in a conflict, nothing overwritten', async () => {
+  const fake = createFakeSupabase(); let hang = false;
+  const f = (u, i) => (hang && /rpc\/wx_studio_save_show/.test(u)) ? never() : fake.fetch(u, i);
+  const a = await client(fake, 'u1', { deviceId: 'A', fetch: f, timeoutMs: 120 }); a.eng.markDirty(); await a.eng.syncNow();
+  const b = await client(fake, 'u1', { deviceId: 'B', deviceName: 'Chrome' }); await b.eng.openShow(a.eng.record().showId); b.state.show.name = 'From B'; b.eng.markDirty(); await b.eng.syncNow();
+  a.state.show.name = 'From A offline'; a.eng.markDirty(); hang = true; assert.equal((await a.eng.syncNow({ force: true })).timedOut, true);
+  hang = false; const r = await a.eng.syncNow({ force: true }); assert.equal(r.status, 'conflict'); assert.equal(fake.db.shows[0].doc.name, 'From B'); assert.equal(a.state.show.name, 'From A offline');
+  assert.ok(a.eng.record().pending || a.eng.record().conflict, 'local edit retained for the conflict choice');
+});
+
+test('hung image upload and hung session lookup also time out as offline (nothing marked synced)', async () => {
+  const fake = createFakeSupabase(); let hangUp = false;
+  const f = (u, i) => (hangUp && /storage\/v1\/object\//.test(u) && i && i.method === 'POST') ? never() : fake.fetch(u, i);
+  const c = await client(fake, 'u1', { fetch: f, timeoutMs: 120, show: mkShow({ assets: { img: png(3000, 9) } }) });
+  hangUp = true; c.eng.markDirty(); const r = await c.eng.syncNow({ force: true }); assert.equal(r.status, 'offline'); assert.equal(r.timedOut, true); assert.equal(fake.db.shows.length, 0);
+  hangUp = false; assert.equal((await c.eng.syncNow({ force: true })).ok, true); assert.match(fake.db.shows[0].doc.assets.img.media, /^sha256:/);
+  const api = CW.createApi({ url: fake.url, key: fake.key, fetch: fake.fetch, timeoutMs: 100, getSession: () => never() });
+  await assert.rejects(() => api.select('wx_studio_shows', 'select=id'), e => e.code === 'offline' && e.timedOut === true);
 });
