@@ -973,7 +973,7 @@
       bind(S.show, 'safe', 'range', { min: 0, max: 160, step: 4, label: 'Safe margin (px)' }),
       h('div', { className: 'btnrow' }, h('button', { text: 'Align & distribute…', on: { click: alignDialog } }))
     ], false));
-    if (!sc.title2) sc.title2 = Object.assign(E.title2Default(), { show: false });
+    if (!sc.title2) sc.title2 = Object.assign(E.title2ForScene(sc), { show: false });
     const T2 = sc.title2; if (!T2.fx) T2.fx = E.fxDefault();
     if (T2.textOnly) p.append(mapAccordion('titleBanner2', 'Banner title (text on your banner artwork)', [
       bind(T2, 'show', 'check', { label: 'Show' }),

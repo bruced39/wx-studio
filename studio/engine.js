@@ -564,6 +564,9 @@
     c.restore();
   };
   E.title2Default = () => ({ show: true, text: '7 DAY FORECAST', pos: 'ul', width: 1150, y: 40, dx: 0, autoWidth: true, height: 154, minW: 0, logo: true, logoScale: 1.05, align: 'center', size: 0, upper: true, color: '#07345a', font: 'Roboto Condensed', weight: 700, anim: 'auto', delay: 0.2, fx: E.fxDefault() });
+  /* Banner & Logo starting layout for NEW map scenes (taken from the user's own map scene): upper right, logo at 90 %. Image/solid scenes keep title2Default(). */
+  E.MAP_BANNER_DEFAULT = Object.freeze({ pos: 'ur', logoScale: 0.9 });
+  E.title2ForScene = sc => { const d = E.title2Default(); return sc && sc.bg && (sc.bg.type === 'mapbox' || sc.bg.type === 'map') ? Object.assign(d, E.MAP_BANNER_DEFAULT) : d; };
   const tb2Imgs = {};
   function tb2Img(k) { const A = g.WX_TB2 && g.WX_TB2[k]; if (!A) return null; let e = tb2Imgs[k]; if (!e) { e = tb2Imgs[k] = { el: new Image(), ok: false }; e.el.onload = () => { e.ok = true; if (E.onAsset) E.onAsset(); }; e.el.src = A.src; } return e.ok ? e.el : null; }
   /* Banner artwork geometry (source pixels of the 1100×264 bar image). The silver ("white") panel sits at 7.7%–76% of the banner height (centre ≈ 43%) and
