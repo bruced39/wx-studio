@@ -1,6 +1,6 @@
 # v0.10.2 release checklist and Streamlit deployment
 
-Status: **prepared, not executed.** Nothing below happens until the owner explicitly authorizes the release. Production = the Streamlit Community Cloud app `wx-studio.streamlit.app`, deployed from branch `main`, main file `app.py` (see README). It redeploys automatically when `main` changes.
+Status: **release authorized 2026-10-25; production verification follows the merge.** Owner authorized the release in chat. No Supabase migration or data changes are required at deployment. Production = the Streamlit Community Cloud app `wx-studio.streamlit.app`, deployed from branch `main`, main file `app.py` (see README). It redeploys automatically when `main` changes.
 
 ## 1. Gates (all must be ✔ before the release step)
 
@@ -10,10 +10,10 @@ Status: **prepared, not executed.** Nothing below happens until the owner explic
 | 2 | Live database verified (revisions, media registered, offline edit preserved) | ChatGPT | ✔ reported |
 | 3 | Weather-palettes grants migration (`20261021114902_…`) applied **and recorded** in the live project | ChatGPT | ✔ reported |
 | 4 | Stuck-sync fix (request timeouts) on `claude/v0.10.2-sync-timeout`, automated tests green | Claude | ✔ see report |
-| 5 | Targeted browser retest of the exact "Keep mine after offline" scenario on the fix branch (section I of `CLOUD_LIVE_TEST_WINDOWS.md`, ~10 min) | user | ☐ pending |
-| 6 | ChatGPT checks the Supabase API/Postgres logs for the hung `wx_studio_save_show` call from the live test (rule out a server-side lock; the client-side cause is already fixed and tested) | ChatGPT | ☐ pending |
-| 7 | Fix branch fast-forwarded into `claude/v0.10.2-release-test` (normal push, no force) | Claude, after gate 5 | ☐ |
-| 8 | Owner says, in words, "release v0.10.2" | user | ☐ |
+| 5 | Targeted browser retest of the exact "Keep mine after offline" scenario on the fix branch (section I of `CLOUD_LIVE_TEST_WINDOWS.md`, ~10 min) | user | ✔ passed 2026-10-25 (revision 14 after Firefox Keep mine) |
+| 6 | ChatGPT checks the Supabase API/Postgres logs for the hung `wx_studio_save_show` call from the live test (rule out a server-side lock; the client-side cause is already fixed and tested) | ChatGPT | ✔ reviewed 2026-10-25 (no server-side lock evidence) |
+| 7 | Fix branch fast-forwarded into `claude/v0.10.2-release-test` (normal push, no force) | Claude, after gate 5 | ✔ fast-forward completed: 9040ebb |
+| 8 | Owner says, in words, "release v0.10.2" | user | ✔ explicitly authorized 2026-10-25 |
 
 ## 2. Release steps (Claude, after gate 8) — a normal merge, never a force-push
 

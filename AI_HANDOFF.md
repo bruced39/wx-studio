@@ -3,6 +3,14 @@
 > Shared project continuity for ChatGPT and Claude. Update this file whenever code changes.
 > Never assume this snapshot is the latest: read `main`, `VERSION`, recent commits, and relevant source files before editing.
 
+## Production release v0.10.2 — Cloud Workspace (2026-10-25; approved)
+
+- **Owner authorization:** explicit user instruction “Release v0.10.2” on 2026-10-25. Release is a normal merge from `claude/v0.10.2-release-test` into `main`; no forced updates and no database changes at deployment.
+- **Features:** Supabase-authenticated cloud accounts, My Shows and Deleted shows, revision-aware autosave/idempotent Sync now, version history and protected prior versions, offline work retention, three-way conflict resolution (Keep both / Use cloud version / Keep mine), image uploads and hydration between browsers. Browser-local MP4/video/GIF limitations remain; cloud video/GIF deferred to v0.10.3.
+- **Cloud backend:** pre-existing additive migrations and private storage deployed earlier to `lcujugmyyuumrshdasla`; weather-palettes grants migration `20261021114902_explicit_wx_studio_weather_palette_api_grants.sql` applied and recorded. No SQL is run as part of this release.
+- **Tested client baseline:** `9040ebb34bc711c0422c93aaf0026bd58b860c88` (bounded HTTP requests and recoverable retry after stalled request). Claude reported 238/238 Node tests plus browser, fake/real SQL and PG variant regression tests green. User passed comprehensive two-browser live tests and the targeted final offline/Chrome-conflict/Firefox-Keep-mine retest on that exact client code. ChatGPT independently verified Supabase `ZZ SECOND` rev 14 contains FIREFOX FINAL RETEST; protected rev 13 preserves CHROME FINAL RETEST; no duplicate revisions; API save POSTs returned HTTP 200; no PostgreSQL errors in the final window.
+- **Release hygiene:** prior production `main` at `9bfcb89217dfa1945319065b0ffb943981c22c50`, before this release; `VERSION` advances to `0.10.2`. Streamlit app builds HTML at runtime through `wxbuild.py`; no committed dist bundle needed. Review `docs/V0_10_2_RELEASE_CHECKLIST.md` for smoke test and rollback; preserve all cloud and browser data on rollback. Related NumPy 2.x test fixture issue in weather ingest is deferred as unrelated to this client release.
+
 ## Last reviewed baseline
 
 - Review date: 2026-10-18 (America/New_York; older entries below retain their original dates).
