@@ -8,7 +8,18 @@
   const url = String(cfg.url || '').replace(/\/+$/, '');
   const key = String(cfg.publishableKey || '');
   const KEY = 'wx.studio.cloudAuth.v1';
-  let session = null, initialized = false;
+  let session = null, initialized = false, lastUid = null;
+  const authListeners = [];
+  /* Additive (v0.10.2): onAuthChange(fn) -> unsubscribe. fn({event:'signed-in'|'signed-out'|'user-changed', userId, previousUserId, reason}) fires only when the
+     signed-in USER changes (token refreshes do not fire). Listener errors never affect authentication. */
+  function authChanged(reason) {
+    const uid = session?.user?.id || null;
+    if (uid === lastUid) return;
+    const prev = lastUid; lastUid = uid;
+    const event = !uid ? 'signed-out' : (prev ? 'user-changed' : 'signed-in');
+    authListeners.slice().forEach(f => { try { f({event, userId: uid, previousUserId: prev, reason: reason || ''}); } catch (e) { /* ignore */ } });
+  }
+  const onAuthChange = (fn) => { if (typeof fn !== 'function') return () => {}; authListeners.push(fn); return () => { const i = authListeners.indexOf(fn); if (i >= 0) authListeners.splice(i, 1); }; };
   const configured = () => /^https:\/\/[a-z0-9.-]+$/i.test(url) && !!key;
   const parse = (raw) => { try { return JSON.parse(raw); } catch (e) { return null; } };
   const store = (s) => {
@@ -17,7 +28,9 @@
       if (session) localStorage.setItem(KEY, JSON.stringify(session));
       else localStorage.removeItem(KEY);
     } catch (e) { /* browser storage can be disabled */ }
+    authChanged(session ? 'session' : (storeReason || 'session-ended'));
   };
+  let storeReason = '';
   const expiredSoon = () => !session || !session.access_token ||
     (session.expires_at && session.expires_at < Date.now() + 45000);
   const baseHeaders = () => ({ 'apikey': key, 'Content-Type': 'application/json' });
@@ -73,6 +86,7 @@
     if (!configured()) return null;
     session = parse((() => { try { return localStorage.getItem(KEY); } catch(e) { return null; } })());
     if (expiredSoon()) await refresh();
+    authChanged('restored');
     return session;
   }
   async function signIn(email, password) {
@@ -97,7 +111,7 @@
         });
       } catch(e) { /* always clear local auth even if network is down */ }
     }
-    store(null);
+    storeReason = 'user'; try { store(null); } finally { storeReason = ''; }
   }
   async function rowRequest(path, opts={}) {
     const auth = await ensureSession();
@@ -139,6 +153,6 @@
   }
   g.WXCloudPresets = Object.freeze({
     configured, initialize, ensureSession, signIn, signUp, signOut, list, save, remove,
-    user: () => session?.user || null
+    user: () => session?.user || null, onAuthChange
   });
 })(typeof window !== 'undefined' ? window : globalThis);

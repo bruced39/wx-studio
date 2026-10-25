@@ -9,6 +9,11 @@
     cloudLoaded:false,cloudLoading:false,cloudBusy:false,cloudPresets:[],cloudMessage:''};
   const MAP_STYLES_KEY = 'wx.studio.mapStylePresets.v1';
   const KEY = 'wx.studio.autosave.v1';
+  /* v0.10.2: per-account local storage. NS is the signed-in account whose work this browser currently shows (null = the original,
+     pre-account storage). It only changes on an explicit sign-in/sign-out (the page reloads), never because a token expired. */
+  const NS_KEY = 'wx.studio.ns.v1'; let NS = null; try { NS = localStorage.getItem(NS_KEY) || null; } catch (e) { /* storage blocked */ }
+  const akey = () => (NS ? KEY + ':u:' + NS : KEY), touchKey = () => akey() + ':touched'; const HK = {}; let booted = false, bootHadAutosave = false, touched = false;
+  const markTouched = () => { if (touched) return; touched = true; try { localStorage.setItem(touchKey(), '1'); } catch (e) { /* ignore */ } };
   const MAP_DEFAULT_KEY = 'wx.studio.defaultMap.v1';
   const cur = () => S.show.scenes[S.si];
   const selObj = () => cur().objects.find(o => o.id === S.oid) || null;
@@ -25,19 +30,63 @@
   function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
-  function ensureBG(sh) { if (g.WX_BGDEFAULT && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bgdefault')) { sh.assets = sh.assets || {}; sh.assets.bgdefault = g.WX_BGDEFAULT; } if (g.WX_BG7DAY && sh && sh.scenes && sh.scenes.some(x => x.bg && x.bg.asset === 'bg7day')) { sh.assets = sh.assets || {}; sh.assets.bg7day = g.WX_BG7DAY; } if (g.WX_TPL && sh && sh.scenes) Object.keys(g.WX_TPL).forEach(k => { if (sh.scenes.some(x => x.bg && x.bg.asset === k)) { sh.assets = sh.assets || {}; sh.assets[k] = g.WX_TPL[k]; } }); }
+  /* Bundled artwork that ships inside the app (default sky, 7-day template, headline / storm backgrounds). v0.10.2: also the list the cloud client uses to
+     recognise bundled images (they are never uploaded). keepCustom (cloud open) never replaces a different image that merely reuses a bundled id. */
+  function builtinBGs() { const o = {}; if (g.WX_BGDEFAULT) o.bgdefault = g.WX_BGDEFAULT; if (g.WX_BG7DAY) o.bg7day = g.WX_BG7DAY; if (g.WX_TPL) Object.keys(g.WX_TPL).forEach(k => { o[k] = g.WX_TPL[k]; }); return o; }
+  function ensureBG(sh, opt) {
+    if (!sh || !sh.scenes) return; const B = builtinBGs();
+    Object.keys(B).forEach(k => { if (!sh.scenes.some(x => x.bg && x.bg.asset === k)) return; sh.assets = sh.assets || {}; if (opt && opt.keepCustom && sh.assets[k] && sh.assets[k] !== B[k]) return; sh.assets[k] = B[k]; });
+  }
   const libHas = (k, v) => { try { return bgList.some(b => b.asset === k && b.data === v); } catch (e) { return false; } };
   /* v0.10.0: autosave reports its outcome. A failed write (storage full or blocked) used to be swallowed silently. */
-  function saveStatus(ok, why) {
+  function saveStatus(ok, why) {      // ok = true: why may be 'ext' (saved in the larger browser database because the small autosave slot is full)
     const el = $('#saveState'); if (!el) return;
-    if (ok) { const d = new Date(); el.textContent = 'Saved ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); el.style.color = '#7f93ad'; el.style.cursor = 'pointer'; el.style.textDecoration = 'underline dotted'; el.title = 'Autosaved in this browser. Click to see recent autosaves and restore an earlier copy. Use Save to keep a file.'; el.onclick = recentDialog; el.dataset.state = 'saved'; saveStatus.warned = false; }
+    if (ok) { const d = new Date(); el.textContent = 'Saved ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); el.style.color = '#7f93ad'; el.style.cursor = 'pointer'; el.style.textDecoration = 'underline dotted'; el.title = (why === 'ext' ? 'Autosaved in this browser’s larger storage (the show is too big for the small autosave slot). ' : 'Autosaved in this browser. ') + 'Click to see recent autosaves and restore an earlier copy. Use Save to keep a file.'; el.onclick = recentDialog; el.dataset.state = 'saved'; saveStatus.warned = false; }
     else { el.textContent = '⚠ Not saved'; el.style.color = '#ff6b6b'; el.style.cursor = 'pointer'; el.style.textDecoration = ''; el.title = 'Autosave failed: ' + why + ' Click to download a copy of your show now.'; el.onclick = () => $('#bSave').click(); el.dataset.state = 'failed'; if (!saveStatus.warned) { saveStatus.warned = true; toast('Autosave failed – ' + why + ' Use Save to keep your work.'); } }
   }
   /* Built-in and library images are re-attached on load, so autosave and recent-autosave copies leave them out. */
   const slimReplacer = (k, v) => ((k === 'bg7day' && v === g.WX_BG7DAY) || (k === 'bgdefault' && v === g.WX_BGDEFAULT) || (g.WX_TPL && /^tpl_/.test(k) && g.WX_TPL[k] === v) || (typeof v === 'string' && /^(bg|ov)_/.test(k) && libHas(k, v))) ? undefined : v;
+  /* v0.10.2 (storage fix): the small localStorage autosave slot (about 5 MB per site) fills up as soon as a show holds a few large images. A full slot
+     used to (1) lose the autosave AND (2) skip the cloud notification that came after it, so the cloud kept an out-of-date copy while showing "Saved".
+     Now: the change is ALWAYS announced to the cloud engine first; localStorage stays the normal place (unchanged format, so nothing migrates); when it
+     refuses, the same JSON goes to a separate IndexedDB database ('wxstudio-autosave') and a tiny marker key tells the next start to read it from there.
+     Nothing is deleted: the older localStorage copy stays as it was, and a stale database record is simply ignored until it is overwritten.          */
+  let chgSeq = 0; const stashQ = { busy: false, json: null, n: 0, why: '' }, STUB = '{"wxIdbStub":1}', idbFlag = () => akey() + ':idb';
+  const isQuota = e => !!e && (/quota/i.test(e.name || '') || e.code === 22 || e.code === 1014);
+  const autoDB = () => new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-autosave', 1); r.onupgradeneeded = () => r.result.createObjectStore('cur', { keyPath: 'key' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('blocked')); } catch (e) { rej(e); } });
+  const autoTx = async (mode, fn) => { const d = await autoDB(); return new Promise((res, rej) => { let out; const t = d.transaction('cur', mode); try { out = fn(t.objectStore('cur')); } catch (e) { d.close(); rej(e); return; } t.oncomplete = () => { d.close(); res(out && out.result); }; t.onerror = t.onabort = () => { d.close(); rej(t.error || new Error('aborted')); }; }); };
+  const autoPut = (key, json) => autoTx('readwrite', s2 => s2.put({ key, json, t: Date.now(), size: json.length }));
+  const autoGet = key => autoTx('readonly', s2 => s2.get(key));
+  const autoDel = key => autoTx('readwrite', s2 => s2.delete(key));
+  /* Put the JSON into the larger database and leave the marker; the newest request wins, writes never overlap. */
+  function stash(json, n, why) {
+    stashQ.json = json; stashQ.n = n; stashQ.why = why; if (stashQ.busy) return; stashQ.busy = true;
+    (async () => {
+      while (stashQ.json !== null) {
+        const j = stashQ.json, k = stashQ.n, w = stashQ.why, key = akey(), flag = idbFlag(); stashQ.json = null;
+        try {
+          await autoPut(key, j);
+          if (k !== chgSeq) continue;                                  // a newer change arrived (and either was stashed too, or fitted into localStorage)
+          let marked = false;
+          try { localStorage.setItem(flag, String(Date.now())); marked = true; }
+          catch (e) { try { localStorage.setItem(key, STUB); marked = true; } catch (e2) { /* nothing more can be done here */ } }   // a smaller value always fits: it frees space
+          if (marked) saveStatus(true, 'ext'); else saveStatus(false, w);
+        } catch (e) { if (k === chgSeq) saveStatus(false, w); }
+      }
+      stashQ.busy = false;
+    })();
+  }
   function autosave() {
-    try { localStorage.setItem(KEY, JSON.stringify(S.show, slimReplacer)); saveStatus(true); recentSoon(); }
-    catch (e) { saveStatus(false, e && e.name === 'QuotaExceededError' ? 'this browser’s storage is full.' : 'this browser is blocking storage.'); }
+    const n = ++chgSeq; let json = null, ok = false, why = 'this browser is blocking storage.';
+    try { json = JSON.stringify(S.show, slimReplacer); } catch (e) { why = 'the show could not be prepared for saving.'; }
+    if (json !== null) {
+      try { localStorage.setItem(akey(), json); ok = true; try { localStorage.removeItem(idbFlag()); } catch (e) { /* ignore */ } }
+      catch (e) { if (isQuota(e)) why = 'this browser’s storage is full.'; }
+    }
+    if (ok) saveStatus(true); else if (json !== null) stash(json, n, why); else saveStatus(false, why);
+    try { recentSoon(); } catch (e) { /* ignore */ }
+    try { if (S.hp > 0) markTouched(); } catch (e) { /* ignore */ }
+    try { if (HK.changed) HK.changed(); } catch (e) { /* cloud must never break autosave */ }   // ALWAYS announced: the cloud copy does not depend on this browser's local storage
   }
   function migrateMB(sh) { if (!sh.mbMigrated) { sh.mbMigrated = 1; sh.scenes.forEach(x => { if (x.bg && x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; x.bg.mbStyle = x.bg.mbStyle || 'broadcast'; x.bg.proj = x.bg.proj || 'mercator'; } }); } }
   function migrateWDBroadcast(sh){if(!sh.wdBroadcastMapV1){sh.wdBroadcastMapV1=1;(sh.scenes||[]).forEach(x=>{if(x.bg&&x.bg.type==='mapbox'){if(!x.bg.mbStyle||x.bg.mbStyle==='streets-v12')x.bg.mbStyle='broadcast';g.MB.ensureConfig(x.bg);}});}}
@@ -98,7 +147,7 @@
     const sh=E.newShow(); if(sh.scenes&&sh.scenes[0]&&sh.scenes[0].bg&&sh.scenes[0].bg.type==='mapbox')sh.scenes[0].bg=JSON.parse(JSON.stringify(defaultMapBg()));
     return sh;
   }
-  function loadShow(sh) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); sh.assets = sh.assets || {}; ensureBG(sh); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
+  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
@@ -987,8 +1036,9 @@
   const builtinBgs = () => [{ id: 'sky', name: 'Default sky', data: g.WX_BGDEFAULT, asset: 'bgdefault', builtin: true }, { id: 't7', name: 'Billerica 7-Day template', data: g.WX_BG7DAY, asset: 'bg7day', builtin: true }].filter(b => b.data);
   const bgAll = () => builtinBgs().concat(bgList);
   function bgDB() { return new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-bgs', 1); r.onupgradeneeded = () => r.result.createObjectStore('bgs', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }); }
-  function bgTx(mode, fn) { return bgDB().then(db => new Promise((res, rej) => { const t = db.transaction('bgs', mode), s = t.objectStore('bgs'), q = fn(s); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); })); }
-  function bgLoad() { bgTx('readonly', s => s.getAll()).then(a => { bgList = (a || []).sort((x, y) => x.t - y.t).map(b => Object.assign(b, { asset: (kindOf(b) === 'bg' ? 'bg_' : 'ov_') + b.id })); reattachLib(); if (S.tab === 'bgs') renderPanels(); }).catch(() => { }); }
+  const ownStore = s => ({ put: r => s.put(NS ? Object.assign({}, r, { owner: NS }) : r), delete: k => s.delete(k), getAll: () => s.getAll(), get: k => s.get(k) }), mine = r => (r.owner || null) === NS;
+  function bgTx(mode, fn) { return bgDB().then(db => new Promise((res, rej) => { const t = db.transaction('bgs', mode), s = t.objectStore('bgs'), q = fn(ownStore(s)); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); })); }
+  function bgLoad() { bgTx('readonly', s => s.getAll()).then(a => { bgList = (a || []).filter(mine).sort((x, y) => x.t - y.t).map(b => Object.assign(b, { asset: (kindOf(b) === 'bg' ? 'bg_' : 'ov_') + b.id })); reattachLib(); if (S.tab === 'bgs') renderPanels(); }).catch(() => { }); }
   function reattachLib() { if (!S.show) return; let ch = false; S.show.scenes.forEach(sc => [sc.bg && sc.bg.asset].concat(sc.objects.map(o => o.asset)).forEach(id => { if (id && !S.show.assets[id]) { const b = bgList.find(x => x.asset === id); if (b) { S.show.assets[id] = b.data; ch = true; } } })); if (ch) E.preload(S.show).then(() => thumbSoon(true)); }
   function bgScale(file, keepAlpha) { return new Promise((res, rej) => { const r = new FileReader(); r.onerror = rej; r.onload = () => { const im = new Image(); im.onerror = rej; im.onload = () => { const k = Math.min(1, 2560 / im.width); if (keepAlpha && k === 1 && /png/i.test(file.type)) return res(r.result); const cv = document.createElement('canvas'); cv.width = Math.round(im.width * (keepAlpha ? k : Math.min(1, 1920 / im.width))); cv.height = Math.round(im.height * (cv.width / im.width)); cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); res(keepAlpha ? cv.toDataURL('image/png') : cv.toDataURL('image/jpeg', 0.88)); }; im.src = r.result; }; r.readAsDataURL(file); }); }
   const kindOf = b => b.kind || 'bg';
@@ -1197,8 +1247,8 @@
   /* ---------- video library (MP4/WebM backgrounds; stored in this browser's IndexedDB) ---------- */
   let vidList = [];
   const vidDB = () => new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-vids', 1); r.onupgradeneeded = () => r.result.createObjectStore('v', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } });
-  const vidTx = async (mode, fn) => { const d = await vidDB(); return new Promise((res, rej) => { const t = d.transaction('v', mode), s = t.objectStore('v'), q = fn(s); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
-  async function restoreVideos() { try { vidList = (await vidTx('readonly', s => s.getAll())) || []; vidList.sort((a, b) => b.t - a.t); vidList.forEach(r => (r.kind === 'gif' ? E.registerGif : E.registerVideo)(r.id, r.blob, r.name)); if (S.tab === 'bgs') renderPanels(); } catch (e) { /* IndexedDB unavailable */ } }
+  const vidTx = async (mode, fn) => { const d = await vidDB(); return new Promise((res, rej) => { const t = d.transaction('v', mode), s = t.objectStore('v'), q = fn(ownStore(s)); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
+  async function restoreVideos() { try { vidList = ((await vidTx('readonly', s => s.getAll())) || []).filter(mine); vidList.sort((a, b) => b.t - a.t); vidList.forEach(r => (r.kind === 'gif' ? E.registerGif : E.registerVideo)(r.id, r.blob, r.name)); if (S.tab === 'bgs') renderPanels(); } catch (e) { /* IndexedDB unavailable */ } }
   async function addVideoFiles(files) {
     for (const f of files) {
       const isGif = f.type === 'image/gif' || /\.gif$/i.test(f.name);
@@ -1971,6 +2021,7 @@
     await recentSnap('safety', 'Before opening ' + f.name);
     const inst = await installMedia(r.media); if (Object.keys(inst.remap).length) remapMedia(r.show, inst.remap);
     try { loadShow(r.show); } catch (err) { notice('Could not open ' + f.name, ['That file is not a WX Studio show.']); return; }
+    if (HK.afterReplace) HK.afterReplace('import');
     const lines = r.warnings.slice();
     if (r.damaged.length) lines.push('These files inside the show were damaged and were skipped: ' + r.damaged.map(d => d.name + ' (' + d.why + ')').join(', ') + '.');
     const stillMissing = WF.inventory(r.show, E.videos).missing;
@@ -1983,14 +2034,15 @@
   const REC_MAX = { auto: 12, safety: 8 };
   const recDB = () => new Promise((res, rej) => { try { const r = indexedDB.open('wxstudio-recent', 1); r.onupgradeneeded = () => r.result.createObjectStore('snaps', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } });
   const recTx = async (mode, fn) => { const d = await recDB(); return new Promise((res, rej) => { const t = d.transaction('snaps', mode), s = t.objectStore('snaps'); let out; try { out = fn(s); } catch (e) { rej(e); return; } t.oncomplete = () => { d.close(); res(out && out.result); }; t.onerror = () => { d.close(); rej(t.error); }; t.onabort = () => { d.close(); rej(t.error); }; }); };
-  const recMeta = async () => { const d = await recDB(); return new Promise((res, rej) => { const out = [], c = d.transaction('snaps', 'readonly').objectStore('snaps').openCursor(); c.onsuccess = () => { const cur2 = c.result; if (!cur2) { d.close(); res(out.sort((a, b) => b.t - a.t)); return; } const v = cur2.value; out.push({ id: v.id, t: v.t, kind: v.kind, label: v.label, name: v.name, scenes: v.scenes, size: v.size, sig: v.sig }); cur2.continue(); }; c.onerror = () => { d.close(); rej(c.error); }; }); };
+  const recMeta = async () => { const d = await recDB(); return new Promise((res, rej) => { const out = [], c = d.transaction('snaps', 'readonly').objectStore('snaps').openCursor(); c.onsuccess = () => { const cur2 = c.result; if (!cur2) { d.close(); res(out.sort((a, b) => b.t - a.t)); return; } const v = cur2.value; if ((v.owner || null) !== NS) { cur2.continue(); return; } out.push({ id: v.id, t: v.t, kind: v.kind, label: v.label, name: v.name, scenes: v.scenes, size: v.size, sig: v.sig }); cur2.continue(); }; c.onerror = () => { d.close(); rej(c.error); }; }); };
   const sigOf = str => { let x = 2166136261; for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619); } return str.length + ':' + (x >>> 0).toString(36); };
   const recLast = { auto: '', safety: '' }; let recT = 0;
   async function recentSnap(kind, label) {
     try {
       const json = JSON.stringify(S.show, slimReplacer), sig = sigOf(json);   // captured now, before any later change
+      if (kind === 'safety' && HK.beforeReplace) { try { await HK.beforeReplace(); } catch (e) { /* the local safety copy below still happens */ } }
       if (recLast[kind] === sig) return; recLast[kind] = sig;
-      const rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: Date.now(), kind, label, name: S.show.name || 'Untitled show', scenes: S.show.scenes.length, size: json.length, sig, json };
+      const rec = { owner: NS || undefined, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: Date.now(), kind, label, name: S.show.name || 'Untitled show', scenes: S.show.scenes.length, size: json.length, sig, json };
       await recTx('readwrite', s => s.put(rec));
       const mine = (await recMeta()).filter(x => x.kind === kind); const drop = mine.slice(REC_MAX[kind] || 10);
       if (drop.length) await recTx('readwrite', s => { drop.forEach(x => s.delete(x.id)); });
@@ -2004,7 +2056,7 @@
     try {
       const rec = await recTx('readonly', s => s.get(id)); if (!rec) { toast('That copy is no longer available'); return; }
       await recentSnap('safety', 'Before restoring “' + rec.name + '”');
-      loadShow(JSON.parse(rec.json)); closeModal();
+      loadShow(JSON.parse(rec.json)); closeModal(); if (HK.afterReplace) HK.afterReplace('restore');
       const missing = WF ? WF.inventory(S.show, E.videos).missing : []; toast('Restored “' + rec.name + '” from ' + new Date(rec.t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + (missing.length ? ' – ' + missing.length + ' video/GIF file(s) not in this browser' : ''));
     } catch (e) { toast('Could not restore that copy'); }
   }
@@ -2019,7 +2071,7 @@
       h('button', { className: 'sm dng', text: 'Delete', on: { click: async () => { try { await recTx('readwrite', s => s.delete(m.id)); } catch (e) { /* ignore */ } recentDialog(); } } }))));
     modal('Recent autosaves', body, [h('button', { text: 'Close', on: { click: closeModal } })]);
   }
-  $('#bNew').onclick = () => { if (confirm('Start a new show? Unsaved changes will be lost.')) { recentSnap('safety', 'Before starting a new show'); loadShow(newShowWithDefaultMap()); } };
+  $('#bNew').onclick = async () => { if (confirm('Start a new show? Unsaved changes will be lost.')) { await recentSnap('safety', 'Before starting a new show'); loadShow(newShowWithDefaultMap()); if (HK.afterReplace) HK.afterReplace('import'); } };
   $('#bSave').onclick = saveShowFile;
   $('#bOpen').onclick = () => $('#fileOpen').click();
   $('#fileOpen').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) openShowFile(f); };
@@ -2028,15 +2080,27 @@
 
   /* ---------- boot ---------- */
   function boot() {
-    bgLoad(); buildTools(); let sh = null; try { const raw = localStorage.getItem(KEY); if (raw) { sh = JSON.parse(raw); if (!sh.scenes || !sh.scenes.length) sh = null; } } catch (e) { sh = null; }
+    bgLoad(); buildTools(); let sh = null, needExt = false;
+    try { const raw = localStorage.getItem(akey()); if (raw) { const p = JSON.parse(raw); if (p && p.wxIdbStub) needExt = true; else if (p && p.scenes && p.scenes.length) sh = p; } if (localStorage.getItem(idbFlag())) needExt = true; } catch (e) { sh = null; }
+    if (!needExt) return bootWith(sh, false);
+    /* The newest autosave lives in the larger database (the small slot was full). Read it before anything is committed; if it cannot be read, fall back to the localStorage copy. */
+    Promise.race([autoGet(akey()).catch(() => null), new Promise(r => setTimeout(() => r(null), 4000))]).then(rec => {
+      let x = null; try { x = rec && JSON.parse(rec.json); if (!x || !x.scenes || !x.scenes.length) x = null; } catch (e) { x = null; }
+      if (!x && !sh) setTimeout(() => toast('The large autosave could not be read in this browser – check Recent autosaves in the Saved menu.'), 1200);
+      bootWith(x || sh, !!x);
+    });
+  }
+  function bootWith(sh, fromExt) {
     if(sh){migrateMB(sh);migrateWDBroadcast(sh);}
     S.show=sh||newShowWithDefaultMap();
     const loadedDefault=applySavedDefaultOnStartup(S.show);
     S.show.assets=S.show.assets||{};ensureBG(S.show);S.hist=[];S.hp=-1;
+    bootHadAutosave=!!sh;
     commit();refreshAll();
+    if(!sh){try{if(localStorage.getItem(touchKey())===null)localStorage.setItem(touchKey(),'0');}catch(e){/* ignore */}}
     if(S.show.scenes[0]?.bg?.type==='mapbox')setTool('pan');
     if(sh){
-      toast(loadedDefault?'Last show restored with saved default Satellite map':'Last show restored; Satellite selected');
+      toast(fromExt?'Last show restored from this browser’s larger storage':loadedDefault?'Last show restored with saved default Satellite map':'Last show restored; Satellite selected');
       E.preload(S.show).then(()=>thumbSoon(true));
     }
     // The editor already paints its current Mapbox frame continuously.
@@ -2047,7 +2111,55 @@
     if (!g.MB.hasToken() && S.show.scenes.some(x => x.bg.type === 'mapbox')) setTimeout(mapboxSettings, 600); if (S.show.scenes.some(x => x.bg.type === 'mapbox') && g.MB.hasToken()) g.MB.init().then(() => thumbSoon(true)).catch(() => { }); g.WDMap.loadPlaces().then(() => thumbSoon(true)); g.WDMap.load().then(() => { thumbSoon(true); if (g.WDMap.status === 'error') toast('Map outlines need internet access – backgrounds and tools still work'); });
     if (document.fonts) { ['700 40px "Roboto Condensed"', '800 40px "Barlow Condensed"', '700 40px "Barlow Condensed"', '600 30px "Barlow Condensed"', '600 20px Barlow'].forEach(f => document.fonts.load(f).catch(() => { })); document.fonts.ready.then(() => thumbSoon(true)); }
     requestAnimationFrame(loop);
+    booted = true;
   }
-  g.WX = { S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog };
+  /* ---------- v0.10.2 cloud workspace bridge (used by cloud_workspace_ui.js; nothing here talks to the network) ---------- */
+  const touchFlag = () => { try { return localStorage.getItem(touchKey()); } catch (e) { return null; } };
+  const hasRealLocalWork = () => S.hp > 0 || touchFlag() === '1' || (touchFlag() === null && bootHadAutosave);
+  const idbAll = async (dbf, store) => { const d = await dbf(); return new Promise((res, rej) => { const q = d.transaction(store, 'readonly').objectStore(store).getAll(); q.onsuccess = () => { d.close(); res(q.result || []); }; q.onerror = () => { d.close(); rej(q.error); }; }); };
+  const idbPut = async (dbf, store, recs) => { if (!recs.length) return; const d = await dbf(); return new Promise((res, rej) => { const t = d.transaction(store, 'readwrite'), o = t.objectStore(store); recs.forEach(r => o.put(r)); t.oncomplete = () => { d.close(); res(); }; t.onerror = () => { d.close(); rej(t.error); }; t.onabort = () => { d.close(); rej(t.error); }; }); };
+  const idbDel = async (dbf, store, ids) => { if (!ids.length) return; const d = await dbf(); return new Promise((res, rej) => { const t = d.transaction(store, 'readwrite'), o = t.objectStore(store); ids.forEach(i => o.delete(i)); t.oncomplete = () => { d.close(); res(); }; t.onerror = () => { d.close(); rej(t.error); }; t.onabort = () => { d.close(); rej(t.error); }; }); };
+  const LIBS = [[bgDB, 'bgs'], [vidDB, 'v'], [recDB, 'snaps']];
+  /* What this browser holds from before accounts existed (only meaningful while NS is null). */
+  async function legacyInfo() {
+    const out = { show: null, images: 0, videos: 0, recents: 0 }; if (NS) return out;
+    try {
+      const raw = localStorage.getItem(KEY); let sh = null;
+      if (raw && (touchFlag() === '1' || touchFlag() === null)) { sh = JSON.parse(raw); if (sh && sh.wxIdbStub) sh = null; }
+      if ((!sh || localStorage.getItem(KEY + ':idb')) && (raw || localStorage.getItem(KEY + ':idb'))) { const r = await autoGet(KEY).catch(() => null); if (r) { try { const x = JSON.parse(r.json); if (x && x.scenes && x.scenes.length) sh = x; } catch (e) { /* ignore */ } } }   // the newest copy may live in the larger database
+      if (sh && sh.scenes && sh.scenes.length) out.show = { name: sh.name || 'Untitled show', scenes: sh.scenes.length };
+    } catch (e) { /* ignore */ }
+    try { out.images = (await idbAll(bgDB, 'bgs')).filter(r => !r.owner).length; } catch (e) { /* ignore */ }
+    try { out.videos = (await idbAll(vidDB, 'v')).filter(r => !r.owner).length; } catch (e) { /* ignore */ }
+    try { out.recents = (await idbAll(recDB, 'snaps')).filter(r => !r.owner).length; } catch (e) { /* ignore */ }
+    return out;
+  }
+  /* Explicit claim: move the pre-account autosave, library and recent copies to this account. Nothing is deleted; it is re-labelled. */
+  async function claimLegacy(uid) {
+    const raw = localStorage.getItem(KEY), dest = KEY + ':u:' + uid;
+    if (raw && localStorage.getItem(dest) === null) { localStorage.setItem(dest, raw); localStorage.setItem(dest + ':touched', '1'); localStorage.removeItem(KEY); localStorage.removeItem(KEY + ':touched'); }
+    try { const ext = await autoGet(KEY), had = await autoGet(dest); if (ext && !had) { await autoPut(dest, ext.json); if (localStorage.getItem(KEY + ':idb')) { localStorage.setItem(dest + ':idb', localStorage.getItem(KEY + ':idb')); localStorage.removeItem(KEY + ':idb'); } } } catch (e) { /* the copy in the larger database stays where it is */ }
+    for (const [dbf, st] of LIBS) { const recs = (await idbAll(dbf, st)).filter(r => !r.owner); await idbPut(dbf, st, recs.map(r => Object.assign({}, r, { owner: uid }))); }
+  }
+  /* Shared-computer cleanup: removes everything this browser stored for one account. */
+  async function clearAccountData(uid, settingsKeys) {
+    try { localStorage.removeItem(KEY + ':u:' + uid); localStorage.removeItem(KEY + ':u:' + uid + ':touched'); localStorage.removeItem(KEY + ':u:' + uid + ':idb'); (settingsKeys || []).forEach(k => localStorage.removeItem(k)); } catch (e) { /* ignore */ }
+    for (const [dbf, st] of LIBS) { try { const ids = (await idbAll(dbf, st)).filter(r => r.owner === uid).map(r => r.id); await idbDel(dbf, st, ids); } catch (e) { /* ignore */ } }
+    try { await autoDel(KEY + ':u:' + uid); } catch (e) { /* ignore */ }
+  }
+  /* Sign-out with "keep a local copy": the open show becomes the pre-account local copy; whatever was there is kept as a recent safety copy first. */
+  async function keepLocalCopy() {
+    const prev = localStorage.getItem(KEY), mine = JSON.stringify(S.show);
+    if (prev && prev !== mine) { try { const sh = JSON.parse(prev); await idbPut(recDB, 'snaps', [{ id: 'pre' + Date.now().toString(36), t: Date.now(), kind: 'safety', label: 'Before sign-out copy', name: sh.name || 'Untitled show', scenes: (sh.scenes || []).length, size: prev.length, sig: sigOf(prev), json: prev }]); } catch (e) { /* ignore */ } }
+    try { localStorage.setItem(KEY, mine); localStorage.removeItem(KEY + ':idb'); }
+    catch (e) { await autoPut(KEY, mine); try { localStorage.setItem(KEY + ':idb', String(Date.now())); } catch (e2) { localStorage.setItem(KEY, STUB); } }   // too big for the small slot: kept in the larger database
+    localStorage.setItem(KEY + ':touched', '1');
+  }
+  function setNamespace(uid) { try { if (uid) localStorage.setItem(NS_KEY, uid); else localStorage.removeItem(NS_KEY); } catch (e) { /* ignore */ } }
+  function loadCloudShow(sh, o) {
+    loadShow(sh, { keepCustom: true }); const id = o && o.sceneId; if (id != null) { const i = S.show.scenes.findIndex(x => String(x.id) === String(id)); if (i > 0) { S.si = i; S.oid = null; refreshAll(); } }
+  }
+  g.WX = { S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog,
+    cloud: { hooks: HK, changeSeq: () => chgSeq, ns: () => NS, setNamespace, hasRealLocalWork, legacyInfo, claimLegacy, clearAccountData, keepLocalCopy, loadCloudShow, builtinAssets: builtinBGs, sceneId: () => (S.show.scenes[S.si] || {}).id, renameShow: n => { S.show.name = n; commit(); }, recentDialog, modal, closeModal, notice, toast, h, fmtMB, recentSnap, videos: () => E.videos } };
   boot();
 })(window);
