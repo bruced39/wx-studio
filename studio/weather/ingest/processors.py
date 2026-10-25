@@ -51,7 +51,7 @@ class Frame:
 
 def rgba(values, stops, *, valid=None, min_echo=None) -> np.ndarray:
     """Linear LUT on a 2D scalar, missing/no-echo and masked cells transparent."""
-    arr = np.ma.asarray(values)
+    arr = np.ma.asarray(values, dtype=np.float32)   # float first: NumPy 2 refuses a NaN fill on integer data
     a = np.asarray(arr.filled(np.nan), dtype=np.float32)
     if a.ndim != 2:
         raise ValueError("Expected 2D geophysical field")
@@ -222,7 +222,7 @@ def decode_mrms(path:str|Path,bbox:BBox,*,max_pixels:int=12_000_000)->Frame:
     finally:
         grbs.close()
     # Sentinel fill/no-echo values are never painted black across the map.
-    valid=np.asarray(np.ma.filled(subset,np.nan),dtype="float32")
+    valid=np.ma.filled(np.ma.asarray(subset,dtype="float32"),np.nan)  # float first: NumPy 2 refuses a NaN fill on integer data
     pixels=rgba(subset,RADAR,valid=(valid>-5)&(valid<90),min_echo=-5)
     return Frame(pixels,actual,ts,"MRMS_MergedReflectivityQC",1000)
 
@@ -253,7 +253,7 @@ def decode_level2(path:str|Path,bbox:BBox,*,moment:str="reflectivity",
     lats,lons,_=radar.get_gate_lat_lon_alt(0)
     if values.shape!=lats.shape or values.shape!=lons.shape:
         raise ValueError("Radar gate geometry/data do not align")
-    srcvalues=np.asarray(np.ma.filled(values,np.nan),dtype="float32")
+    srcvalues=np.ma.filled(np.ma.asarray(values,dtype="float32"),np.nan)
     good=np.isfinite(srcvalues)&(~np.ma.getmaskarray(values))&np.isfinite(lats)&np.isfinite(lons)
     if moment=="reflectivity":good &= srcvalues>=-5
     if not np.any(good):raise ValueError("Selected radar sweep has no valid bins")
