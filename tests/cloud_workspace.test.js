@@ -277,3 +277,17 @@ test('v0.10.2 Sync now (verify): compares the real content – "unchanged" sends
   const r = await c.eng.syncNow({ verify: true }); assert.equal(r.ok, true); assert.notEqual(r.status, 'unchanged'); assert.equal(fake.db.shows[0].doc.scenes[0].bg.asset, 'imgSilent'); assert.equal(fake.objects.size, 1);
   assert.equal(c.eng.status().label, 'Saved to cloud');
 });
+
+test('v0.10.2 server "unchanged": a forced save of an identical show is a success (no new revision/version, not a failure); a stale base still conflicts', async () => {
+  const fake = createFakeSupabase(); const a = await client(fake, 'u1', { deviceId: 'A', deviceName: 'Home PC' });
+  a.eng.markDirty(); await a.eng.syncNow(); const rev = fake.db.shows[0].rev, nv = fake.db.versions.length, n0 = rpcCalls(fake, 'wx_studio_save_show').length;
+  const r = await a.eng.syncNow({ force: true, reason: 'manual' });          // "Save a version now" on an identical show: the client DOES send it
+  assert.equal(rpcCalls(fake, 'wx_studio_save_show').length, n0 + 1, 'forced: the call is made');
+  assert.equal(r.ok, true); assert.equal(r.status, 'unchanged'); assert.equal(fake.db.shows[0].rev, rev, 'revision not incremented'); assert.equal(fake.db.versions.length, nv, 'no extra snapshot');
+  const st = a.eng.status(); assert.equal(st.kind, 'cloud'); assert.equal(st.label, 'Saved to cloud'); assert.equal(st.error, null); assert.equal(st.rev, rev); assert.equal(a.eng.record().pending, null);
+  // a stale base must still be a conflict, even though the document equals what we last saved
+  const b = await client(fake, 'u1', { deviceId: 'B', deviceName: 'Studio PC' }); await b.eng.openShow(a.eng.record().showId);
+  b.state.show.name = 'From B'; b.eng.markDirty(); await b.eng.syncNow();
+  const r2 = await a.eng.syncNow({ force: true, reason: 'manual' });
+  assert.equal(r2.status, 'conflict'); assert.equal(fake.db.shows[0].doc.name, 'From B', 'cloud untouched');
+});

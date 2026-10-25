@@ -144,6 +144,12 @@ with sync_playwright() as p:
     close_dialog(a); open_dialog(a)
     click_btn(a, 'Sync now'); wait(a, "()=>{const r=document.querySelector('#modal [data-cloud-sync-result]');return r&&r.dataset.kind&&r.dataset.kind!=='busy'}", 15000); r1 = sres(a)
     chk('nothing changed -> "Already up to date." with the cloud version', r1['kind'] == 'same' and r1['title'] == 'Already up to date.' and 'cloud version' in r1['text'], r1)
+    # server idempotency: "Save a version now" on an identical show is sent, the server answers 'unchanged' -> success, no new revision
+    def rev_of():
+        st = adm(); return [x['rev'] for x in st['shows'] if x['name'] == 'ZZ LIVE TEST 1' and not x.get('deleted_at')]
+    rv0 = rev_of(); click_btn(a, 'Save a version now'); wait(a, "()=>{const r=document.querySelector('#modal [data-cloud-sync-result]');return r&&r.dataset.kind&&r.dataset.kind!=='busy'}", 15000); rs = sres(a)
+    chk('"Save a version now" on an identical show -> success ("Already up to date."), revision unchanged, no error', rs['kind'] == 'same' and rev_of() == rv0 and ev(a, "WXCloudUI.engine.status().error") is None, [rs, rv0, rev_of()])
+    chk('…and the top indicator still says Saved to cloud', 'Saved to cloud' in ev(a, "document.querySelector('[data-cloud-status]')?.textContent||document.body.innerText"), None)
     # change + slow network: busy state, no double click
     ev(a, "()=>{WX.S.show.scenes[0].name='Renamed for sync test';WX.commit();window.__delay=1800;window.__saves=0}"); a.wait_for_timeout(300)
     click_btn(a, 'Sync now'); a.wait_for_timeout(300); rb = sres(a)
