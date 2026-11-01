@@ -192,10 +192,20 @@
     o = o || {}; const ob = E.newObject(type, props), sc = cur();
     if (o.delay != null) ob.anim.delay = o.delay;
     if (!o.noGeo && isMap(sc.bg)) E.setGeo(ob, sc, editT(), true);
-    sc.objects.push(ob); S.oid = ob.id; commit(); renderPanels(); return ob;
+    sc.objects.push(ob); alsoLaterSteps(ob); S.oid = ob.id; commit(); renderPanels(); return ob;
   }
-  function delObj() { const sc = cur(); if (!S.oid) return; sc.objects = sc.objects.filter(o => o.id !== S.oid); S.oid = null; commit(); renderPanels(); }
-  function dupObj() { const o = selObj(); if (!o) return; const c = JSON.parse(JSON.stringify(o)); c.id = 'o' + Date.now().toString(36); const xf = E.xf(cur(), editT()); E.move(c, 30, 30, xf); cur().objects.push(c); S.oid = c.id; commit(); renderPanels(); }
+  /* v0.11.0: a graphic added while editing step k also goes into every LATER step (same id, same place) – like a new step inheriting the previous one.
+     Earlier steps do not have it, so it fades in at step k. Delete only removes it from the step being edited. */
+  function alsoLaterSteps(ob) {
+    const sc = realScene(); if (!MA.isAnimated(sc)) return; const i = stepIdx(), n = sc.anim.steps.length; if (i >= n - 1) return;
+    for (let k = i + 1; k < n; k++) MA.stepObjects(sc, k).push(JSON.parse(JSON.stringify(ob)));
+    toast('Added to step ' + (i + 1) + ' and the ' + (n - 1 - i === 1 ? 'next step' : (n - 1 - i) + ' later steps') + '.');
+  }
+  function delObj() {
+    const sc = cur(); if (!S.oid) return; const id = S.oid; sc.objects = sc.objects.filter(o => o.id !== id); S.oid = null;
+    const rs = realScene(); if (MA.isAnimated(rs)) { const i = stepIdx(); if (rs.anim.steps.some((st, k) => k > i && MA.stepObjects(rs, k).some(o => o.id === id))) toast('Removed from this step only – it fades out here and later steps still have it.'); }
+    commit(); renderPanels(); }
+  function dupObj() { const o = selObj(); if (!o) return; const c = JSON.parse(JSON.stringify(o)); c.id = 'o' + Date.now().toString(36); const xf = E.xf(cur(), editT()); E.move(c, 30, 30, xf); cur().objects.push(c); alsoLaterSteps(c); S.oid = c.id; commit(); renderPanels(); }
   function layer(dir) { const a = cur().objects, i = a.findIndex(o => o.id === S.oid); if (i < 0) return; const j = dir === 'front' ? a.length - 1 : dir === 'back' ? 0 : clamp(i + dir, 0, a.length - 1); const [o] = a.splice(i, 1); a.splice(j, 0, o); commit(); }
   function newScene(after) { const sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: (() => { const b = bgDefaultSpec(); return b ? { type: 'image', asset: b.asset, kenburns: false, fit: b.asset === 'bgdefault' ? 'fill' : undefined } : { type: 'solid', color: '#101820', kenburns: false }; })(), title: { show: false, text: '', sub: '' } }); { const b = bgAll().find(x => x.asset === sc.bg.asset); if (b) S.show.assets[b.asset] = b.data; } S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
 

@@ -124,6 +124,14 @@ with sync_playwright() as p:
     pg.evaluate("WX.S.oid='t1'; WX.S.show.scenes[0].anim.steps[1].objects.find(o=>o.id==='t1').text='NEW TEXT'; WX.commit();")
     chk('text change lives in step 2 only', pg.evaluate("WX.S.show.scenes[0].objects.find(o=>o.id==='t1').text")=='COLD FRONT')
 
+    # ---- graphics added while editing step 1 also reach the later steps; delete affects only the edited step ----
+    pg.evaluate("WX.S.step=0; WX.S.oid=null"); pg.click('#stepbar .sbstep[data-step=\"0\"]'); pg.wait_for_timeout(80)
+    pg.evaluate("WX.addObject('icon',{x:700,y:700,icon:'sun',id:'late1'})"); pg.wait_for_timeout(80)
+    ids = pg.evaluate("[0,1].map(i=>MapAnim.stepObjects(WX.S.show.scenes[0],i).some(o=>o.id===WX.S.oid))")
+    chk('an object added in step 1 is also in the later step (same id)', ids == [True, True], ids)
+    pg.evaluate("WX.S.step=1"); pg.evaluate("WX.S.oid=WX.S.oid"); pg.keyboard.press('Delete'); pg.wait_for_timeout(80)
+    ids = pg.evaluate("[0,1].map(i=>MapAnim.stepObjects(WX.S.show.scenes[0],i).filter(o=>o.type==='icon'&&o.icon==='sun').length)")
+    chk('Delete removes it from the edited step only', ids == [1, 0], ids)
     # ---- timing + scrub + playback ----
     pg.evaluate("(()=>{const sc=WX.S.show.scenes[0];MapAnim.setStep(sc,0,{hold:0.6});MapAnim.setStep(sc,1,{hold:0.6,dur:0.8});WX.commit();})()")
     pg.evaluate("WX.loadShow(JSON.parse(JSON.stringify(WX.S.show)))"); pg.wait_for_timeout(200)
@@ -135,12 +143,18 @@ with sync_playwright() as p:
     chk('scrubbing switches to scrub mode at the right show time', pg.evaluate("WX.S.mode")=='scrub' and abs(pg.evaluate("WX.S.T") - 1.0) < 0.01)
     snap_obj = pg.evaluate("JSON.stringify(WX.S.show.scenes[0])")
     pg.screenshot(path=S + 'scrub_mid_move.png')
+    seq0 = pg.evaluate("WX.cloud.changeSeq()")
+    pg.evaluate("(()=>{const sl=document.getElementById('sbScrub');for(const v of [0.2,0.9,1.4,0.3]){sl.value=v;sl.dispatchEvent(new Event('input',{bubbles:true}));}})()"); pg.wait_for_timeout(150)
+    pg.click('#stepbar .sbstep[data-step=\"0\"]'); pg.wait_for_timeout(100); pg.click('#stepbar .sbstep[data-step=\"1\"]'); pg.wait_for_timeout(100)
+    chk('moving the playhead / selecting steps does not mark the show changed (no autosave / cloud change)', pg.evaluate("WX.cloud.changeSeq()") == seq0, (seq0, pg.evaluate("WX.cloud.changeSeq()")))
+    pg.evaluate("(()=>{const sl=document.getElementById('sbScrub');sl.value=1.0;sl.dispatchEvent(new Event('input',{bubbles:true}));})()"); pg.wait_for_timeout(100)
     # the saved document does not change while scrubbing / playing
     pg.evaluate("document.querySelector('#stepbar .sbctl:nth-of-type(2) button:last-of-type').scrollIntoView()")
     pg.click("#stepbar button:has-text('Play')"); pg.wait_for_timeout(300)
     chk('Play runs the animation', pg.evaluate("WX.S.mode")=='play')
     pg.wait_for_timeout(2300)
     chk('playback ends back in edit mode', pg.evaluate("WX.S.mode")=='edit')
+    chk('no change notification during playback either', pg.evaluate("WX.cloud.changeSeq()") == seq0)
     chk('document not modified by scrubbing / playback', pg.evaluate("JSON.stringify(WX.S.show.scenes[0])") == snap_obj)
     chk('no drawing errors', pg.evaluate("!WX.E.lastErr"), pg.evaluate("String(WX.E.lastErr)"))
 
