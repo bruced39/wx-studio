@@ -163,6 +163,24 @@ with sync_playwright() as p:
     chk('Reload map tiles falls back to rebuilding the map style', n == 1 and ok, (n, calls, pg.evaluate("()=>window.__setStyleCalls")))
     pg.evaluate("()=>{window.__map.style._sourceCaches=window.__savedCaches}")
 
+    # ---- 5e. manual Reload during a 429 cool-down: visible warning, short guard against rapid repeats, automatic retries still wait
+    if not pg.query_selector('#mbDiagReload'):
+        pg.evaluate("()=>{const b=[...document.querySelectorAll('button')].find(x=>/Mapbox Token \\/ Quality/.test(x.textContent));if(b)b.click()}")
+        pg.wait_for_selector('#mbDiag', timeout=4000); pg.click('#mbDiag'); pg.wait_for_selector('#mbDiagReload', timeout=4000)
+    pg.wait_for_timeout(4200)                                   # let any earlier manual-reload guard expire
+    pg.evaluate("()=>{window.__fireError(429);}")
+    pg.click('#mbDiagReload'); pg.wait_for_timeout(300)
+    warn = pg.inner_text('#mbDiagWarn') if pg.is_visible('#mbDiagWarn') else ''
+    chk('rate-limited: the dialog shows a visible warning and relabels the button', 'rate-limiting' in warn and 'Reload anyway' in pg.inner_text('#mbDiagReload'), warn)
+    chk('rate-limited: the manual reload was honoured (counted) and the cool-down is still active', pg.evaluate("()=>MB.manualReload.count>=1&&MB.diagnostics().includes('back-off ACTIVE')"))
+    chk('the button is disabled for the guard period (no rapid repeats)', pg.evaluate("()=>document.getElementById('mbDiagReload').disabled===true"))
+    ig = pg.evaluate("()=>{const a=MB.manualReload.ignored,r=MB.reloadTiles();return [r,MB.manualReload.ignored-a]}")
+    chk('a repeated reload inside the guard is ignored by the core as well', ig == [-1, 1], ig)
+    pg.evaluate("()=>{window.__requests.length=0;window.__tiles.c={state:'errored'};window.__fireIdle();}")
+    pg.wait_for_timeout(1900)
+    chk('automatic retries still respect the cool-down after a manual reload', pg.evaluate("()=>window.__requests.filter(k=>k==='c').length") == 0 and pg.evaluate("()=>window.__tiles.c.state") == 'errored')
+    pg.wait_for_function("window.__tiles.c.state==='loaded'", timeout=15000)
+
     # ---- 6. a failed tile (HTTP 429) must not be mistaken for a rejected token; a real 401 still is
     r = pg.evaluate("()=>{window.__fireError(429);const a=MB.status;window.__fireError(401);return [a,MB.status,MB.err]}")
     chk('HTTP 429 on a tile keeps the map usable (status stays ready)', r[0] == 'ready', r)

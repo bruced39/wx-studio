@@ -64,10 +64,10 @@ function harness(fm, settleImpl) {
   const settleCalls = [];
   const settle = async (m, gen, wall) => { settleCalls.push(wall || 14000); return settleImpl ? settleImpl() : true; };
   const script = [
-    'let liveKey=null,renderGeneration=0,want=null,busy=false;',
+    'let liveKey=null,renderGeneration=0,want=null,busy=false,curStyleKey="style|k",curCfgKey="cfg";',
     slice('  /* ---- tile completeness', '  MB.setInteractive = function'),
     slice('  async function doSnap(', '  MB.snap = function('),
-    'return {doSnap,cachedFrame,isAuthError,invalidateTileRetry,noteThrottle,throttled,scheduleRecovery,tileHealth,recoverTiles,recordMapError,onMapIdle,tileRetry,incompleteFrames,DIAG,state:()=>({snapshotBusy})};'
+    'return {keys:()=>({curStyleKey,curCfgKey}),doSnap,cachedFrame,isAuthError,invalidateTileRetry,noteThrottle,throttled,scheduleRecovery,tileHealth,recoverTiles,recordMapError,onMapIdle,tileRetry,incompleteFrames,DIAG,state:()=>({snapshotBusy})};'
   ].join('\n');
   const canvasFactory = () => ({ width: 0, height: 0, getContext() { return { drawImage() {} }; } });
   const api = new Function('MB', 'D', 'document', 'W', 'H', 'norm', 'visualConfigReady', 'keyOf', 'cloneBg',
@@ -469,4 +469,121 @@ test('[3] while the style is still loading, an empty cache is not reported as a 
 
 test('[3] Reload map tiles falls back to a full style reload when the private interface is unavailable', () => {
   assert.match(source, /if\(!n&&!tileHealth\(D\)\.recoverable\)\{[\s\S]*?curStyleKey=null;curCfgKey=null;DIAG\.fallbackReloads\+\+;n=1;/);
+});
+
+/* =====================================================================
+   Final adjustments (ChatGPT review of ec02d16 / 4827214)
+   ===================================================================== */
+test('[A] an optional source without the private interface does NOT disable satellite recovery', () => {
+  const mm = multiMap({
+    'mapbox://mapbox.satellite': { type: 'raster', tiles: { s1: 'errored', s2: 'loaded' } },
+    'wd-terrain-dem': { type: 'raster-dem', tiles: { d1: 'loaded' } },
+    'wd-weather-data-image': { type: 'image', tiles: {} }
+  }, { isStyleLoaded: () => true });
+  delete mm.caches['wd-terrain-dem']._removeTile;          // evictable interface missing on an optional cache
+  delete mm.caches['wd-terrain-dem'].update;
+  delete mm.caches['wd-weather-data-image']._tiles;         // optional cache that exposes no tile table at all
+  const h = harness({ map: mm.map }), health = h.api.tileHealth(mm.map);
+  assert.equal(health.supported, true, 'critical source is readable');
+  assert.equal(health.recoverable, true, 'critical source is recoverable');
+  assert.equal(health.verified, true);
+  assert.equal(health.complete, false, 'the failed satellite tile is still detected');
+  assert.equal(h.api.DIAG.limitation, '', 'no limitation is reported for optional sources');
+  assert.deepEqual(health.optionalUnsupported.sort(), ['wd-terrain-dem', 'wd-weather-data-image']);
+  assert.equal(h.api.recoverTiles(mm.map), 1);
+  assert.deepEqual(mm.caches['mapbox://mapbox.satellite'].removed, ['s1']);
+  assert.equal(mm.caches['mapbox://mapbox.satellite']._tiles.s1.state, 'loaded');
+  const txt = h.MB.diagnostics();
+  assert.match(txt, /Note \(not blocking\): no retry interface for wd-terrain-dem, wd-weather-data-image – satellite recovery is unaffected\./);
+  assert.doesNotMatch(txt, /LIMITATION/);
+  assert.doesNotMatch(txt, /UNVERIFIED/);
+});
+
+test('[A] snapshot recovery and the idle watchdog still work with an unsupported optional cache present', async () => {
+  const mk = () => {
+    const mm = multiMap({ 'mapbox://mapbox.satellite': { type: 'raster', tiles: { s1: 'errored', s2: 'loaded' } }, 'wd-terrain-dem': { type: 'raster-dem', tiles: { d1: 'errored' } } });
+    delete mm.caches['wd-terrain-dem']._removeTile; return mm;
+  };
+  const mm = mk(), h = harness({ map: mm.map });
+  const cv = await h.api.doSnap(bg, cam, 'k');
+  assert.ok(cv);
+  assert.equal(h.api.incompleteFrames.has('k'), false, 'satellite recovered -> frame trusted');
+  assert.equal(mm.caches['mapbox://mapbox.satellite'].removed.length, 1);
+  const mm2 = mk(), h2 = harness({ map: mm2.map });
+  h2.api.onMapIdle();
+  assert.deepEqual(h2.runTimers(), [1500], 'watchdog scheduled for the satellite tile');
+  assert.equal(mm2.caches['mapbox://mapbox.satellite'].removed.length, 1);
+});
+
+test('[A] an optional-only failure on a non-recoverable cache schedules no pointless retry', () => {
+  const mm = multiMap({ 'mapbox://mapbox.satellite': SAT, 'wd-terrain-dem': { type: 'raster-dem', tiles: { d1: 'errored' } } });
+  delete mm.caches['wd-terrain-dem']._removeTile;
+  const h = harness({ map: mm.map });
+  h.api.onMapIdle();
+  assert.equal(h.timers.length, 0);
+});
+
+test('[A] a NON-recoverable CRITICAL source still disables recovery (and says so)', () => {
+  const mm = multiMap({ 'mapbox://mapbox.satellite': { type: 'raster', tiles: { s1: 'errored' } }, 'wd-terrain-dem': { type: 'raster-dem', tiles: { d1: 'loaded' } } }, { isStyleLoaded: () => true });
+  delete mm.caches['mapbox://mapbox.satellite']._removeTile;
+  const h = harness({ map: mm.map }), health = h.api.tileHealth(mm.map);
+  assert.equal(health.supported, true);
+  assert.equal(health.recoverable, false);
+  assert.match(h.api.DIAG.limitation, /cannot be retried automatically/);
+});
+
+test('[B] manual Reload map tiles works during a 429 cool-down, warns, and does NOT end the cool-down', () => {
+  const fm = fakeMap({ keys: ['a', 'b'], initial: { b: 'errored' } }), h = harness(fm);
+  assert.equal(h.MB.reloadWarning(), '', 'no warning when not rate-limited');
+  h.api.recordMapError({ error: { status: 429, message: 'Too Many Requests' } });
+  const warning = h.MB.reloadWarning();
+  assert.match(warning, /rate-limiting/);
+  assert.match(warning, /wait about \d+ s/);
+  assert.match(h.MB.diagnostics(), /WARNING: Mapbox is rate-limiting/);
+  const n = h.MB.reloadTiles();
+  assert.ok(n > 0, 'the explicit action is honoured');
+  assert.deepEqual(fm.cache.removed.sort(), ['a', 'b']);
+  assert.equal(h.MB.manualReload.duringBackoff, true);
+  assert.equal(h.api.throttled(), true, 'cool-down is still active for automatic retries');
+  assert.equal(h.api.DIAG.throttle.level, 1);
+  assert.notEqual(h.MB.reloadWarning(), '');
+});
+
+test('[B] rapid repeated manual reloads are ignored for a short guard period', () => {
+  const fm = fakeMap({ keys: ['a', 'b'] }), h = harness(fm);
+  assert.equal(h.MB.RELOAD_GUARD_MS, 4000);
+  assert.ok(h.MB.reloadTiles() > 0);
+  const removed = fm.cache.removed.length;
+  assert.equal(h.MB.reloadTiles(), -1);
+  h.advance(3999); assert.equal(h.MB.reloadTiles(), -1);
+  assert.equal(fm.cache.removed.length, removed, 'no extra tile requests from the ignored clicks');
+  assert.equal(h.MB.manualReload.ignored, 2);
+  assert.equal(h.MB.manualReload.count, 1);
+  h.advance(2); assert.ok(h.MB.reloadTiles() > 0, 'allowed again after the guard');
+  assert.equal(h.MB.manualReload.count, 2);
+  assert.match(h.MB.diagnostics(), /manual reloads: 2 \(ignored repeats: 2\)/);
+});
+
+test('[B] automatic retries still respect the cool-down after a manual reload', () => {
+  const fm = fakeMap({ keys: ['a', 'b'], initial: { b: 'errored' }, failures: { b: 99 } }), h = harness(fm);
+  h.api.recordMapError({ error: { status: 429, message: '' } });
+  h.MB.reloadTiles();
+  fm.cache.removed.length = 0; fm.tiles.b = { state: 'errored' };
+  h.api.onMapIdle();
+  const t = h.timers[h.timers.length - 1];
+  assert.ok(t.ms >= 5000, 'watchdog waits for the remaining cool-down, got ' + t.ms);
+  t.ran = true; t.fn();                                      // fires inside the cool-down
+  assert.equal(fm.cache.removed.length, 0, 'no automatic request inside the cool-down');
+  h.advance(5300);
+  h.timers.filter(x => !x.dead && !x.ran).forEach(x => { x.ran = true; x.fn(); });
+  assert.deepEqual(fm.cache.removed, ['b'], 'recovers once the cool-down has ended');
+});
+
+test('[B] the UI shows the warning, relabels the button and enforces the guard', () => {
+  const ui = fs.readFileSync(path.join(__dirname, '../studio/ui.js'), 'utf8');
+  assert.match(ui, /id: 'mbDiagWarn'/);
+  assert.match(ui, /Reload anyway \(rate-limited\)/);
+  assert.match(ui, /g\.MB\.reloadWarning\(\)/);
+  assert.match(ui, /if \(r < 0\) \{ toast\('Reload already in progress/);
+  assert.match(ui, /reload\.disabled = true; setTimeout\(\(\) => \{ reload\.disabled = false; refresh\(\); \}, g\.MB\.RELOAD_GUARD_MS\)/);
 });

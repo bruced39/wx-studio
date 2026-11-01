@@ -1868,11 +1868,24 @@
     hintFor();
   }
   function mapDiagnosticsDialog() {
-    const pre = h('pre', { id: 'mbDiagText', style: 'max-height:46vh;overflow:auto;white-space:pre-wrap;font-size:12px;user-select:text', text: g.MB.diagnostics() });
-    const refresh = () => { pre.textContent = g.MB.diagnostics(); };
-    const body = h('div', {}, h('div', { className: 'hint', text: 'If satellite imagery shows gaps, press “Reload map tiles”, then copy this report and send it with a screenshot.' }), pre);
-    modal('Map diagnostics', body, [h('button', { text: 'Close', on: { click: closeModal } }),
-      h('button', { id: 'mbDiagReload', text: 'Reload map tiles', on: { click: () => { const n = g.MB.reloadTiles(); toast(n ? 'Reloading ' + n + ' map tiles…' : 'Map tiles refreshed'); setTimeout(refresh, 1500); } } }),
+    const pre = h('pre', { id: 'mbDiagText', style: 'max-height:42vh;overflow:auto;white-space:pre-wrap;font-size:12px;user-select:text', text: g.MB.diagnostics() });
+    const warn = h('div', { id: 'mbDiagWarn', style: 'display:none;margin:6px 0;padding:8px 10px;border-radius:6px;background:#5a3b00;color:#ffe2a8;font-size:13px' });
+    const reload = h('button', { id: 'mbDiagReload', text: 'Reload map tiles' });
+    const refresh = () => {
+      pre.textContent = g.MB.diagnostics();
+      const w = g.MB.reloadWarning(); warn.textContent = w ? '⚠ ' + w : ''; warn.style.display = w ? 'block' : 'none';
+      reload.textContent = w ? 'Reload anyway (rate-limited)' : 'Reload map tiles';
+    };
+    reload.addEventListener('click', () => {
+      const r = g.MB.reloadTiles();
+      if (r < 0) { toast('Reload already in progress – please wait a few seconds'); return; }
+      reload.disabled = true; setTimeout(() => { reload.disabled = false; refresh(); }, g.MB.RELOAD_GUARD_MS);
+      toast(g.MB.reloadWarning() ? 'Reloading anyway – Mapbox is rate-limiting; wait if tiles stay missing' : (r ? 'Reloading map tiles…' : 'Map tiles refreshed'));
+      refresh(); setTimeout(refresh, 1500);
+    });
+    refresh();
+    const body = h('div', {}, h('div', { className: 'hint', text: 'If satellite imagery shows gaps, wait a few seconds (missing tiles are retried automatically), then press “Reload map tiles”. Copy this report and send it with a screenshot.' }), warn, pre);
+    modal('Map diagnostics', body, [h('button', { text: 'Close', on: { click: closeModal } }), reload,
       h('button', { className: 'pri', id: 'mbDiagCopy', text: 'Copy report', on: { click: () => { const t = g.MB.diagnostics(); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Report copied'), () => { const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Press Ctrl+C to copy the selected report'); }); } } })]);
   }
   function mapboxSettings() {

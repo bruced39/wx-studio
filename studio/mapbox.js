@@ -1527,30 +1527,40 @@
     if(type==='vector')return 'vector';
     return 'other';
   }
+  function cacheRecoverable(sc){return typeof sc._removeTile==='function'&&(typeof sc.update==='function'||typeof sc.reload==='function');}
   function tileHealth(m){
-    const h={loaded:true,tiles:0,ready:0,pending:0,errored:0,optionalPending:0,optionalErrored:0,
-      sources:{},supported:false,recoverable:false,verified:false,complete:true};
+    const h={loaded:true,tiles:0,ready:0,pending:0,errored:0,optionalPending:0,optionalErrored:0,optionalUnsupported:[],
+      optionalRecoverable:false,sources:{},supported:false,recoverable:false,verified:false,complete:true};
     try{h.loaded=!!m.loaded();}catch(e){}
     let styleReady=true;try{if(m&&typeof m.isStyleLoaded==='function')styleReady=!!m.isStyleLoaded();}catch(e){}
-    const caches=sourceCaches(m),rows=[];
-    for(const [id,sc] of caches){
-      const tiles=sc._tiles,row={role:sourceRole(id,sc),ready:0,pending:0,errored:0};
-      if(tiles&&typeof tiles==='object')for(const k of Object.keys(tiles)){
+    const rows=[];
+    for(const [id,sc] of sourceCaches(m)){
+      const tiles=sc._tiles,row={role:sourceRole(id,sc),ready:0,pending:0,errored:0,readable:!!(tiles&&typeof tiles==='object'),recoverable:cacheRecoverable(sc)};
+      if(row.readable)for(const k of Object.keys(tiles)){
         const st=tiles[k]&&tiles[k].state;
         if(st==='loaded')row.ready++;else if(st==='errored')row.errored++;else row.pending++;
       }
-      rows.push([String(id).replace(/^.*\u001F/,''),row,!!(tiles&&typeof tiles==='object')]);
+      rows.push([String(id).replace(/^.*\u001F/,''),row]);
     }
-    h.supported=rows.length>0&&rows.every(r=>r[2]);
-    h.recoverable=h.supported&&caches.every(([id,sc])=>typeof sc._removeTile==='function'&&(typeof sc.update==='function'||typeof sc.reload==='function'));
     // Satellite imagery is the critical source; without it the base vector source is.
-    const hasSat=rows.some(r=>r[1].role==='satellite'),crit=r=>hasSat?r[1].role==='satellite':r[1].role==='vector';
+    const hasSat=rows.some(r=>r[1].role==='satellite');
     for(const r of rows){
-      const row=r[1];row.critical=crit(r);h.tiles+=row.ready+row.pending+row.errored;
+      const row=r[1];row.critical=hasSat?row.role==='satellite':row.role==='vector';
+      if(row.readable)h.tiles+=row.ready+row.pending+row.errored;
       if(row.critical){h.ready+=row.ready;h.pending+=row.pending;h.errored+=row.errored;}
-      else{h.optionalPending+=row.pending;h.optionalErrored+=row.errored;}
+      else{
+        h.optionalPending+=row.pending;h.optionalErrored+=row.errored;
+        if(!row.readable||!row.recoverable)h.optionalUnsupported.push(r[0]);
+        else h.optionalRecoverable=true;
+      }
       h.sources[r[0]]=row;
     }
+    // Availability is judged on the CRITICAL source(s) only. An optional
+    // source (terrain DEM, image, ...) whose cache lacks the private interface
+    // must never disable otherwise working satellite detection and recovery.
+    const crit=rows.filter(r=>r[1].critical);
+    h.supported=crit.length>0&&crit.every(r=>r[1].readable);
+    h.recoverable=h.supported&&crit.every(r=>r[1].recoverable);
     if(h.supported){h.verified=true;h.complete=!h.pending&&!h.errored;}
     else h.complete=h.loaded;   // cannot verify: fall back to Mapbox's own (optimistic) answer
     // Report, never hide, an unavailable internal interface.
@@ -1567,10 +1577,11 @@
   // never turns into a request storm; the rest follow on later cycles.
   function recoverTiles(m,force,scope){
     scope=scope||'critical';
-    let n=0,room=force?RECOVER_BATCH*2:(throttled()?RECOVER_BATCH_THROTTLED:RECOVER_BATCH);
+    let n=0,room=force?(throttled()?RECOVER_BATCH:RECOVER_BATCH*2):(throttled()?RECOVER_BATCH_THROTTLED:RECOVER_BATCH);
     const h=tileHealth(m),caches=sourceCaches(m);
     if(!h.recoverable)return 0;
     const order=caches.map(([id,sc])=>{const name=String(id).replace(/^.*\u001F/,'');return [sc,h.sources[name]&&h.sources[name].critical];})
+      .filter(([sc])=>cacheRecoverable(sc)&&sc._tiles&&typeof sc._tiles==='object')
       .sort((a,b)=>(b[1]?1:0)-(a[1]?1:0));
     for(const [sc,critical] of order){
       if(room<=0)break;
@@ -1660,14 +1671,28 @@
       let wait=1500*Math.pow(2,tileRetry.n);
       if(throttled())wait=Math.max(wait,DIAG.throttle.until-Date.now()+250);
       scheduleRecovery(wait,'critical');
-    }else if(!h.errored&&h.optionalErrored&&tileRetry.optional<OPTIONAL_MAX_ATTEMPTS){
+    }else if(!h.errored&&h.optionalErrored&&h.optionalRecoverable&&tileRetry.optional<OPTIONAL_MAX_ATTEMPTS){
       scheduleRecovery(Math.max(4000,throttled()?DIAG.throttle.until-Date.now()+250:0),'optional');
     }
   }
+  // Manual "Reload map tiles" is an explicit user action and still works during
+  // an HTTP 429/503 cool-down, but (a) the UI shows a warning, (b) rapid
+  // repeats within RELOAD_GUARD_MS are ignored, and (c) it does NOT end the
+  // cool-down: automatic retries keep respecting it.
+  const RELOAD_GUARD_MS=4000;
+  MB.RELOAD_GUARD_MS=RELOAD_GUARD_MS;
+  MB.manualReload={at:0,count:0,ignored:0,duringBackoff:false};
+  MB.reloadWarning=function(){
+    if(!throttled())return '';
+    const left=Math.max(1,Math.ceil((DIAG.throttle.until-Date.now())/1000));
+    return 'Mapbox is rate-limiting map requests (HTTP 429/503). Reloading now sends extra requests and can make this worse – if tiles stay missing, wait about '+left+' s and try again.';
+  };
   MB.reloadTiles=function(){
     if(!D||MB.status!=='ready')return 0;
+    const now=Date.now(),R=MB.manualReload;
+    if(now-R.at<RELOAD_GUARD_MS){R.ignored++;return -1;}      // rapid repeat: ignored
+    R.at=now;R.count++;R.duringBackoff=throttled();
     MB.cache.clear();incompleteFrames.clear();liveKey=null;invalidateTileRetry();
-    DIAG.throttle.level=0;DIAG.throttle.until=0;      // an explicit user action overrides the cool-down
     let n=recoverTiles(D,true);
     if(!n&&!tileHealth(D).recoverable){
       // Private cache interface unavailable: fall back to the public API and
@@ -1696,12 +1721,14 @@
         if(h.verified)L.push('Satellite/base tiles in view: loaded '+h.ready+', pending '+h.pending+', FAILED '+h.errored+' – '+(h.complete?'COMPLETE':'INCOMPLETE')+' (map.loaded()='+h.loaded+')');
         else L.push('Tile coverage: UNVERIFIED – '+DIAG.limitation);
         if(h.verified&&DIAG.limitation)L.push('LIMITATION: '+DIAG.limitation);
+        if(h.optionalUnsupported.length)L.push('Note (not blocking): no retry interface for '+h.optionalUnsupported.join(', ')+' – satellite recovery is unaffected.');
         if(h.optionalErrored||h.optionalPending)L.push('Other sources (not blocking): pending '+h.optionalPending+', failed '+h.optionalErrored);
         for(const k of Object.keys(h.sources)){const r=h.sources[k];L.push('  '+k+' ['+r.role+(r.critical?', counted':', informational')+']: loaded '+r.ready+', pending '+r.pending+', failed '+r.errored);}
       }
+      if(MB.reloadWarning())L.push('WARNING: '+MB.reloadWarning());
       const T=DIAG.throttle,left=Math.max(0,Math.round((T.until-Date.now())/1000));
       L.push('Rate limiting (HTTP 429/503): '+DIAG.throttleEvents+' event(s)'+(left?', back-off ACTIVE for '+left+' s (level '+T.level+')':', not active'));
-      L.push('Tile errors since start: '+DIAG.tileErrorCount+', tile reload attempts: '+DIAG.recoveries+', style-reload fallbacks: '+DIAG.fallbackReloads+', incomplete snapshots not trusted: '+DIAG.incompleteSnaps);
+      L.push('Tile errors since start: '+DIAG.tileErrorCount+', tile reload attempts: '+DIAG.recoveries+', style-reload fallbacks: '+DIAG.fallbackReloads+', manual reloads: '+MB.manualReload.count+' (ignored repeats: '+MB.manualReload.ignored+'), incomplete snapshots not trusted: '+DIAG.incompleteSnaps);
       for(const e of DIAG.tileErrors.slice(-12))L.push('  '+e.t+' '+(e.source||'?')+' '+(e.status===''?'':'HTTP '+e.status+' ')+e.message);
     }catch(e){L.push('(diagnostics error: '+(e&&e.message)+')');}
     return L.join('\n');
