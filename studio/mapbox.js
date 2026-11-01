@@ -1336,6 +1336,7 @@
         await withTimeout(loadLib(),20000,
           'Mapbox GL JS did not download within 20 seconds. Check the connection and refresh.');
         g.mapboxgl.accessToken = MB.token();
+        try { if (DIAG.nativeDpr == null) DIAG.nativeDpr = g.devicePixelRatio; } catch (e) { /* ignore */ }
         try { Object.defineProperty(g, 'devicePixelRatio', { configurable: true, get: () => MB.scale }); } catch (e) { /* ignore */ }
         const cw = Math.round(W / MB.scale), ch = Math.round(H / MB.scale);
         host = document.createElement('div'); host.style.cssText = `position:fixed;left:-30000px;top:0;width:${cw}px;height:${ch}px;pointer-events:none;`;
@@ -1351,7 +1352,22 @@
           P=null;
           console.warn('WX Studio optional Mapbox projector unavailable:',projectorError);
         }
-        D.on('error', e => { const m = e && e.error && e.error.message; if (m && /401|403|token|Unauthorized/i.test(m)) { MB.err = 'Mapbox rejected the token (' + m + ')'; MB.status = 'error'; } });
+        D.on('error', e => {
+          if (isAuthError(e)) { MB.err = 'Mapbox rejected the token (' + String(e.error.message || e.error.status).replace(/https?:\/\/\S+/g, '').trim() + ')'; MB.status = 'error'; return; }
+          recordMapError(e);
+        });
+        D.on('idle', onMapIdle);
+        D.on('movestart', () => { tileRetry.n = 0; });
+        try {
+          const cvs = D.getCanvas();
+          cvs.addEventListener('webglcontextlost', () => { DIAG.contextLost++; });
+          cvs.addEventListener('webglcontextrestored', () => {
+            // Mapbox rebuilds its GL state itself; drop every picture taken
+            // from the lost context and request all tiles again.
+            DIAG.contextRestored++; MB.cache.clear(); incompleteFrames.clear(); liveKey = null;
+            setTimeout(() => { try { if (D) { recoverTiles(D, true); D.triggerRepaint(); } } catch (e) { /* ignore */ } if (MB.onUpdate) MB.onUpdate(); }, 50);
+          });
+        } catch (e) { /* ignore */ }
         D.on('moveend',()=>refreshDynamicOverlays(D));
         D.on('sourcedata',e=>{
           if(activeOverlayCfg?.overlayLatLonMode!=='ocean'||!e.isSourceLoaded)return;
@@ -1380,7 +1396,7 @@
     })();
     return initP;
   };
-  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); MB.last=null;MB.lastKey=null; snapshotBusy=false;previewHold=null;previewRestorePending=false;previewRestoreKey=null; MB.status='idle'; MB.err = ''; MB.queue = Promise.resolve(); };
+  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); incompleteFrames.clear(); clearTimeout(tileRetry.timer); tileRetry.timer = null; tileRetry.n = 0; MB.last=null;MB.lastKey=null; snapshotBusy=false;previewHold=null;previewRestorePending=false;previewRestoreKey=null; MB.status='idle'; MB.err = ''; MB.queue = Promise.resolve(); };
   MB.setToken = function (t) { ls.set('wx.mapbox.token', String(t || '').trim()); MB.reset(); };
   MB.setScale = function (s) { MB.scale = s; ls.set('wx.mapbox.scale', String(s)); MB.reset(); };
 
@@ -1425,7 +1441,7 @@
   // Bounded even when a GPU/context failure suppresses the Mapbox 'render'
   // event completely. The previous 20s timeout was INSIDE that event and
   // therefore never fired, leaving the entire snap queue permanently busy.
-  function settle(m,generation){
+  function settle(m,generation,wallMs){
     return new Promise((resolve,reject)=>{
       let active=true,ok=0,sawRender=false,stepTimer=null;
       const done=(value,error)=>{
@@ -1440,7 +1456,7 @@
         // loading screen. A completely silent GPU gets an explicit error.
         if(sawRender)return done(true);
         done(false,new Error('Mapbox did not render a frame within 14 seconds. Check browser WebGL/GPU acceleration and refresh.'));
-      },14000);
+      },wallMs>0?wallMs:14000);
       const onRender=()=>{
         if(!active)return;
         sawRender=true;
@@ -1471,6 +1487,138 @@
     const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
     return styleKey===curStyleKey && pr===curProj && (bg.mbStyle!=='broadcast'||cfgKey===curCfgKey);
   }
+
+  /* ---- tile completeness, recovery and diagnostics (v0.10.2.2) ----
+     Mapbox GL treats a tile that FAILED to download (HTTP 429/5xx, aborted
+     request, dropped connection) as "loaded": map.loaded() and
+     areTilesLoaded() both report true and no automatic retry is made until
+     the tile leaves the view. A satellite snapshot taken at that moment was
+     cached as complete, which produced permanent rectangular holes with the
+     vector labels (a different source) still drawn. The helpers below count
+     failed tiles explicitly, retry them with back-off, and refuse to cache a
+     frame that is known to be incomplete. */
+  const DIAG={tileErrors:[],tileErrorCount:0,recoveries:0,incompleteSnaps:0,retryable:0,
+    contextLost:0,contextRestored:0,lastHealth:null,nativeDpr:null,started:Date.now()};
+  const INCOMPLETE_RETRY_MS=8000,INCOMPLETE_MAX_TRIES=3,incompleteFrames=new Map();
+  MB.diag=DIAG;
+  function sourceCaches(m){
+    const out=[];
+    try{
+      const st=m&&m.style;if(!st)return out;
+      const raw=st._mergedSourceCaches||st._sourceCaches||st.sourceCaches;
+      if(!raw)return out;
+      if(raw instanceof Map){for(const [id,sc] of raw)if(sc)out.push([id,sc]);}
+      else for(const id of Object.keys(raw))if(raw[id])out.push([id,raw[id]]);
+    }catch(e){}
+    return out;
+  }
+  function tileHealth(m){
+    const h={loaded:true,tiles:0,ready:0,pending:0,errored:0,sources:{},complete:true};
+    try{h.loaded=!!m.loaded();}catch(e){}
+    for(const [id,sc] of sourceCaches(m)){
+      const tiles=sc._tiles||{},row={ready:0,pending:0,errored:0};
+      for(const k of Object.keys(tiles)){
+        const st=tiles[k]&&tiles[k].state;h.tiles++;
+        if(st==='loaded')row.ready++;else if(st==='errored')row.errored++;else row.pending++;
+      }
+      h.ready+=row.ready;h.pending+=row.pending;h.errored+=row.errored;
+      if(row.pending||row.errored)h.sources[String(id).replace(/^.*[\u001F:]/,'')]=row;
+    }
+    h.complete=h.loaded&&!h.pending&&!h.errored;
+    return h;
+  }
+  // Remove failed (or, with force, all) tiles so the source cache requests
+  // them again. Public Mapbox API has no per-tile retry; reload() skips
+  // errored tiles, so they are evicted and the cache is asked to update.
+  function recoverTiles(m,force){
+    let n=0;
+    for(const [id,sc] of sourceCaches(m)){
+      try{
+        const tiles=sc._tiles||{},keys=Object.keys(tiles).filter(k=>force||(tiles[k]&&tiles[k].state==='errored'));
+        if(!keys.length)continue;
+        for(const k of keys){if(typeof sc._removeTile==='function'){sc._removeTile(k);n++;}}
+        if(typeof sc.update==='function')sc.update(m.transform);
+        else if(typeof sc.reload==='function')sc.reload();
+      }catch(e){}
+    }
+    if(n){DIAG.recoveries++;DIAG.retryable=0;try{m.triggerRepaint();}catch(e){}}
+    return n;
+  }
+  // Only a genuine authorisation failure may latch the whole map into the
+  // permanent error state. A request URL always contains "access_token=", so
+  // matching the word "token" anywhere in an error would turn ANY failed tile
+  // (429, 5xx, dropped connection) into "Mapbox rejected the token".
+  function isAuthError(e){
+    const err=e&&e.error;if(!err)return false;
+    if(err.status===401||err.status===403)return true;
+    if(err.status!=null&&err.status!=='')return false;
+    const m=String(err.message||'').replace(/https?:\/\/\S+/g,'');
+    return /\b401\b|\b403\b|Unauthorized|invalid (access )?token|access token (is )?(invalid|expired|required)/i.test(m);
+  }
+  function recordMapError(e){
+    const err=e&&e.error,status=err&&err.status,msg=(err&&err.message)||'';
+    DIAG.tileErrorCount++;DIAG.retryable++;
+    DIAG.tileErrors.push({t:new Date().toISOString().slice(11,19),source:(e&&e.sourceId)||'',status:status==null?'':status,
+      message:String(msg).replace(/access_token=[^&\s"']+/g,'access_token=…').slice(0,160)});
+    if(DIAG.tileErrors.length>40)DIAG.tileErrors.shift();
+  }
+  function cachedFrame(key){
+    const cv=MB.cache.get(key);if(!cv)return null;
+    const inc=incompleteFrames.get(key);
+    if(inc&&inc.tries<INCOMPLETE_MAX_TRIES&&Date.now()-inc.at>INCOMPLETE_RETRY_MS){MB.cache.delete(key);return null;}
+    return cv;
+  }
+  // Idle watchdog: when Mapbox stops rendering with failed tiles still in
+  // view, retry them with exponential back-off (1.5 s, 3 s, 6 s, 12 s).
+  const tileRetry={n:0,timer:null};
+  function onMapIdle(){
+    if(!D||MB.interacting||snapshotBusy)return;
+    const h=tileHealth(D);DIAG.lastHealth=h;
+    if(!h.errored){
+      tileRetry.n=0;
+      // Frames captured while tiles were failing are stale now: re-snap.
+      if(h.complete&&incompleteFrames.size){for(const k of incompleteFrames.keys())MB.cache.delete(k);incompleteFrames.clear();if(MB.onUpdate)MB.onUpdate();}
+      return;
+    }
+    if(tileRetry.timer||tileRetry.n>=4)return;
+    const wait=1500*Math.pow(2,tileRetry.n++);
+    tileRetry.timer=setTimeout(()=>{
+      tileRetry.timer=null;
+      if(!D||MB.interacting||snapshotBusy)return;
+      recoverTiles(D);
+    },wait);
+  }
+  MB.reloadTiles=function(){
+    if(!D||MB.status!=='ready')return 0;
+    MB.cache.clear();incompleteFrames.clear();liveKey=null;tileRetry.n=0;
+    const n=recoverTiles(D,true);
+    try{D.triggerRepaint();}catch(e){}
+    if(MB.onUpdate)MB.onUpdate();
+    return n;
+  };
+  MB.diagnostics=function(){
+    const L=['WX Studio map diagnostics','Time: '+new Date().toISOString(),'Browser: '+(g.navigator&&g.navigator.userAgent||'?')];
+    try{
+      L.push('Mapbox GL JS: '+(g.mapboxgl&&g.mapboxgl.version||'?')+' (pinned '+VER+')');
+      L.push('Status: '+MB.status+(MB.err?' – '+MB.err:''));
+      L.push('Device pixel ratio: native '+(DIAG.nativeDpr==null?'?':DIAG.nativeDpr)+', map render scale '+MB.scale);
+      let gl=null;try{gl=D&&D.painter&&D.painter.context&&D.painter.context.gl;}catch(e){}
+      if(gl){
+        const ext=gl.getExtension&&gl.getExtension('WEBGL_debug_renderer_info');
+        L.push('WebGL: '+gl.getParameter(gl.VERSION)+' | '+(ext?gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)+' / '+gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):'renderer hidden by browser')+' | max texture '+gl.getParameter(gl.MAX_TEXTURE_SIZE));
+        L.push('WebGL context lost now: '+(gl.isContextLost&&gl.isContextLost()));
+      }else L.push('WebGL: map not initialised');
+      L.push('WebGL context losses / restores: '+DIAG.contextLost+' / '+DIAG.contextRestored);
+      if(D){
+        const h=tileHealth(D);
+        L.push('Tiles in view: '+h.tiles+' (loaded '+h.ready+', pending '+h.pending+', failed '+h.errored+') – map.loaded()='+h.loaded);
+        for(const k of Object.keys(h.sources))L.push('  '+k+': '+JSON.stringify(h.sources[k]));
+      }
+      L.push('Tile errors since start: '+DIAG.tileErrorCount+', tile reload attempts: '+DIAG.recoveries+', incomplete snapshots not trusted: '+DIAG.incompleteSnaps);
+      for(const e of DIAG.tileErrors.slice(-12))L.push('  '+e.t+' '+(e.source||'?')+' '+(e.status===''?'':'HTTP '+e.status+' ')+e.message);
+    }catch(e){L.push('(diagnostics error: '+(e&&e.message)+')');}
+    return L.join('\n');
+  };
 
   // The WebGL map used by the live editor is ALSO used for hidden
   // thumbnail/export snapshots. Hold the last correct editor frame while
@@ -1547,7 +1695,7 @@
 
   MB.queue = Promise.resolve();
   async function doSnap(bg, cam, key) {
-    await MB.init();if(MB.cache.has(key))return MB.cache.get(key);
+    await MB.init();{const hit=cachedFrame(key);if(hit)return hit;}
     if(MB.interacting)return null;
     // Capture before BOTH style changes and camera jumps.
     holdEditorFrame();
@@ -1559,10 +1707,26 @@
       D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});liveKey=null;
       const ready=await settle(D,generation);
       if(!ready||generation!==renderGeneration||MB.interacting)return null;
+      // map.loaded() is TRUE even when tiles failed to download, so count
+      // failed/pending tiles explicitly and give them two more chances.
+      let health=tileHealth(D);
+      for(let round=0;round<2&&!health.complete;round++){
+        if(health.errored)recoverTiles(D);
+        const again=await settle(D,generation,6000);
+        if(!again||generation!==renderGeneration||MB.interacting)return null;
+        health=tileHealth(D);
+      }
+      DIAG.lastHealth=health;
       const cv=document.createElement('canvas');cv.width=W;cv.height=H;
       cv.getContext('2d').drawImage(D.getCanvas(),0,0,W,H);
+      // An incomplete picture is still returned (better than a blank), but
+      // it is only trusted for a short time and then re-rendered, instead of
+      // being cached as final.
+      const prior=incompleteFrames.get(key);
+      if(health.complete)incompleteFrames.delete(key);
+      else{DIAG.incompleteSnaps++;incompleteFrames.set(key,{at:Date.now(),tries:(prior?prior.tries:0)+1});}
       MB.cache.set(key,cv);
-      if(MB.cache.size>14)MB.cache.delete(MB.cache.keys().next().value);
+      if(MB.cache.size>14){const old=MB.cache.keys().next().value;MB.cache.delete(old);incompleteFrames.delete(old);}
       MB.last=cv;MB.lastKey=key;
       return cv;
     }finally{
@@ -1575,7 +1739,7 @@
   MB.snap = function(bg,cam){
     if(MB.status==='error')return Promise.reject(new Error(MB.err||'Mapbox failed'));
     const key=keyOf(bg,cam),b=cloneBg(bg);
-    if(MB.cache.has(key))return Promise.resolve(MB.cache.get(key));
+    {const hit=cachedFrame(key);if(hit)return Promise.resolve(hit);}
     const p=MB.queue.then(()=>doSnap(b,cam,key)).catch(error=>{
       // A fatal style/render exception must be visible to the user, not
       // swallowed by pump() and instantly retried every editor frame.
@@ -1600,7 +1764,7 @@
   }
   MB.liveFrame=function(bg,cam){
     if(!MB.hasToken())return null;
-    const key=keyOf(bg,cam),cached=MB.cache.get(key);
+    const key=keyOf(bg,cam),cached=cachedFrame(key);
     // Snapshot cameras must never be drawn in the live scene. MB.last
     // can belong to ANOTHER scene/zoom, so only accept exact-key snapshots.
     if(snapshotBusy)return previewHold||cached||null;
@@ -1618,7 +1782,7 @@
     return MB.lastKey===key?MB.last:null;
   };
   MB.frame=function(bg,cam){
-    const key=keyOf(bg,cam),cached=MB.cache.get(key);
+    const key=keyOf(bg,cam),cached=cachedFrame(key);
     if(cached)return cached;
     if(MB.status==='error'||!MB.hasToken())
       return MB.lastKey===key?MB.last:null;

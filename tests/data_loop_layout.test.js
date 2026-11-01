@@ -92,7 +92,7 @@ test('Mapbox map remains usable if weather imagery errors; startup errors are ex
   // The visible Mapbox map must not be blocked by a second empty projector.
   assert.match(map,/withTimeout\(once\(D,'load'\),25000/);
   assert.doesNotMatch(map,/Promise\.all\(\[once\(D, 'load'\),once\(P, 'load'\)\]\)/);
-  assert.match(map,/function settle\(m,generation\)/);
+  assert.match(map,/function settle\(m,generation,wallMs\)/);
   assert.match(map,/MB\.status='error';MB\.err=/);
 });
 test('frame date and scrub position use the exact rendered underlay frame',()=>{
