@@ -135,17 +135,39 @@ with sync_playwright() as p:
     chk('…the copy carries B’s rename, the original A’s hold change', any(s['doc']['scenes'][0]['anim']['steps'][1]['name'] == 'B renamed' for s in shows) and any(s['doc']['scenes'][0]['anim']['steps'][1]['hold'] == 4 for s in shows))
 
     # ---------- offline recovery ----------
+    # The edit is a SPECIFIC coordinate (step 3, first object, first point, x). Its value is read from the live editor
+    # before the edit (earlier conflict sections changed the show, so it is NOT compared with the original `expect`).
+    PT = "WX.S.show.scenes[0].anim.steps[2].objects[0].pts[0][0]"
+    before_x = a.evaluate(PT); cloud_before = json.loads(json.dumps(cloud_anim(), sort_keys=True)); rev_before = S0()['rev']
+    want_x = before_x + 7
     adm('faults', {'offline': True})
     a.evaluate("(()=>{const s=WX.S.show.scenes[0];s.anim.steps[2].objects[0].pts[0][0]+=7;MapAnim.normalize(s);WX.commit();})()")
     ok = wait(a, "()=>document.getElementById('cloudState').querySelector('.cl').textContent.startsWith('Offline')", 25000)
     chk('offline: "Offline – saved locally"', ok, chip(a))
-    ns = a.evaluate("localStorage.getItem('wx.studio.ns.v1')"); loc = a.evaluate("([k])=>localStorage.getItem(k)||''", ['wx.studio.autosave.v1:u:' + str(ns)])
-    chk('offline edit of step 3 is in the local autosave (steps included)', '"anim"' in loc and '"steps"' in loc, len(loc))
+    chk('offline: the editor holds the edited coordinate (before + 7)', a.evaluate(PT) == want_x, (before_x, a.evaluate(PT)))
+    ns = a.evaluate("localStorage.getItem('wx.studio.ns.v1')"); LKEY = 'wx.studio.autosave.v1:u:' + str(ns)
+    LOCX = """(k)=>{const raw=localStorage.getItem(k)||'';if(!raw)return {raw:0};let o;try{o=JSON.parse(raw)}catch(e){return {raw:raw.length,bad:1}}
+      const find=(x)=>{if(!x||typeof x!=='object')return null;if(Array.isArray(x.scenes))return x;for(const v of Object.values(x)){const r=find(v);if(r)return r}return null};
+      const sh=find(o);if(!sh)return {raw:raw.length,noshow:1};const an=sh.scenes[0].anim;
+      return {raw:raw.length,steps:an&&an.steps.length,x:an&&an.steps[2].objects[0].pts[0][0],id:an&&an.steps[2].objects[0].id}}"""
+    loc = a.evaluate(LOCX, LKEY)
+    chk('offline: local autosave holds the SAME edited coordinate and all 3 steps', loc.get('steps') == 3 and loc.get('x') == want_x, (loc, want_x))
+    chk('offline: the cloud document is untouched (same revision, same coordinate)', S0()['rev'] == rev_before and cloud_anim()['steps'][2]['objects'][0]['pts'][0][0] == before_x, (S0()['rev'], rev_before))
     a.reload(); a.wait_for_timeout(2200)
-    chk('reload while offline keeps all 3 steps and the edit', a.evaluate("WX.S.show.scenes[0].anim.steps.length") == 3 and a.evaluate("WX.S.show.scenes[0].anim.steps[2].objects[0].pts[0][0]") == expect['steps'][2]['objects'][0]['pts'][0][0] + 7 if False else a.evaluate("WX.S.show.scenes[0].anim.steps.length") == 3)
+    chk('reload while offline: the live show still has 3 steps and the edited coordinate', a.evaluate("WX.S.show.scenes[0].anim.steps.length") == 3 and a.evaluate(PT) == want_x, (a.evaluate("WX.S.show.scenes[0].anim.steps.length"), a.evaluate(PT), want_x))
+    loc2 = a.evaluate(LOCX, LKEY)
+    chk('reload while offline: local storage still holds the edited coordinate', loc2.get('steps') == 3 and loc2.get('x') == want_x and loc2.get('id') == loc.get('id'), (loc2, want_x))
+    chk('reload while offline: the cloud is still at the old revision', S0()['rev'] == rev_before and cloud_anim()['steps'][2]['objects'][0]['pts'][0][0] == before_x)
     adm('faults', {'offline': False}); a.evaluate("WXCloudUI.engine.syncNow({force:true})")
     ok = saved(a, 25000)
     chk('reconnect syncs the offline step edit', ok, chip(a))
+    ca = cloud_anim(); exp = json.loads(json.dumps(cloud_before, sort_keys=True)); exp['steps'][2]['objects'][0]['pts'][0][0] = want_x
+    chk('after reconnect the CLOUD document holds the same edited coordinate', ca['steps'][2]['objects'][0]['pts'][0][0] == want_x, (ca['steps'][2]['objects'][0]['pts'][0][0], want_x))
+    chk('…and nothing else changed: 3 steps, same objects, durations, names (only that coordinate differs)', json.dumps(ca, sort_keys=True) == json.dumps(exp, sort_keys=True), 'steps=%d' % len(ca['steps']))
+    chk('sync lost no step and made exactly ONE new revision, with no conflict dialog', len(ca['steps']) == 3 and S0()['rev'] == rev_before + 1 and modal_text(a) == '', (S0()['rev'], rev_before, modal_text(a)[:60]))
+    chk('the editor still shows the offline edit after the sync (cloud did not overwrite it)', a.evaluate(PT) == want_x)
+    a.evaluate("WXCloudUI.engine.syncNow()"); a.wait_for_timeout(1500)
+    chk('a second sync is "unchanged": no extra revision', S0()['rev'] == rev_before + 1, (S0()['rev'], rev_before))
 
     # ---------- version history / restore ----------
     vers = a.evaluate("WXCloudUI.engine.listVersions()"); cur = S0()['rev']
