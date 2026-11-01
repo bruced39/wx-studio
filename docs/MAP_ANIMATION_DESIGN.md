@@ -94,3 +94,15 @@ Steps live in `scene.anim` of the normal show document: cloud save/open, unchang
 * New steps simplify fronts to ≤ 6 control points (Visvalingam–Whyatt, ends kept). Step 1 is never simplified.
 * Media scans (`showfile.js` inventory, `export.js` readiness, `reattachLib`, `remapMedia`) look into step objects.
 * Version numbers per stage: 0.11.0 (Stage 1) → 0.11.1 (Stage 2) → 0.11.2 (Stage 3) → 0.11.3 (Stage 4); the release number is decided when you approve the merge.
+
+## 11. Test coverage (Stage 4)
+
+| Area | Test |
+|---|---|
+| Model, timeline, interpolation, appear / disappear / drift, determinism, normalize idempotence, speed | `tests/map_animation.test.js` (23) |
+| `.wxshow` JSON + package round trip, step media refs, cloud document build, stable key / unchanged detection, size | `tests/map_animation_files.test.js` (5) |
+| Step bar, editing a step with real mouse input, handles, control points, scrub, play, undo, no autosave from the playhead, non-map scenes | `tests/browser/map_animation_browser_check.py` (37) |
+| Geographic positions under camera move + zoom, determinism, `renderShow` = `renderScene` | `tests/browser/map_animation_geo_browser_check.py` (23) |
+| Frame-accurate export loop (fake encoder inspects every frame) | `tests/browser/map_animation_export_browser_check.py` (7) |
+| Cloud save / open on a second computer, unchanged detection, conflicts (Use cloud / Keep mine / Keep both), offline recovery, version restore – fake Supabase and real SQL (`WX_BACKEND=pg`) | `tests/browser/map_animation_cloud_browser_check.py` (31) |
+| Relative frame cost with 72 objects × 12 steps | `tests/browser/map_animation_perf_browser_check.py` (4) |

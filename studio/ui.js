@@ -285,7 +285,14 @@
     if (so.pts) { r.verts = so.pts; if (so.pts.length) { let cx = 0, cy = 0; so.pts.forEach(q => { cx += q[0]; cy += q[1]; }); r.center = [cx / so.pts.length, cy / so.pts.length]; r.rot = [clamp(b.x + b.w / 2, 30, W - 30), Math.max(34, b.y - 44)]; r.scale = [clamp(b.x + b.w + 18, 20, W - 20), clamp(b.y + b.h + 18, 20, H - 20)]; } } else if (['icon', 'storm', 'hl', 'barb', 'text', 'shape', 'image'].includes(so.type)) r.resize = [b.x + b.w, b.y + b.h];
     return r;
   }
-  function backToEdit() { if (S.mode !== 'edit') { S.mode = 'edit'; S.play = null; updateTransport(); } }
+  function backToEdit() {
+    if (S.mode !== 'edit') {
+      /* v0.11.0: leaving a preview / scrub inside an animated scene continues editing the step that was on screen */
+      const sc = S.show && S.show.scenes[S.si], st0 = sc && MA.isAnimated(sc) ? E.starts(S.show)[S.si] : null;
+      if (st0 != null && S.T >= st0 && S.T <= st0 + sc.duration) { S.stepSid = sc.id; S.step = MA.stepAt(sc, S.T - st0); if (S.oid && !MA.stepObjects(sc, S.step).some(o => o.id === S.oid)) S.oid = null; }
+      S.mode = 'edit'; S.play = null; updateTransport(); if (st0 != null) { renderStepbar(); renderPanels(); }
+    }
+  }
   function mapView(sc) { const k = (S.editEnd && sc.bg.view2) ? 'view2' : 'view'; if (!sc.bg[k]) sc.bg[k] = JSON.parse(JSON.stringify(E.viewAt(sc, editT()))); return sc.bg[k]; }
   ov.addEventListener('pointerdown', e => {
     if (S.present) return;
