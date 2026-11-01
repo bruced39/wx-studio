@@ -40,7 +40,16 @@ button:disabled{opacity:.45;cursor:not-allowed}
 #stageWrap.present canvas{object-fit:contain}
 #tools{display:flex;gap:4px;flex-wrap:wrap;align-items:center}#tools .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
 #tools select{width:auto}
-#transport{display:flex;gap:6px;align-items:center}#scrub{flex:1}#tc{width:96px;text-align:right;color:var(--mut);font-variant-numeric:tabular-nums}
+#stepbar{display:flex;flex-direction:column;gap:5px;background:var(--p1);border:1px solid var(--line);border-radius:8px;padding:6px 8px}#stepbar[hidden]{display:none}
+#stepbar .sbrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap}#stepbar .sbctl{gap:8px}#stepbar .mut{color:var(--mut);font-size:12px}
+#stepbar .sbtrack{position:relative;display:flex;gap:3px;flex:1;min-width:0;height:34px}
+#stepbar .sbstep{display:flex;min-width:46px;border:1px solid var(--line);border-radius:6px;overflow:hidden;cursor:pointer;background:var(--p2)}#stepbar .sbstep.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+#stepbar .sbmove{background:repeating-linear-gradient(135deg,#1c4a7c 0 6px,#173c66 6px 12px);min-width:6px}
+#stepbar .sbhold{display:flex;align-items:center;gap:5px;padding:0 6px;min-width:34px;overflow:hidden;white-space:nowrap}#stepbar .sbhold b{background:var(--acc2);border-radius:10px;padding:0 6px;font-size:12px}#stepbar .sbhold i{font-style:normal;font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis}
+#stepbar .sbhead{position:absolute;top:-2px;bottom:-2px;width:2px;background:#ffe14d;pointer-events:none;margin-left:-1px}
+#stepbar .sbf{display:flex;flex-direction:column;font-size:11px;color:var(--mut);gap:1px}#stepbar .sbf input[type=number]{width:64px}#stepbar .sbf select{width:96px}#stepbar .sbname input{width:130px}
+#stepbar .sbtot{font-variant-numeric:tabular-nums;color:var(--tx);font-weight:700}#stepbar #sbScrub{flex:1;min-width:160px}#stepbar .sbwarn{color:#ffb84d;font-size:12px}
+#bAnimOn[hidden]{display:none}#transport{display:flex;gap:6px;align-items:center}#scrub{flex:1}#tc{width:96px;text-align:right;color:var(--mut);font-variant-numeric:tabular-nums}
 #side{background:var(--p1);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 #tabs{display:flex;border-bottom:1px solid var(--line)}#tabs button{flex:1;border:0;border-radius:0;background:none;padding:8px 2px;font-size:12px;white-space:nowrap;border-bottom:2px solid transparent}
 #tabs button.on{border-bottom-color:var(--acc);color:#fff;background:var(--p2)}
@@ -168,7 +177,8 @@ table.t7{border-collapse:collapse}table.t7 td,table.t7 th{padding:3px;text-align
   <div id="center">
    <div id="stageBox"><div id="stageWrap"><canvas id="stage" width="1920" height="1080"></canvas><canvas id="overlay" width="1920" height="1080"></canvas><div id="mapZoomBadge" hidden aria-live="off" aria-label="Current map zoom"><svg viewBox="0 0 154 44" preserveAspectRatio="none" aria-hidden="true"><rect x="1" y="1" width="152" height="42" rx="8" fill="rgba(8,20,38,0.88)" stroke="rgba(100,180,255,0.75)" stroke-width="2"/><text id="mapZoomValue" x="77" y="23" fill="#ffffff" font-size="23" font-weight="700" font-family="Barlow,Arial,sans-serif" text-anchor="middle" dominant-baseline="middle">ZOOM 0.0</text></svg></div></div></div>
    <div id="tools"></div>
-   <div id="transport"><button id="bPlayScene">▶ Scene</button><button id="bPlayShow">▶ Show</button><button id="bStop">■</button><input id="scrub" type="range" min="0" max="10" step="0.01" value="0"><span id="tc">0.0 / 0.0 s</span></div>
+   <div id="transport"><button id="bPlayScene">▶ Scene</button><button id="bPlayShow">▶ Show</button><button id="bStop">■</button><button id="bAnimOn" class="pri" hidden title="Animate this map scene: add steps and move your fronts, highs/lows, icons and text from step to step">🎞 Animate</button><input id="scrub" type="range" min="0" max="10" step="0.01" value="0"><span id="tc">0.0 / 0.0 s</span></div>
+   <div id="stepbar" hidden></div>
   </div>
   <div id="side"><div id="tabs"><button data-t="scene" class="on">Scene</button><button data-t="object">Object</button><button data-t="library">Library</button><button data-t="media">Media</button><button data-t="bgs">Assets</button></div><div id="panels"></div></div>
  </div>
@@ -179,5 +189,5 @@ table.t7{border-collapse:collapse}table.t7 td,table.t7 th{padding:3px;text-align
   <div id="mapStyleScroll"></div>
  </div>
 <div id="modalBg"><div id="modal"></div></div><div id="toast"></div><input id="fileImg" type="file" accept="image/*" multiple hidden>
-<script src="icons.js"></script><script src="icons_hd_art.js"></script><script src="icons_hd.js"></script><script src="hl_art.js"></script><script src="symbols.js"></script><script src="map.js"></script><script src="mapbox.js"></script><script src="cloud_presets.js"></script><script src="cloud_assets.js"></script><script src="bg7day.js"></script><script src="tb2.js"></script><script src="bgdefault.js"></script><script src="tpl_art.js"></script><script src="engine.js"></script><script src="mp4.js"></script><script src="showfile.js"></script><script src="export.js"></script><script src="ui.js"></script><script src="cloud_workspace.js"></script><script src="cloud_workspace_ui.js"></script><script src="dataloop.js"></script><script src="weather/sources.js"></script><script src="weather/palettes.js"></script><script src="weather/cloud_palettes.js"></script><script src="weather/nexrad_sites.js"></script><script src="weather/processor_bridge.js"></script><script src="weather_workspace.js"></script>
+<script src="icons.js"></script><script src="icons_hd_art.js"></script><script src="icons_hd.js"></script><script src="hl_art.js"></script><script src="symbols.js"></script><script src="map.js"></script><script src="mapbox.js"></script><script src="cloud_presets.js"></script><script src="cloud_assets.js"></script><script src="bg7day.js"></script><script src="tb2.js"></script><script src="bgdefault.js"></script><script src="tpl_art.js"></script><script src="engine.js"></script><script src="mapanim.js"></script><script src="mp4.js"></script><script src="showfile.js"></script><script src="export.js"></script><script src="ui.js"></script><script src="cloud_workspace.js"></script><script src="cloud_workspace_ui.js"></script><script src="dataloop.js"></script><script src="weather/sources.js"></script><script src="weather/palettes.js"></script><script src="weather/cloud_palettes.js"></script><script src="weather/nexrad_sites.js"></script><script src="weather/processor_bridge.js"></script><script src="weather_workspace.js"></script>
 </body></html>

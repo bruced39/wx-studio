@@ -15,7 +15,18 @@
   const akey = () => (NS ? KEY + ':u:' + NS : KEY), touchKey = () => akey() + ':touched'; const HK = {}; let booted = false, bootHadAutosave = false, touched = false;
   const markTouched = () => { if (touched) return; touched = true; try { localStorage.setItem(touchKey(), '1'); } catch (e) { /* ignore */ } };
   const MAP_DEFAULT_KEY = 'wx.studio.defaultMap.v1';
-  const cur = () => S.show.scenes[S.si];
+  /* v0.11.0 map animation steps: cur() is the scene being edited. In an animated scene with step 2+ selected it is a write-through view whose `objects` is that step's
+     array, so every existing tool (move, restyle, add, delete, undo…) edits the selected step. The real show is never swapped. */
+  const MA = g.MapAnim;
+  const realScene = () => S.show.scenes[S.si];
+  const stepIdx = () => { const sc = S.show && S.show.scenes[S.si]; if (!sc || !sc.anim || !MA || !MA.isAnimated(sc)) return 0; if (S.stepSid !== sc.id) { S.stepSid = sc.id; S.step = 0; } S.step = clamp(+S.step || 0, 0, sc.anim.steps.length - 1); return S.step; };
+  const viewCache = new WeakMap();
+  function stepView(sc, i) {
+    const st = sc.anim.steps[i], c = viewCache.get(sc); if (c && c.st === st) return c.px;
+    const px = new Proxy(sc, { get: (t, k) => k === 'objects' ? st.objects : t[k], set: (t, k, v) => { if (k === 'objects') st.objects = v; else t[k] = v; return true; } });
+    viewCache.set(sc, { st, px }); return px;
+  }
+  const cur = () => { const sc = S.show.scenes[S.si]; if (!sc || !sc.anim) return sc; const i = stepIdx(); return i > 0 ? stepView(sc, i) : sc; };
   const selObj = () => cur().objects.find(o => o.id === S.oid) || null;
   const isMap = bg => bg.type === 'map' || bg.type === 'mapbox';
   const editT = () => (S.editEnd && cur().bg.view2) ? (cur().bg.camDelay || 0) + (cur().bg.camDur || 3) + 0.01 : 0;
@@ -147,7 +158,7 @@
     const sh=E.newShow(); if(sh.scenes&&sh.scenes[0]&&sh.scenes[0].bg&&sh.scenes[0].bg.type==='mapbox')sh.scenes[0].bg=JSON.parse(JSON.stringify(defaultMapBg()));
     return sh;
   }
-  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
+  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); sh.scenes.forEach(x => { if (x && x.anim && MA) MA.normalize(x); }); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
@@ -245,9 +256,23 @@
 
   /* ---------- stage pointer interaction ---------- */
   const pt = e => { const r = ov.getBoundingClientRect(); return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
+  /* rotate / scale a line-type object about its centre on screen, then store it back in its own coordinates (geographic when pinned to the map) */
+  function rotScalePts(pts, c, ang, f) { const cs = Math.cos(ang), sn = Math.sin(ang); return pts.map(q => { const x = (q[0] - c[0]) * f, y = (q[1] - c[1]) * f; return [c[0] + x * cs - y * sn, c[1] + x * sn + y * cs]; }); }
+  function setScreenPts(o, xf, np) { const out = (o.geo && xf.map) ? np.map(q => xf.inv(q[0], q[1])) : np; if (out.every(q => isFinite(q[0]) && isFinite(q[1]))) o.pts = out; }
+  function transformSelected(ang, f) {
+    const o = selObj(); if (!o || !o.pts || !o.pts.length) return; const xf = E.xf(cur(), editT()), so = E.toScreen(o, xf); let cx = 0, cy = 0; so.pts.forEach(q => { cx += q[0]; cy += q[1]; });
+    const c = [cx / so.pts.length, cy / so.pts.length]; setScreenPts(o, xf, rotScalePts(so.pts.map(q => [q[0], q[1]]), c, ang * Math.PI / 180, f)); commit();
+  }
+  /* double-click the curve to add a control point; returns true when one was added */
+  function addCtrlPoint(o, p) {
+    const xf = E.xf(cur(), editT()), so = E.toScreen(o, xf); if (!so.pts || so.pts.length < 2) return false;
+    const SEG = 10, raw = o.type === 'pen', dense = raw ? so.pts : g.Sym.catmull(so.pts, !!so.closed, SEG); let bi = -1, bd = 1e9;
+    dense.forEach((q, i) => { const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < bd) { bd = d; bi = i; } }); if (bi < 0 || bd > 22) return false;
+    const span = raw ? clamp(bi, 0, so.pts.length - 2) : clamp(Math.floor(bi / SEG), 0, so.pts.length - 2), np = so.pts.map(q => [q[0], q[1]]); np.splice(span + 1, 0, [dense[bi][0], dense[bi][1]]); setScreenPts(o, xf, np); commit(); return true;
+  }
   function handles(so) {
     const b = E.bounds(so), r = { verts: null, resize: null, box: b };
-    if (so.pts) r.verts = so.pts; else if (['icon', 'storm', 'hl', 'barb', 'text', 'shape', 'image'].includes(so.type)) r.resize = [b.x + b.w, b.y + b.h];
+    if (so.pts) { r.verts = so.pts; if (so.pts.length) { let cx = 0, cy = 0; so.pts.forEach(q => { cx += q[0]; cy += q[1]; }); r.center = [cx / so.pts.length, cy / so.pts.length]; r.rot = [clamp(b.x + b.w / 2, 30, W - 30), Math.max(34, b.y - 44)]; r.scale = [clamp(b.x + b.w + 18, 20, W - 20), clamp(b.y + b.h + 18, 20, H - 20)]; } } else if (['icon', 'storm', 'hl', 'barb', 'text', 'shape', 'image'].includes(so.type)) r.resize = [b.x + b.w, b.y + b.h];
     return r;
   }
   function backToEdit() { if (S.mode !== 'edit') { S.mode = 'edit'; S.play = null; updateTransport(); } }
@@ -275,7 +300,9 @@
       const so = selObj() ? E.toScreen(selObj(), xf) : null;
       if (so) { const hd = handles(so);
         if (selObj().move && selObj().move.on) { const mb = E.bounds(so), ax = mb.x + mb.w / 2, ay = mb.y + mb.h / 2, i = selObj().move.pts.findIndex(q => Math.hypot(ax + q[0] - p[0], ay + q[1] - p[1]) < 26); if (i >= 0) { S.drag = { k: 'mstop', i }; return; } }
-        if (hd.verts) { const i = hd.verts.findIndex(v => Math.hypot(v[0] - p[0], v[1] - p[1]) < 16); if (i >= 0) { S.drag = { k: 'vert', i }; return; } }
+        if (hd.verts) { const i = hd.verts.findIndex(v => Math.hypot(v[0] - p[0], v[1] - p[1]) < 16); if (i >= 0) { if (e.shiftKey) { const so0 = selObj(); if (so0.pts.length > 2) { so0.pts.splice(i, 1); commit(); renderPanels(); } return; } S.drag = { k: 'vert', i }; return; } }
+        if (hd.rot && Math.hypot(hd.rot[0] - p[0], hd.rot[1] - p[1]) < 22) { S.drag = { k: 'rot', c: hd.center, a0: Math.atan2(p[1] - hd.center[1], p[0] - hd.center[0]), orig: so.pts.map(q => [q[0], q[1]]), moved: true }; return; }
+        if (hd.scale && Math.hypot(hd.scale[0] - p[0], hd.scale[1] - p[1]) < 22) { S.drag = { k: 'scl', c: hd.center, r0: Math.hypot(p[0] - hd.center[0], p[1] - hd.center[1]) || 1, orig: so.pts.map(q => [q[0], q[1]]), moved: true }; return; }
         if (hd.resize && Math.hypot(hd.resize[0] - p[0], hd.resize[1] - p[1]) < 18) { S.drag = { k: 'resize', last: p, c: [hd.box.x + hd.box.w / 2, hd.box.y + hd.box.h / 2] }; return; } }
       const hit = E.hit(sc, editT(), p[0], p[1]);
       if (hit) { S.oid = hit.id; S.drag = { k: 'move', last: p, moved: false }; if (S.tab !== 'object') setTab('object'); else renderPanels(); }
@@ -321,6 +348,12 @@
       d.last = p; d.moved = true; }
     else if (d.k === 'mstop' && o && o.move) { const mb = E.bounds(E.toScreen(o, xf)); o.move.pts[d.i] = [p[0] - (mb.x + mb.w / 2), p[1] - (mb.y + mb.h / 2)]; }
     else if (d.k === 'vert' && o) { const k = (o.geo && xf.map) ? xf.k : 1, q = o.geo && xf.map ? xf.inv(p[0], p[1]) : p; o.pts[d.i] = [q[0], q[1]]; }
+    else if ((d.k === 'rot' || d.k === 'scl') && o) {
+      let ang = 0, f = 1;
+      if (d.k === 'rot') { ang = Math.atan2(p[1] - d.c[1], p[0] - d.c[0]) - d.a0; if (e.shiftKey) ang = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12); }
+      else f = clamp(Math.hypot(p[0] - d.c[0], p[1] - d.c[1]) / d.r0, 0.1, 12);
+      setScreenPts(o, xf, rotScalePts(d.orig, d.c, ang, f));
+    }
     else if (d.k === 'resize' && o) {
       const so = E.toScreen(o, xf), k = (o.geo && xf.map) ? (xf.kOf ? xf.kOf(o) : xf.k) : 1;
       if (o.type === 'image') { const r = (o.h / o.w) || 1; o.w = Math.max(20, o.w + (p[0] - d.last[0]) / k); if (e.shiftKey) o.h = Math.max(20, o.h + (p[1] - d.last[1]) / k); else o.h = o.w * r; }
@@ -378,7 +411,7 @@
   }
   ov.addEventListener('dblclick', e => {
     if (S.draft && S.draft.pts) { S.draft.pts.pop(); finishDraft(); return; }
-    if (S.tool !== 'select' || !S.show) return; const sc = cur(), p = pt(e), hit = E.hit(sc, editT(), p[0], p[1]);
+    if (S.tool !== 'select' || !S.show) return; const sc = cur(), p = pt(e), so0 = selObj(); if (so0 && so0.pts && addCtrlPoint(so0, p)) { e.preventDefault(); return; } const hit = E.hit(sc, editT(), p[0], p[1]);
     if (hit && hit.type === 'text' && !hit.auto) { S.oid = hit.id; if (S.tab !== 'object') setTab('object'); else renderPanels(); startInline(hit, false); return; }
     const T = sc.title2; if (!hit && T && T.show && T.textOnly) { const R = T.region || { l: 186, r: 1272, cy: 102, h: 88 }, dx = T.dx || 0; if (p[0] >= R.l + dx && p[0] <= R.r + dx && Math.abs(p[1] - (R.cy + (T.ty || 0))) <= R.h / 2 + 6) startInline(T, true); }
   });
@@ -403,11 +436,85 @@
   /* ---------- playback ---------- */
   function playFrom(a, b) { S.mode = 'play'; S.play = { a, b, t0: clock() }; }
   function stopPlay() { S.mode = 'edit'; S.play = null; if (S.present) exitPresent(); updateTransport(); }
-  function updateTransport() { const tot = E.total(S.show), sc = $('#scrub'); sc.max = tot; const T = S.mode === 'edit' ? E.starts(S.show)[S.si] : S.T; if (document.activeElement !== sc) sc.value = T; $('#tc').textContent = `${T.toFixed(1)} / ${tot.toFixed(1)} s`; }
+  function updateTransport() { const tot = E.total(S.show), sc = $('#scrub'); sc.max = tot; const T = S.mode === 'edit' ? E.starts(S.show)[S.si] : S.T; if (document.activeElement !== sc) sc.value = T; $('#tc').textContent = `${T.toFixed(1)} / ${tot.toFixed(1)} s`; if (typeof syncStepbar === 'function') syncStepbar(); }
   $('#scrub').addEventListener('input', e => { S.mode = 'scrub'; S.T = +e.target.value; S.play = null; updateTransport(); });
   $('#bPlayScene').onclick = () => { const st = E.starts(S.show)[S.si]; playFrom(st, st + cur().duration); };
   $('#bPlayShow').onclick = () => playFrom(0, E.total(S.show));
   $('#bStop').onclick = stopPlay;
+
+  /* ---------- v0.11.0 map animation bar: steps, timing, scrub, play ---------- */
+  const sbar = () => $('#stepbar');
+  const SB_WARN = 1024 * 1024;
+  function selectStep(i) {
+    const sc = realScene(); if (!MA.isAnimated(sc)) return; backToEdit(); S.stepSid = sc.id; S.step = clamp(i, 0, sc.anim.steps.length - 1);
+    if (S.oid && !selObj()) S.oid = null; renderStepbar(); renderPanels();
+  }
+  function stepsChanged(sel) { const sc = realScene(); if (sel != null) { S.stepSid = sc.id; S.step = sel; } if (S.oid && !selObj()) S.oid = null; commit(); renderStepbar(); renderPanels(); updateTransport(); renderSceneList(); }
+  function animEnable() { const sc = realScene(); backToEdit(); MA.enable(sc); S.stepSid = sc.id; S.step = 0; commit(); refreshAll(); toast('Animation on – click “＋ Step”, then move your graphics for the next step'); }
+  function animDisable() { const sc = realScene(); if (!MA.isAnimated(sc)) return; backToEdit(); const keep = stepIdx(); MA.flatten(sc, keep); S.step = 0; commit(); refreshAll(); toast('Animation removed (kept Step ' + (keep + 1) + '). Ctrl+Z brings it back.'); }
+  function stepAdd() { const sc = realScene(); backToEdit(); const at = MA.addStep(sc, stepIdx()); if (at == null) return toast('Maximum ' + MA.LIMITS.maxSteps + ' steps'); stepsChanged(at); }
+  function stepDup() { const sc = realScene(), at = MA.dupStep(sc, stepIdx()); if (at == null) return toast('Maximum ' + MA.LIMITS.maxSteps + ' steps'); backToEdit(); stepsChanged(at); }
+  function stepDel() { const sc = realScene(); if (sc.anim.steps.length < 2) return toast('Keep at least one step (use “Remove animation” to turn steps off)'); backToEdit(); const at = MA.delStep(sc, stepIdx()); stepsChanged(at); }
+  function stepShift(d) { const sc = realScene(), i = stepIdx(), to = i + d; if (to < 0 || to >= sc.anim.steps.length) return; backToEdit(); stepsChanged(MA.moveStep(sc, i, to)); }
+  /* put the selected object (or all objects) of this step into every other step, same ids – so a style / position change reaches all steps */
+  function copyToAllSteps(all) {
+    const sc = realScene(); if (!MA.isAnimated(sc)) return; const i = stepIdx(), src = (all ? MA.stepObjects(sc, i) : [selObj()]).filter(Boolean);
+    if (!src.length) return toast('Select an object first'); backToEdit();
+    sc.anim.steps.forEach((st, k) => { if (k === i) return; const arr = MA.stepObjects(sc, k); src.forEach(o => { const c = JSON.parse(JSON.stringify(o)), j = arr.findIndex(q => q.id === o.id); if (j >= 0) arr[j] = c; else arr.push(c); }); });
+    commit(); renderStepbar(); toast(all ? 'Copied all graphics of this step to every step' : 'Copied this object to every step');
+  }
+  function sbNum(label, val, min, max, step, on, dis, title) {
+    const el = h('input', { type: 'number', min, max, step, value: +(+val).toFixed(2), disabled: !!dis }); if (title) el.title = title;
+    el.addEventListener('change', () => { let v = +el.value; if (!isFinite(v)) v = val; on(clamp(v, min, max)); });
+    return h('label', { className: 'sbf' }, h('span', { text: label }), el);
+  }
+  function renderStepbar() {
+    const box = sbar(); if (!box) return; const sc = S.show && S.show.scenes[S.si];
+    const on0 = $('#bAnimOn'); if (!sc || !isMap(sc.bg)) { box.hidden = true; box.textContent = ''; if (on0) on0.hidden = true; return; }
+    const on = $('#bAnimOn'); if (on) { on.hidden = MA.isAnimated(sc); on.onclick = animEnable; }
+    if (!MA.isAnimated(sc)) { box.hidden = true; box.textContent = ''; return; }      // un-animated: just the small "Animate" button in the transport row
+    box.hidden = false; box.textContent = '';
+    const i = stepIdx(), tl = MA.timeline(sc), st = sc.anim.steps[i], n = sc.anim.steps.length, tot = tl.total || 1;
+    const track = h('div', { className: 'sbtrack', id: 'sbTrack', title: 'Click a step to edit it. Drag the bar below to preview.' });
+    sc.anim.steps.forEach((s2, k) => {
+      const mv = tl.segs.find(q => q.kind === 'move' && q.to === k), hd = tl.segs.find(q => q.kind === 'hold' && q.step === k), wrap = h('div', { className: 'sbstep' + (k === i ? ' on' : ''), 'data-step': k, on: { click: () => selectStep(k) } });
+      if (mv) wrap.append(h('div', { className: 'sbmove', style: 'flex:' + Math.max(0.01, mv.t1 - mv.t0) + ' 1 0', title: 'Move into step ' + (k + 1) + ': ' + (mv.t1 - mv.t0).toFixed(1) + ' s' }));
+      wrap.append(h('div', { className: 'sbhold', style: 'flex:' + Math.max(0.01, hd.t1 - hd.t0) + ' 1 0', title: 'Hold: ' + (hd.t1 - hd.t0).toFixed(1) + ' s' }, h('b', { text: String(k + 1) }), h('i', { text: s2.name })));
+      wrap.style.flex = Math.max(0.05, (mv ? mv.t1 - mv.t0 : 0) + (hd.t1 - hd.t0)) + ' 1 0'; track.append(wrap);
+    });
+    track.append(h('div', { className: 'sbhead', id: 'sbHead' }));
+    const sz = MA.sizeBytes(sc), kb = sz > 1024 ? (sz / 1024).toFixed(0) + ' KB' : sz + ' B';
+    box.append(
+      h('div', { className: 'sbrow' }, track),
+      h('div', { className: 'sbrow sbctl' },
+        h('button', { className: 'pri', text: '＋ Step', title: 'New step: starts as a copy of the selected step', on: { click: stepAdd } }),
+        h('button', { text: '⧉', title: 'Duplicate this step', on: { click: stepDup } }),
+        h('button', { text: '◀', title: 'Move step earlier', disabled: i === 0, on: { click: () => stepShift(-1) } }),
+        h('button', { text: '▶', title: 'Move step later', disabled: i === n - 1, on: { click: () => stepShift(1) } }),
+        h('button', { className: 'dng', text: '🗑', title: 'Delete this step', disabled: n < 2, on: { click: stepDel } }),
+        h('label', { className: 'sbf sbname' }, h('span', { text: 'Step ' + (i + 1) + ' of ' + n }), (() => { const el = h('input', { type: 'text', value: st.name }); el.addEventListener('change', () => { MA.setStep(sc, i, { name: el.value.trim() || 'Step ' + (i + 1) }); stepsChanged(); }); return el; })()),
+        sbNum('Hold s', st.hold, 0, 120, 0.5, v => { MA.setStep(sc, i, { hold: v }); stepsChanged(); }, false, 'Seconds this step stays still'),
+        sbNum('Move s', st.dur || 3, 0.2, 60, 0.5, v => { MA.setStep(sc, i, { dur: v }); stepsChanged(); }, i === 0, i === 0 ? 'Step 1 is where the scene starts' : 'Seconds to move into this step'),
+        h('label', { className: 'sbf' }, h('span', { text: 'Motion' }), h('select', { disabled: i === 0, on: { change: e => { MA.setStep(sc, i, { ease: e.target.value }); stepsChanged(); } } }, MA.EASES.map(q => h('option', { value: q[0], text: q[1], selected: (st.ease || 'inout') === q[0] })))),
+        sbNum('Speed ×', sc.anim.speed, 0.25, 4, 0.25, v => { MA.setSpeed(sc, v); stepsChanged(); }, false, 'Plays the whole animation faster / slower'),
+        h('span', { className: 'sbtot', id: 'sbTot', text: 'Total ' + sc.duration.toFixed(1) + ' s' }),
+        h('button', { text: '▶ Play', title: 'Play this scene', on: { click: () => { backToEdit(); const a = E.starts(S.show)[S.si]; playFrom(a, a + sc.duration); } } })),
+      h('div', { className: 'sbrow sbctl' },
+        h('input', { type: 'range', id: 'sbScrub', min: 0, max: tot, step: 0.01, value: 0, title: 'Preview the animation' }),
+        h('button', { text: 'Copy object → all steps', title: 'Put the selected object in every step exactly as it is here', on: { click: () => copyToAllSteps(false) } }),
+        h('button', { text: 'Remove animation', className: 'dng', title: 'Keep only the selected step as the scene’s graphics', on: { click: animDisable } }),
+        sz > SB_WARN ? h('span', { className: 'sbwarn', text: '⚠ animation data ' + kb + ' (cloud limit 8 MB)' }) : h('span', { className: 'mut', text: kb })));
+    const sl = $('#sbScrub'); sl.addEventListener('input', () => { S.mode = 'scrub'; S.play = null; S.T = E.starts(S.show)[S.si] + (+sl.value); updateTransport(); });
+    syncStepbar();
+  }
+  /* light per-frame sync (no DOM rebuild): playhead + scrub position */
+  function syncStepbar() {
+    const sc = S.show && S.show.scenes[S.si]; if (!sc || !MA.isAnimated(sc)) return; const head = $('#sbHead'), sl = $('#sbScrub'), tot = sc.duration || 1;
+    const t = S.mode === 'edit' ? MA.stepTimes(sc, stepIdx()).arrive : clamp(S.T - E.starts(S.show)[S.si], 0, tot);
+    if (head) head.style.left = (t / tot * 100) + '%'; if (sl && document.activeElement !== sl) { sl.max = tot; sl.value = t; }
+    const tt = $('#sbTot'); if (tt) { const v = 'Total ' + tot.toFixed(1) + ' s'; if (tt.textContent !== v) tt.textContent = v; }
+    document.querySelectorAll('#sbTrack .sbstep').forEach(el => { const k = +el.dataset.step, on = S.mode === 'edit' ? k === stepIdx() : k === MA.stepAt(sc, t); el.classList.toggle('on', on); });
+  }
   function present() { S.present = true; $('#stageWrap').classList.add('present'); try { $('#stageWrap').requestFullscreen && $('#stageWrap').requestFullscreen(); } catch (e) { /* overlay mode */ } playFrom(0, E.total(S.show)); }
   function exitPresent() { S.present = false; $('#stageWrap').classList.remove('present'); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) { /* ignore */ } S.mode = 'edit'; S.play = null; }
   document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && S.present) exitPresent(); });
@@ -470,6 +577,8 @@
     const o = selObj();
     if (o && !d) { const so = E.toScreen(o, xf), hd = handles(so), b = hd.box; octx.strokeStyle = '#2f9bff'; octx.setLineDash([10, 7]); octx.strokeRect(b.x, b.y, b.w, b.h); octx.setLineDash([]); octx.fillStyle = '#fff'; octx.strokeStyle = '#2f9bff';
       if (hd.verts) hd.verts.forEach(v => { octx.beginPath(); octx.arc(v[0], v[1], 9, 0, 6.3); octx.fill(); octx.stroke(); });
+      if (hd.rot) { octx.save(); octx.setLineDash([]); octx.strokeStyle = '#2f9bff'; octx.lineWidth = 3; octx.beginPath(); octx.moveTo(hd.rot[0], hd.rot[1] + 12); octx.lineTo(hd.rot[0], b.y); octx.stroke(); octx.fillStyle = '#2f9bff'; octx.beginPath(); octx.arc(hd.rot[0], hd.rot[1], 14, 0, 6.3); octx.fill(); octx.fillStyle = '#fff'; octx.font = '800 20px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText('↻', hd.rot[0], hd.rot[1] + 1); octx.restore(); }
+      if (hd.scale) { octx.fillStyle = '#2f9bff'; octx.fillRect(hd.scale[0] - 12, hd.scale[1] - 12, 24, 24); octx.fillStyle = '#fff'; octx.font = '800 18px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText('⤡', hd.scale[0], hd.scale[1] + 1); }
       if (hd.resize) { octx.fillRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); octx.strokeRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); } }
     if (o && !d && o.move && o.move.on) { const mb = E.bounds(E.toScreen(o, xf)), ax = mb.x + mb.w / 2, ay = mb.y + mb.h / 2, sm = E.moveSamples(o.move); octx.save(); octx.strokeStyle = '#ffe14d'; octx.lineWidth = 4; octx.setLineDash([14, 9]); octx.beginPath(); sm.forEach((q, i) => i ? octx.lineTo(ax + q[0], ay + q[1]) : octx.moveTo(ax + q[0], ay + q[1])); octx.stroke(); octx.setLineDash([]);
       [[0, 0]].concat(o.move.pts).forEach((q, i) => { const x = ax + q[0], y = ay + q[1]; octx.fillStyle = i ? '#ffe14d' : '#2f9bff'; octx.strokeStyle = '#08142a'; octx.lineWidth = 3; octx.beginPath(); octx.arc(x, y, 20, 0, 6.3); octx.fill(); octx.stroke(); octx.fillStyle = '#08142a'; octx.font = '800 24px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText(MLET(i), x, y + 1); }); octx.restore(); }
@@ -545,6 +654,14 @@
     if (o.type !== 'text') p.append(h('div', { className: 'h', text: 'Layer style' }), h('div', { className: 'btnrow' }, h('button', { text: 'Layer style… (stroke, shadow, glow, overlay)', on: { click: () => { if (!o.fx) { o.fx = E.fxDefault(); o.fx.stroke.on = false; o.fx.shadow = { on: true, color: '#000000', opacity: 60, angle: 90, dist: 6, size: 10 }; } openFxWindow(o.fx, 'Layer Style – ' + o.type); } } }), o.fx ? h('button', { text: 'Remove layer style', on: { click: () => { delete o.fx; commit(); renderPanels(); } } }) : null));
     { const sh0 = E.shadowOf(o), sh = (o.shadow && typeof o.shadow === 'object') ? o.shadow : (o.shadow = sh0 || { on: false, blur: 12, dist: 7, alpha: 0.6 }); sh.on = !!sh0;
       p.append(h('div', { className: 'h', text: 'Shadow' }), bind(sh, 'on', 'check', { label: 'Drop shadow' }), bind(sh, 'blur', 'range', { min: 0, max: 40, label: 'Softness' }), bind(sh, 'dist', 'range', { min: 0, max: 40, label: 'Distance' }), bind(sh, 'alpha', 'range', { min: 0, max: 1, step: 0.05, label: 'Opacity' })); }
+    if (o.pts && o.pts.length) {
+      p.append(h('div', { className: 'h', text: 'Shape (drag the ↻ and ⤡ handles, or use these)' }), h('div', { className: 'btnrow' },
+        h('button', { text: '⟲ 15°', on: { click: () => { transformSelected(-15, 1); } } }), h('button', { text: '⟳ 15°', on: { click: () => { transformSelected(15, 1); } } }),
+        h('button', { text: '− 10 %', on: { click: () => { transformSelected(0, 0.9); } } }), h('button', { text: '+ 10 %', on: { click: () => { transformSelected(0, 1.1); } } }),
+        h('button', { text: 'Fewer points', title: 'Fewer control points = an easier curve to bend. Double-click the line to add one, Shift+click a point to remove it.', on: { click: () => { if (o.pts.length > 2) { MA.fewerPoints(o, Math.max(2, o.pts.length - 1)); commit(); renderPanels(); } } } }),
+        h('button', { text: 'Reverse', title: 'Reverse the drawing direction', on: { click: () => { o.pts.reverse(); commit(); renderPanels(); } } })),
+        h('div', { className: 'mut', text: o.pts.length + ' control points · double-click the line to add one · Shift+click a point to remove it' }));
+    }
     p.append(h('div', { className: 'h', text: 'Animation' }));
     B2(p, o.anim, 'in', 'select', { label: 'Entrance', options: E.ANIMS }); B2(p, o.anim, 'delay', 'range', { min: 0, max: 20, step: 0.1, label: 'Delay (s)' }); B2(p, o.anim, 'dur', 'range', { min: 0.1, max: 5, step: 0.1, label: 'Duration (s)' });
     movePanel(p, o);
@@ -574,7 +691,7 @@
 
     p.append(mapAccordion('sceneSettings','Scene Settings',[
       bind(sc, 'name', 'text', { label: 'Name', after: () => renderSceneList() }),
-      bind(sc, 'duration', 'num', { min: 1, max: 120, step: 0.5, label: 'Duration (s)', rerender: false, after: () => updateTransport() }),
+      MA.isAnimated(sc) ? fld('Duration', h('div', { className: 'mut', text: sc.duration.toFixed(1) + ' s – set by the animation steps (Animation bar below the map)' })) : bind(sc, 'duration', 'num', { min: 1, max: 120, step: 0.5, label: 'Duration (s)', rerender: false, after: () => updateTransport() }),
       bind(sc.transition, 'type', 'select', { label: 'Transition in', options: E.TRANSITIONS }),
       bind(sc.transition, 'dur', 'range', { min: 0.2, max: 3, step: 0.1, label: 'Trans. length' })
     ],false));
@@ -1039,7 +1156,7 @@
   const ownStore = s => ({ put: r => s.put(NS ? Object.assign({}, r, { owner: NS }) : r), delete: k => s.delete(k), getAll: () => s.getAll(), get: k => s.get(k) }), mine = r => (r.owner || null) === NS;
   function bgTx(mode, fn) { return bgDB().then(db => new Promise((res, rej) => { const t = db.transaction('bgs', mode), s = t.objectStore('bgs'), q = fn(ownStore(s)); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); })); }
   function bgLoad() { bgTx('readonly', s => s.getAll()).then(a => { bgList = (a || []).filter(mine).sort((x, y) => x.t - y.t).map(b => Object.assign(b, { asset: (kindOf(b) === 'bg' ? 'bg_' : 'ov_') + b.id })); reattachLib(); if (S.tab === 'bgs') renderPanels(); }).catch(() => { }); }
-  function reattachLib() { if (!S.show) return; let ch = false; S.show.scenes.forEach(sc => [sc.bg && sc.bg.asset].concat(sc.objects.map(o => o.asset)).forEach(id => { if (id && !S.show.assets[id]) { const b = bgList.find(x => x.asset === id); if (b) { S.show.assets[id] = b.data; ch = true; } } })); if (ch) E.preload(S.show).then(() => thumbSoon(true)); }
+  function reattachLib() { if (!S.show) return; let ch = false; S.show.scenes.forEach(sc => [sc.bg && sc.bg.asset].concat(MA.allObjects(sc).map(o => o.asset)).forEach(id => { if (id && !S.show.assets[id]) { const b = bgList.find(x => x.asset === id); if (b) { S.show.assets[id] = b.data; ch = true; } } })); if (ch) E.preload(S.show).then(() => thumbSoon(true)); }
   function bgScale(file, keepAlpha) { return new Promise((res, rej) => { const r = new FileReader(); r.onerror = rej; r.onload = () => { const im = new Image(); im.onerror = rej; im.onload = () => { const k = Math.min(1, 2560 / im.width); if (keepAlpha && k === 1 && /png/i.test(file.type)) return res(r.result); const cv = document.createElement('canvas'); cv.width = Math.round(im.width * (keepAlpha ? k : Math.min(1, 1920 / im.width))); cv.height = Math.round(im.height * (cv.width / im.width)); cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); res(keepAlpha ? cv.toDataURL('image/png') : cv.toDataURL('image/jpeg', 0.88)); }; im.src = r.result; }; r.readAsDataURL(file); }); }
   const kindOf = b => b.kind || 'bg';
   async function bgAdd(files, kind) {
@@ -1763,7 +1880,7 @@
     }); thumbSoon(true);
   }
   function mv(i, d) { const j = i + d, a = S.show.scenes; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; S.si = j; commit(); refreshAll(); }
-  function refreshAll() { $('#showName').value = S.show.name; renderSceneList(); renderPanels(); updateTransport(); const fk = $('#frontKind'); if (fk) fk.value = S.opt.front; }
+  function refreshAll() { $('#showName').value = S.show.name; renderSceneList(); renderPanels(); renderStepbar(); updateTransport(); const fk = $('#frontKind'); if (fk) fk.value = S.opt.front; }
 
   /* ---------- icon thumbnails animation ---------- */
   setInterval(() => { if (S.tab !== 'library') return; document.querySelectorAll('canvas[data-icon]').forEach(cv => { const c = cv.getContext('2d'); c.clearRect(0, 0, 120, 120); g.Icons.draw(c, cv.dataset.icon, 60, 62, 100, clock()); }); }, 66);
@@ -2013,7 +2130,7 @@
     }
     return { remap, unsaved };
   }
-  function remapMedia(show, remap) { const f = o => { if (o && remap[o.vid]) o.vid = remap[o.vid]; }; show.scenes.forEach(sc => { f(sc.bg); (sc.objects || []).forEach(f); }); }
+  function remapMedia(show, remap) { const f = o => { if (o && remap[o.vid]) o.vid = remap[o.vid]; }; show.scenes.forEach(sc => { f(sc.bg); MA.allObjects(sc).forEach(f); }); }
   async function openShowFile(f) {
     if (!WF) { toast('Open is unavailable (showfile.js did not load)'); return; }
     let r; toast('Opening ' + f.name + '…');

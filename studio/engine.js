@@ -476,13 +476,16 @@
     const seg = cum[i] - cum[i - 1] || 1, f = clamp((d - cum[i - 1]) / seg, 0, 1);
     return [S[i - 1][0] + (S[i][0] - S[i - 1][0]) * f, S[i - 1][1] + (S[i][1] - S[i - 1][1]) * f];
   };
-  function drawObjectAnimated(c, o0, scene, xf, t, show, editing) {
+  function drawObjectAnimated(c, o0, scene, xf, t, show, editing, objs) {
     let o = toScreen(o0, xf); const a = o0.anim || ANIM_DEFAULT();
-    const mvSrc = (o0.move && o0.move.on) ? o0 : (o0.moveWith ? (scene.objects.find(q => q.id === o0.moveWith && q.move && q.move.on) || null) : null);
+    const mvSrc = (o0.move && o0.move.on) ? o0 : (o0.moveWith ? ((objs || scene.objects).find(q => q.id === o0.moveWith && q.move && q.move.on) || null) : null);
     if (!editing && mvSrc) { const mo = E.moveOffset(mvSrc, t); if (mo[0] || mo[1]) { o = Object.assign({}, o); if (o.pts) o.pts = o.pts.map(q => [q[0] + mo[0], q[1] + mo[1]]); if (o.x != null) { o.x += mo[0]; o.y += mo[1]; } } }
     let p = 1, vis = true;
     if (!editing) { if (t < (a.delay || 0)) return; p = clamp((t - (a.delay || 0)) / Math.max(0.01, a.dur || 0.01), 0, 1); }
     const mode = a.in || 'none'; c.save();
+    /* v0.11.0 map animation steps: interpolated copies carry _a (opacity) and _s (scale about the object's centre) */
+    if (o0._a != null) c.globalAlpha *= clamp(o0._a, 0, 1);
+    if (o0._s != null && o0._s !== 1) { const sb = E.bounds(o), sx = sb.x + sb.w / 2, sy = sb.y + sb.h / 2; c.translate(sx, sy); c.scale(o0._s, o0._s); c.translate(-sx, -sy); }
     if (mode === 'draw' && PATHY[o.type]) { const o2 = Object.assign({}, o, { animMode: 'draw' }); drawShadowed(c, o2, o0, t, ease.out(p), show); c.restore(); return; }
     const pe = mode === 'none' ? 1 : ease.out(p);
     if (mode === 'fade' || mode === 'draw') c.globalAlpha *= pe;
@@ -667,7 +670,9 @@
       guard(() => g.WXData.useMapboxUnderlay(scene,t,opts));
     guard(() => drawBackground(c, show, scene, t, ct, opts));
     if (scene.dataLoop && scene.dataLoop.on && g.WXData) guard(() => g.WXData.draw(c, scene, t, opts, xf));
-    scene.objects.forEach(o => { if (!o.hidden) guard(() => drawObjectAnimated(c, o, scene, xf, t, show, editing)); });
+    /* v0.11.0: an animated scene draws the objects of the step / in-between state at time t (edit mode draws the selected step as stored) */
+    const objs = (!editing && scene.anim && E.objectsAt) ? E.objectsAt(scene, t) : scene.objects;
+    objs.forEach(o => { if (!o.hidden) guard(() => drawObjectAnimated(c, o, scene, xf, t, show, editing, objs)); });
     if (scene.dataLoop && scene.dataLoop.on && g.WXData) guard(() => g.WXData.drawBar(c, scene, t, opts));
     guard(() => drawTitle(c, show, scene, t, editing)); guard(() => drawTitle2(c, show, scene, t, editing)); guard(() => drawBug(c, show));
     c.restore();

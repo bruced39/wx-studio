@@ -69,7 +69,7 @@
       if (b.type === 'mapbox') f.mapboxScenes.push(n);
       if (b.type === 'video') { const v = E && E.videos && E.videos[b.vid]; if (!v || v.err) f.missing.push({ scene: n, kind: 'video', name: (v && v.name) || b.vid || 'unknown' }); }
       if (b.type === 'image' && b.asset && !assets[b.asset]) f.missing.push({ scene: n, kind: 'image', name: b.asset });
-      (sc.objects || []).forEach(o => { if (o.type === 'image' && o.asset && !assets[o.asset]) f.missing.push({ scene: n, kind: 'image', name: o.asset }); });
+      ((sc.objects || []).concat(...((sc.anim && sc.anim.steps) || []).map(st => st.objects || []))).forEach(o => { if (o.type === 'image' && o.asset && !assets[o.asset]) f.missing.push({ scene: n, kind: 'image', name: o.asset }); });
     });
     /* Weather loop layers: ask WXData whether each enabled layer has frames that are actually decoded (not just a connected source). */
     f.weather = [];
