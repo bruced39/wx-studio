@@ -1357,7 +1357,7 @@
           recordMapError(e);
         });
         D.on('idle', onMapIdle);
-        D.on('movestart', () => { tileRetry.n = 0; });
+        D.on('movestart', invalidateTileRetry);
         try {
           const cvs = D.getCanvas();
           cvs.addEventListener('webglcontextlost', () => { DIAG.contextLost++; });
@@ -1396,7 +1396,7 @@
     })();
     return initP;
   };
-  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); incompleteFrames.clear(); clearTimeout(tileRetry.timer); tileRetry.timer = null; tileRetry.n = 0; MB.last=null;MB.lastKey=null; snapshotBusy=false;previewHold=null;previewRestorePending=false;previewRestoreKey=null; MB.status='idle'; MB.err = ''; MB.queue = Promise.resolve(); };
+  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); incompleteFrames.clear(); invalidateTileRetry(); DIAG.throttle.level = 0; DIAG.throttle.until = 0; MB.last=null;MB.lastKey=null; snapshotBusy=false;previewHold=null;previewRestorePending=false;previewRestoreKey=null; MB.status='idle'; MB.err = ''; MB.queue = Promise.resolve(); };
   MB.setToken = function (t) { ls.set('wx.mapbox.token', String(t || '').trim()); MB.reset(); };
   MB.setScale = function (s) { MB.scale = s; ls.set('wx.mapbox.scale', String(s)); MB.reset(); };
 
@@ -1414,6 +1414,7 @@
   }
   async function setup(bg) {
     MB.ensureConfig(bg);const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
+    if(styleKey!==curStyleKey||cfgKey!==curCfgKey)invalidateTileRetry();
     if(styleKey!==curStyleKey){
       D.setStyle('mapbox://styles/mapbox/'+st);
       await withTimeout(once(D,'style.load'),12000,
@@ -1496,10 +1497,16 @@
      cached as complete, which produced permanent rectangular holes with the
      vector labels (a different source) still drawn. The helpers below count
      failed tiles explicitly, retry them with back-off, and refuse to cache a
-     frame that is known to be incomplete. */
-  const DIAG={tileErrors:[],tileErrorCount:0,recoveries:0,incompleteSnaps:0,retryable:0,
+     frame that is known to be incomplete.
+     Completeness is judged on the SATELLITE raster source only (or, on bases
+     without satellite imagery, the base vector source). Failures of other
+     sources (terrain, hillshade, weather image, ...) are reported in the
+     diagnostics but never block a snapshot or trigger aggressive retries. */
+  const DIAG={tileErrors:[],tileErrorCount:0,recoveries:0,incompleteSnaps:0,retryable:0,fallbackReloads:0,
+    throttle:{level:0,until:0},throttleEvents:0,limitation:'',
     contextLost:0,contextRestored:0,lastHealth:null,nativeDpr:null,started:Date.now()};
   const INCOMPLETE_RETRY_MS=8000,INCOMPLETE_MAX_TRIES=3,incompleteFrames=new Map();
+  const RECOVER_BATCH=24,RECOVER_BATCH_THROTTLED=8,CRITICAL_MAX_ATTEMPTS=4,OPTIONAL_MAX_ATTEMPTS=1;
   MB.diag=DIAG;
   function sourceCaches(m){
     const out=[];
@@ -1512,31 +1519,67 @@
     }catch(e){}
     return out;
   }
+  function sourceRole(id,sc){
+    let type='';
+    try{const src=(typeof sc.getSource==='function'&&sc.getSource())||sc._source;type=(src&&src.type)||'';}catch(e){}
+    const name=String(id).replace(/^.*\u001F/,'');
+    if(type==='raster'||(!type&&/satellite/i.test(name)))return 'satellite';
+    if(type==='vector')return 'vector';
+    return 'other';
+  }
   function tileHealth(m){
-    const h={loaded:true,tiles:0,ready:0,pending:0,errored:0,sources:{},complete:true};
+    const h={loaded:true,tiles:0,ready:0,pending:0,errored:0,optionalPending:0,optionalErrored:0,
+      sources:{},supported:false,recoverable:false,verified:false,complete:true};
     try{h.loaded=!!m.loaded();}catch(e){}
-    for(const [id,sc] of sourceCaches(m)){
-      const tiles=sc._tiles||{},row={ready:0,pending:0,errored:0};
-      for(const k of Object.keys(tiles)){
-        const st=tiles[k]&&tiles[k].state;h.tiles++;
+    let styleReady=true;try{if(m&&typeof m.isStyleLoaded==='function')styleReady=!!m.isStyleLoaded();}catch(e){}
+    const caches=sourceCaches(m),rows=[];
+    for(const [id,sc] of caches){
+      const tiles=sc._tiles,row={role:sourceRole(id,sc),ready:0,pending:0,errored:0};
+      if(tiles&&typeof tiles==='object')for(const k of Object.keys(tiles)){
+        const st=tiles[k]&&tiles[k].state;
         if(st==='loaded')row.ready++;else if(st==='errored')row.errored++;else row.pending++;
       }
-      h.ready+=row.ready;h.pending+=row.pending;h.errored+=row.errored;
-      if(row.pending||row.errored)h.sources[String(id).replace(/^.*[\u001F:]/,'')]=row;
+      rows.push([String(id).replace(/^.*\u001F/,''),row,!!(tiles&&typeof tiles==='object')]);
     }
-    h.complete=h.loaded&&!h.pending&&!h.errored;
+    h.supported=rows.length>0&&rows.every(r=>r[2]);
+    h.recoverable=h.supported&&caches.every(([id,sc])=>typeof sc._removeTile==='function'&&(typeof sc.update==='function'||typeof sc.reload==='function'));
+    // Satellite imagery is the critical source; without it the base vector source is.
+    const hasSat=rows.some(r=>r[1].role==='satellite'),crit=r=>hasSat?r[1].role==='satellite':r[1].role==='vector';
+    for(const r of rows){
+      const row=r[1];row.critical=crit(r);h.tiles+=row.ready+row.pending+row.errored;
+      if(row.critical){h.ready+=row.ready;h.pending+=row.pending;h.errored+=row.errored;}
+      else{h.optionalPending+=row.pending;h.optionalErrored+=row.errored;}
+      h.sources[r[0]]=row;
+    }
+    if(h.supported){h.verified=true;h.complete=!h.pending&&!h.errored;}
+    else h.complete=h.loaded;   // cannot verify: fall back to Mapbox's own (optimistic) answer
+    // Report, never hide, an unavailable internal interface.
+    DIAG.limitation=!styleReady?DIAG.limitation:
+      !h.supported?'Mapbox internal source cache not available: failed satellite tiles cannot be detected, so tile coverage is UNVERIFIED (map.loaded()='+h.loaded+' only).':
+      !h.recoverable?'Mapbox internal tile-eviction interface not available: failed tiles are detected but cannot be retried automatically; use Reload map tiles.':'';
     return h;
   }
   // Remove failed (or, with force, all) tiles so the source cache requests
   // them again. Public Mapbox API has no per-tile retry; reload() skips
   // errored tiles, so they are evicted and the cache is asked to update.
-  function recoverTiles(m,force){
-    let n=0;
-    for(const [id,sc] of sourceCaches(m)){
+  // scope: 'critical' (default) | 'optional' | 'all'. At most RECOVER_BATCH
+  // tiles per call (fewer while HTTP 429 back-off is active) so a mass failure
+  // never turns into a request storm; the rest follow on later cycles.
+  function recoverTiles(m,force,scope){
+    scope=scope||'critical';
+    let n=0,room=force?RECOVER_BATCH*2:(throttled()?RECOVER_BATCH_THROTTLED:RECOVER_BATCH);
+    const h=tileHealth(m),caches=sourceCaches(m);
+    if(!h.recoverable)return 0;
+    const order=caches.map(([id,sc])=>{const name=String(id).replace(/^.*\u001F/,'');return [sc,h.sources[name]&&h.sources[name].critical];})
+      .sort((a,b)=>(b[1]?1:0)-(a[1]?1:0));
+    for(const [sc,critical] of order){
+      if(room<=0)break;
+      if(!force&&scope==='critical'&&!critical)continue;
+      if(!force&&scope==='optional'&&critical)continue;
       try{
-        const tiles=sc._tiles||{},keys=Object.keys(tiles).filter(k=>force||(tiles[k]&&tiles[k].state==='errored'));
+        const tiles=sc._tiles||{},keys=Object.keys(tiles).filter(k=>force||(tiles[k]&&tiles[k].state==='errored')).slice(0,room);
         if(!keys.length)continue;
-        for(const k of keys){if(typeof sc._removeTile==='function'){sc._removeTile(k);n++;}}
+        for(const k of keys){sc._removeTile(k);n++;room--;}
         if(typeof sc.update==='function')sc.update(m.transform);
         else if(typeof sc.reload==='function')sc.reload();
       }catch(e){}
@@ -1555,9 +1598,19 @@
     const m=String(err.message||'').replace(/https?:\/\/\S+/g,'');
     return /\b401\b|\b403\b|Unauthorized|invalid (access )?token|access token (is )?(invalid|expired|required)/i.test(m);
   }
+  // HTTP 429 / 503: Mapbox is rate-limiting us. Open a cool-down window
+  // (5 s, 10 s, 20 s, 40 s, max 60 s) in which NO automatic retry is sent.
+  // A burst of many 429s from one load counts once.
+  function throttled(){return Date.now()<DIAG.throttle.until;}
+  function noteThrottle(status){
+    if(status!==429&&status!==503)return;
+    const T=DIAG.throttle,now=Date.now();
+    if(now<T.until)return;
+    T.level=Math.min(T.level+1,4);T.until=now+Math.min(60000,5000*Math.pow(2,T.level-1));DIAG.throttleEvents++;
+  }
   function recordMapError(e){
     const err=e&&e.error,status=err&&err.status,msg=(err&&err.message)||'';
-    DIAG.tileErrorCount++;DIAG.retryable++;
+    DIAG.tileErrorCount++;DIAG.retryable++;noteThrottle(status);
     DIAG.tileErrors.push({t:new Date().toISOString().slice(11,19),source:(e&&e.sourceId)||'',status:status==null?'':status,
       message:String(msg).replace(/access_token=[^&\s"']+/g,'access_token=…').slice(0,160)});
     if(DIAG.tileErrors.length>40)DIAG.tileErrors.shift();
@@ -1565,33 +1618,62 @@
   function cachedFrame(key){
     const cv=MB.cache.get(key);if(!cv)return null;
     const inc=incompleteFrames.get(key);
-    if(inc&&inc.tries<INCOMPLETE_MAX_TRIES&&Date.now()-inc.at>INCOMPLETE_RETRY_MS){MB.cache.delete(key);return null;}
+    // No re-render (and therefore no new tile requests) during a 429 cool-down.
+    if(inc&&inc.tries<INCOMPLETE_MAX_TRIES&&Date.now()-inc.at>INCOMPLETE_RETRY_MS&&!throttled()){MB.cache.delete(key);return null;}
     return cv;
   }
   // Idle watchdog: when Mapbox stops rendering with failed tiles still in
   // view, retry them with exponential back-off (1.5 s, 3 s, 6 s, 12 s).
-  const tileRetry={n:0,timer:null};
+  // An attempt is only CONSUMED when it is really sent: if the map is busy
+  // (user dragging / snapshot running) the retry waits, and if the camera or
+  // style changed meanwhile the stale retry is dropped (epoch check).
+  const tileRetry={n:0,optional:0,timer:null,epoch:0};
+  function invalidateTileRetry(){
+    tileRetry.epoch++;tileRetry.n=0;tileRetry.optional=0;
+    if(tileRetry.timer){clearTimeout(tileRetry.timer);tileRetry.timer=null;}
+  }
+  function scheduleRecovery(wait,scope){
+    const epoch=tileRetry.epoch;
+    const fire=()=>{
+      tileRetry.timer=null;
+      if(epoch!==tileRetry.epoch||!D)return;                                  // camera/style changed: stale
+      if(MB.interacting||snapshotBusy){tileRetry.timer=setTimeout(fire,500);return;}   // busy: wait, keep the attempt
+      if(throttled()){tileRetry.timer=setTimeout(fire,DIAG.throttle.until-Date.now()+250);return;}
+      const h=tileHealth(D);
+      if(scope==='critical'?!h.errored:!h.optionalErrored)return;            // healed by itself
+      if(scope==='critical')tileRetry.n++;else tileRetry.optional++;
+      recoverTiles(D,false,scope);
+    };
+    tileRetry.timer=setTimeout(fire,wait);
+  }
   function onMapIdle(){
     if(!D||MB.interacting||snapshotBusy)return;
     const h=tileHealth(D);DIAG.lastHealth=h;
-    if(!h.errored){
-      tileRetry.n=0;
+    if(!h.recoverable)return;
+    if(h.complete){
+      tileRetry.n=0;DIAG.throttle.level=0;
       // Frames captured while tiles were failing are stale now: re-snap.
-      if(h.complete&&incompleteFrames.size){for(const k of incompleteFrames.keys())MB.cache.delete(k);incompleteFrames.clear();if(MB.onUpdate)MB.onUpdate();}
-      return;
+      if(incompleteFrames.size){for(const k of incompleteFrames.keys())MB.cache.delete(k);incompleteFrames.clear();if(MB.onUpdate)MB.onUpdate();}
     }
-    if(tileRetry.timer||tileRetry.n>=4)return;
-    const wait=1500*Math.pow(2,tileRetry.n++);
-    tileRetry.timer=setTimeout(()=>{
-      tileRetry.timer=null;
-      if(!D||MB.interacting||snapshotBusy)return;
-      recoverTiles(D);
-    },wait);
+    if(tileRetry.timer)return;
+    if(h.errored&&tileRetry.n<CRITICAL_MAX_ATTEMPTS){
+      let wait=1500*Math.pow(2,tileRetry.n);
+      if(throttled())wait=Math.max(wait,DIAG.throttle.until-Date.now()+250);
+      scheduleRecovery(wait,'critical');
+    }else if(!h.errored&&h.optionalErrored&&tileRetry.optional<OPTIONAL_MAX_ATTEMPTS){
+      scheduleRecovery(Math.max(4000,throttled()?DIAG.throttle.until-Date.now()+250:0),'optional');
+    }
   }
   MB.reloadTiles=function(){
     if(!D||MB.status!=='ready')return 0;
-    MB.cache.clear();incompleteFrames.clear();liveKey=null;tileRetry.n=0;
-    const n=recoverTiles(D,true);
+    MB.cache.clear();incompleteFrames.clear();liveKey=null;invalidateTileRetry();
+    DIAG.throttle.level=0;DIAG.throttle.until=0;      // an explicit user action overrides the cool-down
+    let n=recoverTiles(D,true);
+    if(!n&&!tileHealth(D).recoverable){
+      // Private cache interface unavailable: fall back to the public API and
+      // rebuild the whole style, which requests every tile again.
+      curStyleKey=null;curCfgKey=null;DIAG.fallbackReloads++;n=1;
+    }
     try{D.triggerRepaint();}catch(e){}
     if(MB.onUpdate)MB.onUpdate();
     return n;
@@ -1611,10 +1693,15 @@
       L.push('WebGL context losses / restores: '+DIAG.contextLost+' / '+DIAG.contextRestored);
       if(D){
         const h=tileHealth(D);
-        L.push('Tiles in view: '+h.tiles+' (loaded '+h.ready+', pending '+h.pending+', failed '+h.errored+') – map.loaded()='+h.loaded);
-        for(const k of Object.keys(h.sources))L.push('  '+k+': '+JSON.stringify(h.sources[k]));
+        if(h.verified)L.push('Satellite/base tiles in view: loaded '+h.ready+', pending '+h.pending+', FAILED '+h.errored+' – '+(h.complete?'COMPLETE':'INCOMPLETE')+' (map.loaded()='+h.loaded+')');
+        else L.push('Tile coverage: UNVERIFIED – '+DIAG.limitation);
+        if(h.verified&&DIAG.limitation)L.push('LIMITATION: '+DIAG.limitation);
+        if(h.optionalErrored||h.optionalPending)L.push('Other sources (not blocking): pending '+h.optionalPending+', failed '+h.optionalErrored);
+        for(const k of Object.keys(h.sources)){const r=h.sources[k];L.push('  '+k+' ['+r.role+(r.critical?', counted':', informational')+']: loaded '+r.ready+', pending '+r.pending+', failed '+r.errored);}
       }
-      L.push('Tile errors since start: '+DIAG.tileErrorCount+', tile reload attempts: '+DIAG.recoveries+', incomplete snapshots not trusted: '+DIAG.incompleteSnaps);
+      const T=DIAG.throttle,left=Math.max(0,Math.round((T.until-Date.now())/1000));
+      L.push('Rate limiting (HTTP 429/503): '+DIAG.throttleEvents+' event(s)'+(left?', back-off ACTIVE for '+left+' s (level '+T.level+')':', not active'));
+      L.push('Tile errors since start: '+DIAG.tileErrorCount+', tile reload attempts: '+DIAG.recoveries+', style-reload fallbacks: '+DIAG.fallbackReloads+', incomplete snapshots not trusted: '+DIAG.incompleteSnaps);
       for(const e of DIAG.tileErrors.slice(-12))L.push('  '+e.t+' '+(e.source||'?')+' '+(e.status===''?'':'HTTP '+e.status+' ')+e.message);
     }catch(e){L.push('(diagnostics error: '+(e&&e.message)+')');}
     return L.join('\n');
@@ -1676,6 +1763,7 @@
     }
     const k=norm(cam), key=[k.c[0].toFixed(6),k.c[1].toFixed(6),k.z.toFixed(4),k.b.toFixed(3),k.p.toFixed(3)].join('|');
     if(key!==liveKey){
+      invalidateTileRetry();
       D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
       D.triggerRepaint();
       liveKey=key;
@@ -1687,6 +1775,7 @@
     active=!!active;
     if(MB.interacting===active)return;
     MB.interacting=active;
+    invalidateTileRetry();
     renderGeneration++;
     want=null;
     if(!active)liveKey=null;
@@ -1699,7 +1788,7 @@
     if(MB.interacting)return null;
     // Capture before BOTH style changes and camera jumps.
     holdEditorFrame();
-    snapshotBusy=true;
+    snapshotBusy=true;invalidateTileRetry();
     try{
       await withTimeout(setup(bg),17000,
         'Mapbox map style configuration stalled. Refresh to retry; your scene and map settings are saved.');
@@ -1711,7 +1800,10 @@
       // failed/pending tiles explicitly and give them two more chances.
       let health=tileHealth(D);
       for(let round=0;round<2&&!health.complete;round++){
-        if(health.errored)recoverTiles(D);
+        if(health.errored){
+          if(throttled())break;          // HTTP 429 cool-down: never hammer Mapbox, report the frame as incomplete
+          recoverTiles(D);
+        }
         const again=await settle(D,generation,6000);
         if(!again||generation!==renderGeneration||MB.interacting)return null;
         health=tileHealth(D);

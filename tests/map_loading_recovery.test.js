@@ -102,7 +102,8 @@ test('Mapbox reset clears projector state even when optional P is unavailable',(
     '\n  function holdEditorFrame(');
   const reset=block('  MB.reset = function () {','\n  MB.setToken =');
   const simulate="'use strict';\n"+decl+"\n"+previewDecl+
-    "\nconst incompleteFrames=new Map(),tileRetry={n:3,timer:null};"+
+    "\nconst incompleteFrames=new Map(),tileRetry={n:3,optional:1,timer:null,epoch:0},DIAG={throttle:{level:2,until:5}};"+
+    "function invalidateTileRetry(){tileRetry.epoch++;tileRetry.n=0;tileRetry.optional=0;if(tileRetry.timer){clearTimeout(tileRetry.timer);tileRetry.timer=null;}}"+
     "\nconst MB={interacting:true,cache:{clear(){this.cleared=true}},last:'previous',"+
     "lastKey:'old frame',status:'ready',err:'previous error',queue:Promise.resolve()};"+
     "pProj='globe';pKey='camera';curProj='globe';"+
