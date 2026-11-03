@@ -1323,12 +1323,198 @@
       error=>{clearTimeout(timer);reject(error)}
     );
   });
+  /* ---- Mapbox usage safeguards (v0.10.3) -------------------------------------
+     In GL JS v3 every `new mapboxgl.Map()` is one billable "map load"; style
+     switches, zoom and pan are not. The counters below are LOCAL ESTIMATES kept
+     by this browser only. They are NOT Mapbox billing figures: they cannot see
+     other browsers, users or devices, nor the separate Static Images / Raster
+     Tiles APIs. Billing and usage alerts stay with the Mapbox account. */
+  const mem = {};
+  const ss = {
+    get: k => { try { const v = sessionStorage.getItem(k); if (v != null) return v; } catch (e) { /* ignore */ } return mem[k] == null ? null : mem[k]; },
+    set: (k, v) => { mem[k] = String(v); try { sessionStorage.setItem(k, String(v)); } catch (e) { /* ignore */ } }
+  };
+  const jget = (store, k) => { try { const o = JSON.parse(store.get(k) || 'null'); return o && typeof o === 'object' ? o : null; } catch (e) { return null; } };
+  const jset = (store, k, o) => { try { store.set(k, JSON.stringify(o)); } catch (e) { /* ignore */ } };
+  const KEY_S = 'wx.mapbox.usage.session', KEY_M = 'wx.mapbox.usage.month';
+  const USAGE_LIMITS = { page: 3, session: 12, month: 5000 };
+  const USAGE = { page: { display: 0, projector: 0, staticPreview: 0, resets: 0, noopSkips: 0, since: Date.now() } };
+  const ymNow = () => new Date().toISOString().slice(0, 7);
+  function bump(kind) {
+    USAGE.page[kind] = (USAGE.page[kind] || 0) + 1;
+    const s0 = jget(ss, KEY_S) || { since: new Date().toISOString(), display: 0, projector: 0, staticPreview: 0 };
+    s0[kind] = (s0[kind] || 0) + 1; jset(ss, KEY_S, s0);
+    let m = jget(ls, KEY_M); if (!m || m.ym !== ymNow()) m = { ym: ymNow(), display: 0, projector: 0, staticPreview: 0 };
+    m[kind] = (m[kind] || 0) + 1; jset(ls, KEY_M, m);
+  }
+  MB.USAGE_LIMITS = USAGE_LIMITS;
+  MB.usage = function () {
+    const p = USAGE.page, s0 = jget(ss, KEY_S) || { since: null, display: 0, projector: 0, staticPreview: 0 };
+    const m0 = jget(ls, KEY_M), m = m0 && m0.ym === ymNow() ? m0 : { ym: ymNow(), display: 0, projector: 0, staticPreview: 0 };
+    const mp = p.display + p.projector, ms = (s0.display || 0) + (s0.projector || 0), mm = (m.display || 0) + (m.projector || 0), w = [];
+    if (mp > USAGE_LIMITS.page) w.push(`This page load has started ${mp} Mapbox maps (display ${p.display}, helper ${p.projector}); normal use is 1–2. Each one is a billable map load. Reload the page and avoid repeated "Save & load map".`);
+    if (ms > USAGE_LIMITS.session) w.push(`This browser tab has started about ${ms} Mapbox maps in its session (normal is a few). Frequent page reloads each start new maps.`);
+    if (mm > USAGE_LIMITS.month) w.push(`This browser alone has started about ${mm} Mapbox maps this month (UTC), roughly ${(100 * mm / 50000).toFixed(0)}% of a 50,000 free allowance. Other browsers and users are not counted here.`);
+    return {
+      estimate: true,
+      label: 'Local estimate from this browser only — not an official Mapbox billing figure. Check Mapbox account → Statistics for real usage.',
+      page: { display: p.display, projector: p.projector, maps: mp, staticPreview: p.staticPreview, resets: p.resets, noopSkips: p.noopSkips },
+      session: { since: s0.since, display: s0.display || 0, projector: s0.projector || 0, maps: ms, staticPreview: s0.staticPreview || 0 },
+      month: { ym: m.ym, display: m.display || 0, projector: m.projector || 0, maps: mm, staticPreview: m.staticPreview || 0 },
+      limits: USAGE_LIMITS, warnings: w
+    };
+  };
+
+  /* ---- user-controlled pause (v0.10.3) ----
+     While paused WX Studio starts no Mapbox map, takes no new map snapshots and
+     schedules no tile retries. Editing, other backgrounds, saved shows and cached
+     map frames keep working. It is per browser tab (sessionStorage) so it cannot
+     be forgotten across days. It is NOT a spending limit. */
+  MB.paused = ss.get('wx.mapbox.paused') === '1';
+  const pausedError = () => { const e = new Error('Mapbox is paused: no map requests are being made. Resume it in Scene → Mapbox settings.'); e.mbPaused = true; return e; };
+  MB.setPaused = function (on) {
+    on = !!on; if (on === MB.paused) return MB.paused;
+    MB.paused = on; ss.set('wx.mapbox.paused', on ? '1' : '0');
+    if (on) { want = null; try { invalidateTileRetry(); } catch (e) { /* ignore */ } }
+    else { liveKey = null; }
+    if (MB.onUpdate) MB.onUpdate();
+    return MB.paused;
+  };
+
+  /* ---- projector: lng/lat <-> screen pixels without a second Map (v0.10.3) ----
+     The old design created a style-less second Map just to call project() and
+     unproject(). That doubled the billable map loads. For a flat (mercator,
+     pitch 0) camera the conversion is exact Web-Mercator arithmetic, which is
+     verified at runtime against the display map's own project(). If the check
+     cannot be run or fails, or the camera is a globe / pitched / near-pole
+     one, the old helper map is created lazily (and counted) instead. */
+  let vw = 0, vh = 0, usedToken = null, pEl = null;
+  const PT = { mode: ls.get('wx.mapbox.projector') === 'native' ? 'native' : 'math', state: 'untested', rot: false, rotTried: false, rotReason: '', maxErr: null, rotErr: null, tests: 0, mismatches: 0, createFailed: false, reason: 'not verified yet', mathCalls: 0, nativeCalls: 0 };
+  const RAD = Math.PI / 180, TOL = 0.02;
+  const mercX = lng => (lng + 180) / 360;
+  const mercY = lat => .5 - Math.log(Math.tan(Math.PI / 4 + Math.max(-89.9, Math.min(89.9, lat)) * RAD / 2)) / (2 * Math.PI);
+  // True when Mapbox will not move the requested centre to satisfy its own bounds (world smaller than the view, poles in view).
+  const unconstrained = (lat, z) => { const world = 512 * Math.pow(2, z), cy = mercY(lat) * world; return cy - vh / 2 >= 2 && world - cy - vh / 2 >= 2; };
+  function mProject(k, lng, lat) {
+    const world = 512 * Math.pow(2, k.z), a = k.b * RAD, ex = (mercX(lng) - mercX(k.c[0])) * world, ey = (mercY(lat) - mercY(k.c[1])) * world;
+    return [vw / 2 + Math.cos(a) * ex + Math.sin(a) * ey, vh / 2 - Math.sin(a) * ex + Math.cos(a) * ey];
+  }
+  function mUnproject(k, x, y) {
+    const world = 512 * Math.pow(2, k.z), a = k.b * RAD, u = x - vw / 2, v = y - vh / 2,
+      east = Math.cos(a) * u - Math.sin(a) * v, south = Math.sin(a) * u + Math.cos(a) * v,
+      mx = mercX(k.c[0]) + east / world, my = mercY(k.c[1]) + south / world;
+    return [mx * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) / RAD];
+  }
+  const SAMPLE_PX = [[0, 0], [300, 200], [-300, -200], [450, -250], [-450, 250], [120, -90], [-520, 40]];
+  // Largest pixel disagreement between the maths and `real(lng,lat)->[x,y]` for one camera.
+  function compareCam(cam, real) {
+    let err = 0;
+    for (const o of SAMPLE_PX) {
+      const px = [vw / 2 + o[0], vh / 2 + o[1]], ll = mUnproject(cam, px[0], px[1]), r = real(ll[0], ll[1]), back = mProject(cam, ll[0], ll[1]);
+      err = Math.max(err, Math.hypot(r[0] - px[0], r[1] - px[1]), Math.hypot(back[0] - px[0], back[1] - px[1]));
+    }
+    return err;
+  }
+  function projectorSelfTest() {
+    if (!D || MB.status !== 'ready' || PT.state === 'failed') return;
+    try {
+      if (PT.state !== 'ok') {
+        if (curProj !== 'mercator' || D.getPitch() > 0.001 || (D.isMoving && D.isMoving())) { PT.reason = 'waiting for a flat, stationary display map'; return; }
+        const c = D.getCenter(), cam = { c: [c.lng, c.lat], z: D.getZoom(), b: D.getBearing(), p: 0 };
+        if (!unconstrained(cam.c[1], cam.z) || Math.abs(cam.c[0]) > 180) { PT.reason = 'display map is at a constrained camera'; return; }
+        const err = compareCam(cam, (lng, lat) => { const q = D.project([lng, lat]); return [q.x, q.y]; });
+        PT.tests++; PT.maxErr = Math.max(PT.maxErr || 0, err);
+        if (err <= TOL) { PT.state = 'ok'; PT.reason = 'verified against the live display map'; if (Math.abs(cam.b) > 1) PT.rot = true; }
+        else { PT.mismatches++; PT.state = 'failed'; PT.reason = 'differs from Mapbox by ' + (isFinite(err) ? err.toFixed(3) : 'NaN') + ' px; using the helper map'; return; }
+      }
+      rotationSelfTest();
+    } catch (e) { PT.reason = 'self-test could not run (' + (e && e.message) + ')'; }
+  }
+  // Rotation is checked on a private copy of the display map's transform (no Map, no network).
+  function rotationSelfTest() {
+    if (PT.rot || PT.rotTried || PT.state !== 'ok' || !D) return;
+    PT.rotTried = true;
+    try {
+      const T = D.transform && D.transform.clone && D.transform.clone(), LL = g.mapboxgl && g.mapboxgl.LngLat;
+      if (!T || !LL) { PT.rotReason = 'transform copy unavailable'; return; }
+      const c = D.getCenter(); let worst = 0;
+      for (const b of [37, -123]) {
+        T.zoom = D.getZoom(); T.center = new LL(c.lng, c.lat); T.pitch = 0; T.bearing = b;
+        if (Math.abs(T.bearing - b) > 1e-6 || Math.abs(T.pitch) > 1e-6) { PT.rotReason = 'transform copy did not accept the test camera'; return; }
+        worst = Math.max(worst, compareCam({ c: [c.lng, c.lat], z: D.getZoom(), b, p: 0 }, (lng, lat) => { const q = T.locationPoint(new LL(lng, lat)); return [q.x, q.y]; }));
+      }
+      PT.rotErr = worst;
+      if (worst <= TOL) { PT.rot = true; PT.rotReason = 'verified'; } else PT.rotReason = 'did not match (' + (isFinite(worst) ? worst.toFixed(3) + ' px' : 'NaN') + '); rotated cameras use the helper map';
+    } catch (e) { PT.rotReason = 'could not run (' + (e && e.message) + ')'; }
+  }
+  const useMath = (k, pr) => PT.mode === 'math' && PT.state === 'ok' && pr === 'mercator' && k.p === 0 && Math.abs(k.c[0]) <= 180 && unconstrained(k.c[1], k.z) && (Math.abs(k.b) < 1e-9 || PT.rot);
+  // The legacy helper map. Counted as a map load; never created while paused.
+  function ensureProjector(early) {
+    if (P) return P;
+    if (PT.createFailed || !D || !host || !g.mapboxgl || MB.paused || (!early && MB.status !== 'ready')) return null;
+    pEl = document.createElement('div'); pEl.style.cssText = `position:absolute;left:0;top:0;width:${vw}px;height:${vh}px`; host.appendChild(pEl);
+    try {
+      const c = D.getCenter();
+      P = new g.mapboxgl.Map({ container: pEl, style: { version: 8, sources: {}, layers: [] }, center: [c.lng, c.lat], zoom: D.getZoom(), interactive: false, attributionControl: false, trackResize: false, projection: 'mercator' });
+      bump('projector'); pProj = 'mercator'; pKey = null;
+    } catch (e) {
+      // A second GL context may fail on a busy GPU; never discard the real map because of it.
+      P = null; PT.createFailed = true; try { if (pEl) pEl.remove(); } catch (x) { /* ignore */ } pEl = null;
+      console.warn('WX Studio optional Mapbox projector unavailable:', e);
+    }
+    return P;
+  }
+  MB.setProjectorMode = function (mode) {
+    mode = mode === 'native' ? 'native' : 'math'; if (mode === PT.mode) return PT.mode;
+    PT.mode = mode; ls.set('wx.mapbox.projector', mode);
+    if (mode === 'native') ensureProjector();
+    else { try { if (P) P.remove(); if (pEl) pEl.remove(); } catch (e) { /* ignore */ } P = null; pEl = null; pProj = pKey = null; projectorSelfTest(); }
+    if (MB.onUpdate) MB.onUpdate();
+    return PT.mode;
+  };
+  MB.projectorInfo = () => Object.assign({ helperMapExists: !!P }, PT);
+
+  /* ---- token facts for the settings dialog / diagnostics (never the full token) ---- */
+  MB.tokenInfo = function () {
+    const t = MB.token(), secret = String(g.WX_MAPBOX_TOKEN || '').trim(), browser = String(ls.get('wx.mapbox.token') || '').trim();
+    const kind = /^pk\./.test(t) ? 'public' : /^sk\./.test(t) ? 'secret (REJECTED – never use secret tokens in a browser)' : /^tk\./.test(t) ? 'temporary' : t ? 'unrecognised' : 'none';
+    const masked = /^pk\./.test(t) ? 'pk.…' + t.slice(-4) : '';
+    let origin = '';
+    try { if (g.location && /^https?:/.test(g.location.protocol)) origin = g.location.origin; } catch (e) { /* ignore */ }
+    try { if (!origin && g.location && g.location.ancestorOrigins && g.location.ancestorOrigins.length) origin = g.location.ancestorOrigins[g.location.ancestorOrigins.length - 1]; } catch (e) { /* ignore */ }
+    try { if (!origin && g.document && g.document.referrer) origin = new URL(g.document.referrer).origin; } catch (e) { /* ignore */ }
+    return { present: !!t, kind, masked, source: secret ? 'Streamlit Secrets' : browser ? 'this browser' : 'none', browserTokenIgnored: !!(secret && browser && secret !== browser), note: String(g.WX_MAPBOX_TOKEN_NOTE || ''), origin, allowedUrl: origin && origin !== 'null' ? origin : '' };
+  };
+
+  MB.usageDiagnostics = function () {
+    const L = [];
+    const U=MB.usage(),T=MB.tokenInfo(),Q=MB.projectorInfo();
+    L.push('Map-load counters – LOCAL ESTIMATE from this browser only, not Mapbox billing (see mapbox.com → Statistics):');
+    L.push('  this page load: '+U.page.maps+' map(s) started (display '+U.page.display+', helper '+U.page.projector+'), map resets '+U.page.resets+', redundant reloads skipped '+U.page.noopSkips+', style-card previews '+U.page.staticPreview);
+    L.push('  this tab session: '+U.session.maps+' map(s) (display '+U.session.display+', helper '+U.session.projector+')'+(U.session.since?' since '+U.session.since:''));
+    L.push('  this browser, '+U.month.ym+' (UTC): '+U.month.maps+' map(s), '+U.month.staticPreview+' style-card preview request(s)');
+    for(const w of U.warnings)L.push('  WARNING (local estimate): '+w);
+    L.push('Projector: '+(Q.mode==='native'?'native helper map (forced in this browser)':Q.state==='ok'?'exact Mercator maths, '+Q.reason+', max error '+(Q.maxErr==null?'?':Q.maxErr.toExponential(1))+' px, rotation '+(Q.rot?'verified':'not verified'+(Q.rotReason?' ('+Q.rotReason+')':'')):'helper map when needed ('+Q.reason+')')+'; helper map '+(Q.helperMapExists?'created':'not created')+'; maths calls '+Q.mathCalls+', helper calls '+Q.nativeCalls);
+    L.push('Token: '+(T.present?T.kind+(T.masked?' '+T.masked:'')+', from '+T.source:'none')+(T.browserTokenIgnored?' (a different token saved in this browser is ignored while Streamlit Secrets supply one)':'')+(T.allowedUrl?'; page origin '+T.allowedUrl:'; page origin not detectable'));if(T.note)L.push('Token note: '+T.note);
+    return L;
+  };
+
+  /* One page-lifetime Static Images preview request per token (separate Mapbox API). */
+  const previewAsked = {};
+  MB.satellitePreviewUrl = function () {
+    const t = MB.token();
+    if (!/^pk\./.test(t) || MB.paused) return null;
+    if (!previewAsked[t]) { previewAsked[t] = 1; bump('staticPreview'); }
+    return 'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/-71.5,42.4,6/280x142@2x?access_token=' + encodeURIComponent(t);
+  };
+
   MB.init = function () {
     // A failed init must remain failed until a deliberate reset/reload.
     // Otherwise the editor's 30fps preview retries GL creation immediately,
     // hiding the error and drawing 'Loading Mapbox map…' forever.
     if(MB.status==='error')return Promise.reject(new Error(MB.err||'Mapbox could not initialize'));
     if (initP) return initP;
+    if (MB.paused) return Promise.reject(pausedError());
     initP = (async () => {
       MB.status = 'loading'; MB.err = '';
       try {
@@ -1340,18 +1526,14 @@
         try { Object.defineProperty(g, 'devicePixelRatio', { configurable: true, get: () => MB.scale }); } catch (e) { /* ignore */ }
         const cw = Math.round(W / MB.scale), ch = Math.round(H / MB.scale);
         host = document.createElement('div'); host.style.cssText = `position:fixed;left:-30000px;top:0;width:${cw}px;height:${ch}px;pointer-events:none;`;
-        const de = document.createElement('div'), pe = document.createElement('div'); for (const e of [de, pe]) { e.style.cssText = `position:absolute;left:0;top:0;width:${cw}px;height:${ch}px`; host.appendChild(e); } document.body.appendChild(host);
+        const de = document.createElement('div'); for (const e of [de]) { e.style.cssText = `position:absolute;left:0;top:0;width:${cw}px;height:${ch}px`; host.appendChild(e); } document.body.appendChild(host);
         const c0 = MB.regionCam('newengland');
         D = new g.mapboxgl.Map({ container: de, style: 'mapbox://styles/mapbox/streets-v12', center: c0.c, zoom: c0.z, interactive: false, attributionControl: false, preserveDrawingBuffer: true, fadeDuration: 0, antialias: true, trackResize: false, projection: 'mercator' });
-        // The projector is an optional coordinate-conversion helper.
-        // A second GL context may fail on a busy GPU; never discard the
-        // actual weather map because that optional map could not initialize.
-        try{
-          P = new g.mapboxgl.Map({ container: pe, style: { version: 8, sources: {}, layers: [] }, center: c0.c, zoom: c0.z, interactive: false, attributionControl: false, trackResize: false, projection: 'mercator' });
-        }catch(projectorError){
-          P=null;
-          console.warn('WX Studio optional Mapbox projector unavailable:',projectorError);
-        }
+        bump('display'); vw = cw; vh = ch; usedToken = MB.token();
+        // v0.10.3: no second Map at startup. Coordinates come from verified
+        // Mercator maths; the helper map is created lazily, or here only if the
+        // user chose the native helper (wx.mapbox.projector = 'native').
+        if (PT.mode === 'native') ensureProjector(true);
         D.on('error', e => {
           if (isAuthError(e)) { MB.err = 'Mapbox rejected the token (' + String(e.error.message || e.error.status).replace(/https?:\/\/\S+/g, '').trim() + ')'; MB.status = 'error'; return; }
           recordMapError(e);
@@ -1385,20 +1567,30 @@
           'Mapbox base map did not load within 25 seconds. Check the Mapbox token, network and browser WebGL; then refresh.');
         if(MB.status==='error')throw new Error(MB.err||'Mapbox token was rejected');
         curStyle = 'streets-v12'; curStyleKey='stock|streets-v12'; curCfgKey=null; curProj = 'mercator'; pProj = 'mercator'; MB.status = 'ready';
+        projectorSelfTest();
       } catch (e) {
         MB.status='error';MB.err=e.message||String(e);
         // A failed first load must not retain orphaned WebGL maps/hosts.
         try{if(D)D.remove();if(P)P.remove();if(host)host.remove()}catch(ignore){}
-        D=P=host=null;initP=null;
+        D=P=host=pEl=null;initP=null;
         console.warn('WX Studio Mapbox initialization:',MB.err);
         throw e;
       }
     })();
     return initP;
   };
-  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } D = P = host = initP = null; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); incompleteFrames.clear(); invalidateTileRetry(); DIAG.throttle.level = 0; DIAG.throttle.until = 0; MB.last=null;MB.lastKey=null; snapshotBusy=false;previewHold=null;previewRestorePending=false;previewRestoreKey=null; MB.status='idle'; MB.err = ''; MB.queue = Promise.resolve(); };
-  MB.setToken = function (t) { ls.set('wx.mapbox.token', String(t || '').trim()); MB.reset(); };
-  MB.setScale = function (s) { MB.scale = s; ls.set('wx.mapbox.scale', String(s)); MB.reset(); };
+  MB.reset = function () { try { if (D) D.remove(); if (P) P.remove(); if (host) host.remove(); } catch (e) { /* ignore */ } if (D || P) USAGE.page.resets++; D = P = host = pEl = initP = null; usedToken = null; PT.state = 'untested'; PT.rot = false; PT.rotTried = false; PT.rotReason = ''; PT.reason = 'not verified yet'; curStyle = curStyleKey = curCfgKey = curProj = pProj = pKey = liveKey = null; renderGeneration++; MB.interacting = false; MB.cache.clear(); incompleteFrames.clear(); invalidateTileRetry(); DIAG.throttle.level = 0; DIAG.throttle.until = 0; MB.last=null;MB.lastKey=null; snapshotBusy=false;previewHold=null;previewRestorePending=false;previewRestoreKey=null; MB.status='idle'; MB.err = ''; MB.queue = Promise.resolve(); };
+  // v0.10.3: setting the token / label size to what the map is already using
+  // must not rebuild the maps (each rebuild is a new billable map load).
+  MB.setToken = function (t) {
+    ls.set('wx.mapbox.token', String(t || '').trim());
+    if ((D || initP) && MB.status !== 'error' && usedToken != null && MB.token() === usedToken) { USAGE.page.noopSkips++; return false; }
+    MB.reset(); return true;
+  };
+  MB.setScale = function (v) {
+    if ((D || initP) && MB.status !== 'error' && +v === MB.scale) { USAGE.page.noopSkips++; return false; }
+    MB.scale = v; ls.set('wx.mapbox.scale', String(v)); MB.reset(); return true;
+  };
 
   function fog(bg) {
     try{
@@ -1646,6 +1838,7 @@
   function scheduleRecovery(wait,scope){
     const epoch=tileRetry.epoch;
     const fire=()=>{
+      if(MB.paused)return;
       tileRetry.timer=null;
       if(epoch!==tileRetry.epoch||!D)return;                                  // camera/style changed: stale
       if(MB.interacting||snapshotBusy){tileRetry.timer=setTimeout(fire,500);return;}   // busy: wait, keep the attempt
@@ -1708,6 +1901,8 @@
     try{
       L.push('Mapbox GL JS: '+(g.mapboxgl&&g.mapboxgl.version||'?')+' (pinned '+VER+')');
       L.push('Status: '+MB.status+(MB.err?' – '+MB.err:''));
+      L.push('Mapbox requests: '+(MB.paused?'PAUSED by the user (no maps are started and no snapshots are taken)':'active'));
+      if(MB.usageDiagnostics)for(const x of MB.usageDiagnostics())L.push(x);
       L.push('Device pixel ratio: native '+(DIAG.nativeDpr==null?'?':DIAG.nativeDpr)+', map render scale '+MB.scale);
       let gl=null;try{gl=D&&D.painter&&D.painter.context&&D.painter.context.gl;}catch(e){}
       if(gl){
@@ -1859,9 +2054,13 @@
     if(MB.status==='error')return Promise.reject(new Error(MB.err||'Mapbox failed'));
     const key=keyOf(bg,cam),b=cloneBg(bg);
     {const hit=cachedFrame(key);if(hit)return Promise.resolve(hit);}
-    const p=MB.queue.then(()=>doSnap(b,cam,key)).catch(error=>{
+    if(MB.paused)return Promise.reject(pausedError());
+    // v0.10.3: a reset (token / label-size change, reload) while this frame is rendering destroys the map under it.
+    // That failure belongs to the OLD map; it must not latch an error on the NEW one.
+    const p=MB.queue.then(()=>{const gen=renderGeneration;return doSnap(b,cam,key).catch(e=>{if(gen!==renderGeneration){const x=new Error('Mapbox was reset while a frame was rendering');x.mbStale=true;throw x;}throw e;});}).catch(error=>{
       // A fatal style/render exception must be visible to the user, not
       // swallowed by pump() and instantly retried every editor frame.
+      if(error&&(error.mbPaused||error.mbStale))throw error;   // paused / reset mid-queue: not a Mapbox failure
       if(MB.status!=='error'){
         MB.err=error?.message||String(error);
         MB.status='error';
@@ -1877,7 +2076,7 @@
      current WebGL canvas directly instead of waiting for settled snapshots. */
   let busy = false, want = null;
   function pump() {
-    if (busy || !want || MB.interacting || MB.status==='error') return;
+    if (busy || !want || MB.interacting || MB.status==='error' || MB.paused) return;
     busy = true; const w = want; want = null;
     MB.snap(w.bg, w.cam).catch(() => { }).then(() => { busy = false; if (MB.onUpdate) MB.onUpdate(); pump(); });
   }
@@ -1916,7 +2115,8 @@
   MB.panByPixels = function(bg,startCam,dx,dy){
     if(!Number.isFinite(dx)||!Number.isFinite(dy))return null;
     const k=norm(startCam),s=MB.scale||1,pr=projOf(bg);
-    if(P&&MB.status==='ready'){
+    if(MB.status==='ready'&&!useMath(k,pr)&&ensureProjector()){
+      PT.nativeCalls++;
       try{
         if(pProj!==pr){P.setProjection(pr);pProj=pr;}
         P.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
@@ -1949,8 +2149,18 @@
     return [wrap(k.c[0]-east*360/world),Math.max(-85,Math.min(85,lat1))];
   };
   MB.xf = function (bg, cam) {
-    if (!P || MB.status !== 'ready') return null;
-    const s = MB.scale, k = norm(cam), pr = projOf(bg), key = pr + '|' + k.c[0] + '|' + k.c[1] + '|' + k.z + '|' + k.b + '|' + k.p;
+    if (MB.status !== 'ready') return null;
+    const s = MB.scale, k = norm(cam), pr = projOf(bg);
+    if (useMath(k, pr)) {
+      PT.mathCalls++;
+      return {
+        fwd: (x, y) => { const q = mProject(k, x, y); return [q[0] * s, q[1] * s]; },
+        inv: (x, y) => mUnproject(k, x / s, y / s)
+      };
+    }
+    if (!ensureProjector()) return null;
+    PT.nativeCalls++;
+    const key = pr + '|' + k.c[0] + '|' + k.c[1] + '|' + k.z + '|' + k.b + '|' + k.p;
     const sync = () => { if (pKey === key) return; if (pProj !== pr) { P.setProjection(pr); pProj = pr; } P.jumpTo({ center: k.c, zoom: k.z, bearing: k.b, pitch: k.p }); pKey = key; };
     return {
       fwd: (x, y) => { sync(); const q = P.project([x, y]); return [q.x * s, q.y * s]; },

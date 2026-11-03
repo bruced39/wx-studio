@@ -507,7 +507,8 @@
       const cam=E.viewAt(scene,ct), fr=(opts&&opts.liveMap&&g.MB.liveFrame)?g.MB.liveFrame(b,cam):g.MB.frame(b,cam);
       if (fr) c.drawImage(fr, 0, 0, W, H); else { c.fillStyle = '#0b1a2e'; c.fillRect(0, 0, W, H); }
       c.save(); c.font = `600 26px ${SANS}`; c.textAlign = 'center';
-      if (!fr || g.MB.status !== 'ready') { c.fillStyle = g.MB.status === 'error' || !g.MB.hasToken() ? '#ffb4a8' : 'rgba(255,255,255,0.6)'; c.fillText(g.MB.status === 'error' ? 'Mapbox: ' + g.MB.err : (!g.MB.hasToken() ? 'Add your Mapbox token: Scene panel → Mapbox settings' : 'Loading Mapbox map…'), W / 2, H / 2); }
+      if (!fr && g.MB.paused) { c.fillStyle = '#ffd9a0'; c.fillText('Mapbox is paused – no map requests are being made. Resume: Scene panel → Mapbox settings', W / 2, H / 2); }
+      else if (!fr || g.MB.status !== 'ready') { c.fillStyle = g.MB.status === 'error' || !g.MB.hasToken() ? '#ffb4a8' : 'rgba(255,255,255,0.6)'; c.fillText(g.MB.status === 'error' ? 'Mapbox: ' + g.MB.err : (!g.MB.hasToken() ? 'Add your Mapbox token: Scene panel → Mapbox settings' : 'Loading Mapbox map…'), W / 2, H / 2); }
       c.textAlign = 'left'; c.font = `500 15px ${SANS}`; c.fillStyle = 'rgba(255,255,255,0.78)'; c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 4; c.fillText('© Mapbox  © OpenStreetMap contributors', 14, H - 12); c.restore();
     } else if (b.type === 'map') {
       g.WDMap.draw(c, E.viewAt(scene, ct), b.theme, { W, H, cities: b.cities !== false, counties: b.counties !== false, density: b.cityDensity || 1 });

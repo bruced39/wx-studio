@@ -3,6 +3,22 @@
 > Shared project continuity for ChatGPT and Claude. Update this file whenever code changes.
 > Never assume this snapshot is the latest: read `main`, `VERSION`, recent commits, and relevant source files before editing.
 
+## v0.10.3 — Mapbox usage safeguards (2026-11-02; FEATURE BRANCH `claude/v0.10.3-mapbox-usage-safeguards`, NOT merged, NOT in production)
+
+- **Why:** the account is moving to Mapbox pay-as-you-go so satellite works again; goal is to stay inside the free allowance (GL JS 50,000 map loads/month, Raster Tiles 750,000, no hard spending cap). Full audit, token guide and billing notes: `docs/MAPBOX_USAGE_AND_TOKENS.md`.
+- **Stacked on** `claude/v0.10.2.2-map-tile-recovery` (b162d77) so the hotfix safeguards (tile recovery, 429/503 cool-down, 4 s manual-reload guard, diagnostics) are intact. Merge order: hotfix first (after the isolated Firefox test), then this branch, then reconcile the animation branch.
+- **Changes (Claude-owned files only):** `studio/mapbox.js`, `studio/ui.js`, `studio/engine.js`, `studio/export.js`, `app.py`, new `mapbox_token.py`, tests, docs, `VERSION` 0.10.2.2 → 0.10.3.
+  1. Startup creates **one** Map (display) instead of two. The projection helper map is lazy and counted; flat mercator cameras use Web-Mercator maths that is **self-tested at runtime against the display map's own `project()`** (and rotation on a `transform.clone()`); any doubt → helper map. `wx.mapbox.projector=native` forces the old behaviour (UI checkbox in Mapbox settings).
+  2. `MB.setToken` / `MB.setScale` are no-ops when nothing effective changed (previously every "Save & load map" rebuilt both maps).
+  3. A frame that fails because `MB.reset()` destroyed the map under it no longer latches a sticky error.
+  4. Local usage counters (page / tab session / UTC month) + warnings, labelled **local estimates, not Mapbox billing**. Shown in Mapbox settings and Map diagnostics.
+  5. "Pause Mapbox requests" (per tab): no Map creation, no snapshots, no tile retries, no style-card image; editing/other backgrounds/saved shows/cached frames work. Export preflight errors with a **Resume Mapbox** button and `prepare()` refuses, so no video can contain placeholders.
+  6. Tokens: `mapbox_token.py` (public `pk.` only; optional `[MAPBOX_PUBLIC_TOKENS_BY_HOST]`; non-public values reported by key name only). Settings dialog shows masked token + source, never asks to retype a Secrets token, shows the URL to allow in Mapbox.
+- **ChatGPT-owned files touched: NONE** (no `supabase/migrations/*`, `tests/supabase/*`, `studio/cloud_presets.js`, NOAA ingest, cloud workspace files). The Cloud Workspace still syncs the allow-listed `wx.mapbox.token` / `wx.mapbox.scale` keys exactly as before; new keys (`wx.mapbox.usage.*`, `wx.mapbox.projector`, session `wx.mapbox.paused`) are not in the cloud settings allow-list and are never synced.
+- **Not verifiable in the sandbox (real Mapbox GL cannot be downloaded):** the real-library behaviour of the maths self-test, and whether Mapbox URL restrictions accept the Streamlit iframe's Referer. The owner should open *Map diagnostics* once on the test app: expect `Projector: exact Mercator maths, verified against the live display map`.
+- **Tests:** `tests/mapbox_usage_safeguards.test.js` (19), `tests/test_mapbox_token.py` (9), `tests/browser/mapbox_usage_browser_check.py` (36; counts `new Map()` in a stand-in GL), plus updates to `tests/map_loading_recovery.test.js` for the new guards. **Regression (2026-11-02, this branch):** 24 Node test files all green (map_tile_recovery 40, map_loading_recovery 8, mapbox_usage_safeguards 19, cloud 57, …); Python `test_mapbox_token` 9 + NOAA/setup tests OK, `app_cloud_config_check` 11/11; 22 browser checks green on the fake Supabase backend (incl. `map_tile_recovery` 30/30 and `mapbox_usage` 36/36); 4 cloud checks green on real PostgreSQL (`WX_BACKEND=pg`). The `map_animation_*` checks live on the animation branch and were not re-run here. Pre-existing: `tests/test_weather_processor*.py` need `pytest`, which the sandbox lacks.
+- **Animation branch (v0.11.4):** untouched; effects and expected conflicts are documented in section 7 of the doc (mainly `ui.js mapboxSettings` and `mapbox.js` init/reset/snap/xf/diagnostics; no API changes).
+
 ## Production release v0.10.2 — Cloud Workspace (2026-10-25; approved)
 
 - **Owner authorization:** explicit user instruction “Release v0.10.2” on 2026-10-25. Release is a normal merge from `claude/v0.10.2-release-test` into `main`; no forced updates and no database changes at deployment.
