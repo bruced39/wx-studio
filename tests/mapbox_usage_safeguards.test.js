@@ -28,7 +28,7 @@ function rig(opts = {}) {
     SAFE, RESET,
     'return {PT,USAGE,ensureProjector,projectorSelfTest,useMath,mProject,mUnproject,unconstrained,compareCam,bump,',
     ' state:o=>{if("D" in o)D=o.D;if("P" in o)P=o.P;if("host" in o)host=o.host;if("vw" in o){vw=o.vw;vh=o.vh;}if("usedToken" in o)usedToken=o.usedToken;if("initP" in o)initP=o.initP;if("curProj" in o)curProj=o.curProj;},',
-    ' get:()=>({D,P,host,initP,usedToken,vw,vh,want,liveKey})};'
+    ' get:()=>({D,P,host,initP,usedToken,vw,vh,want,liveKey,renderGeneration})};'
   ].join('\n');
   const api = new Function('MB', 'ls', 'g', 'document', 'console', 'counters', 'sessionStorage', 'Date', script)(
     MB, ls, g, doc, { warn() {}, log() {} }, counters, wrapped, opts.Date || Date);
@@ -227,7 +227,7 @@ test('token facts never expose the token; secret (sk.) tokens are labelled rejec
 test('source guards: pause checks in snap/pump/init/tile retry, and no Map is created at startup for the projector', () => {
   assert.match(src, /if \(MB\.paused\) return Promise\.reject\(pausedError\(\)\);/, 'init refuses while paused');
   assert.match(src, /if\(MB\.paused\)return Promise\.reject\(pausedError\(\)\);/, 'snap refuses uncached frames while paused');
-  assert.match(src, /const fire=\(\)=>\{\s*\n\s*if\(MB\.paused\)return;/, 'tile retries stop while paused');
+  assert.match(src, /const fire=\(\)=>\{\s*\n\s*if\(MB\.paused\)\{tileRetry\.timer=null;return;\}/, 'tile retries stop while paused');
   assert.match(src, /if \(PT\.mode === 'native'\) ensureProjector\(true\);/, 'eager helper only when the user forces it');
   const initBody = block('  MB.init = function () {', '  MB.reset = function');
   assert.equal((initBody.match(/new g\.mapboxgl\.Map\(/g) || []).length, 1, 'MB.init creates exactly one Map (the display map)');
@@ -247,4 +247,56 @@ test('a frame that fails because Mapbox was reset underneath it does not latch a
   };
   assert.equal(await run(true), 'ready', 'stale failure ignored');
   assert.equal(await run(false), 'error', 'genuine failure still latched');
+});
+
+/* ---- pause: camera-driven paths (v0.10.3 review fix) ---- */
+function liveRig(paused) {
+  const pre = "'use strict';let D,liveKey=null,snapshotBusy=false,previewHold=null,previewRestorePending=false,previewRestoreKey=null,jumps=0,repaints=0,invalidated=0;" +
+    "const norm=c=>c,visualConfigReady=()=>true,styleOf=()=>'s',projOf=()=>'mercator',curStyleKey='stock|s',curProj='mercator';let curStyleKeyX;" +
+    "function invalidateTileRetry(){invalidated++}function onEditorFrameRendered(){}";
+  const code = block('  function stableEditorFrame(bg,cam){', '\n  MB.setInteractive');
+  const fn = new Function('MB', pre + code + ";D={jumpTo(){jumps++},triggerRepaint(){repaints++},getCanvas(){return 'CANVAS'},on(){},off(){}};" +
+    "return {stable:stableEditorFrame,live:liveCanvas,get:()=>({jumps,repaints,invalidated,liveKey}),set:o=>{if('liveKey' in o)liveKey=o.liveKey;if('hold' in o){previewHold=o.hold;previewRestorePending=o.pending;previewRestoreKey=o.rkey||null}}};");
+  return fn({ paused: !!paused, status: 'ready', interacting: false });
+}
+const CAM = { c: [-71, 42], z: 7, b: 0, p: 0 }, KEY = '-71.000000|42.000000|7.0000|0.000|0.000';
+test('paused: the live-preview canvas never calls jumpTo / triggerRepaint for a new camera', () => {
+  const r = liveRig(true);
+  assert.equal(r.live({}, CAM), null);
+  assert.equal(r.stable({}, CAM), null);
+  assert.deepEqual([r.get().jumps, r.get().repaints, r.get().invalidated], [0, 0, 0]);
+});
+test('paused: a canvas already at the requested camera may still be shown, still without any request', () => {
+  const r = liveRig(true); r.set({ liveKey: KEY });
+  assert.equal(r.live({}, CAM), 'CANVAS'); assert.equal(r.get().jumps, 0);
+});
+test('paused: the interrupted-snapshot restore jump is held back; after resume it happens once', () => {
+  const MBo = { paused: true, status: 'ready', interacting: false };
+  const r = liveRig(true); r.set({ hold: 'HELD', pending: true });
+  assert.equal(r.stable({}, CAM), 'HELD'); assert.equal(r.get().jumps, 0, 'no restore jump while paused');
+  const r2 = liveRig(false); r2.set({ hold: 'HELD', pending: true });
+  assert.equal(r2.stable({}, CAM), 'HELD'); assert.equal(r2.get().jumps, 1, 'resumed: camera restored');
+  assert.ok(MBo);
+});
+test('not paused: live preview still follows the camera (no regression)', () => {
+  const r = liveRig(false);
+  assert.equal(r.live({}, CAM), 'CANVAS'); assert.equal(r.get().jumps, 1);
+  r.live({}, CAM); assert.equal(r.get().jumps, 1, 'same camera: no second jump');
+});
+test('source: every D-moving path checks the pause flag', () => {
+  const snapBody = block('  async function doSnap(', '  MB.snap = function(');
+  assert.ok((snapBody.match(/if\(MB\.paused\)throw pausedError\(\)/g) || []).length >= 4, 'doSnap checkpoints');
+  assert.match(block('  function recoverTiles(m,force,scope){', '    let n=0'), /if\(MB\.paused\)return 0/);
+  assert.match(block('  function onMapIdle(){', '    const h=tileHealth'), /MB\.paused/);
+  assert.match(block('  MB.reloadTiles=function(){', '    const now'), /MB\.paused/);
+  const st = block('  function settle(m,generation,wallMs){', '\n  }\n');
+  assert.equal((st.match(/MB\.paused/g) || []).length, 3, 'settle stops on pause (wall timer, render, step)');
+  assert.match(src, /webglcontextrestored[\s\S]{0,600}D && !MB\.paused/, 'context-restore recovery respects pause');
+});
+test('setPaused(true) bumps the render generation so an in-flight snapshot ends at its next checkpoint', () => {
+  const r = rig(); r.state({});
+  const gen0 = r.get().renderGeneration;
+  r.MB.setPaused(true);
+  assert.equal(r.get().renderGeneration, gen0 + 1);
+  r.MB.setPaused(false); assert.equal(r.get().renderGeneration, gen0 + 1, 'resume changes nothing else');
 });

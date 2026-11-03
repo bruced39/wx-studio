@@ -43,7 +43,7 @@ FAKE_GL = r"""
     on(ev,fn){(this.__ls[ev]=this.__ls[ev]||[]).push(fn);if(this.__isD){(window.__listeners[ev]=window.__listeners[ev]||[]).push(fn);}return this;}
     once(ev,fn){const w=(...a)=>{this.off(ev,w);fn(...a)};this.on(ev,w);if(ev==='style.load')setTimeout(()=>{(this.__ls['style.load']||[]).slice().forEach(f=>f());},10);return this;}
     off(ev,fn){for(const t of [this.__ls,window.__listeners]){if(t[ev])t[ev]=t[ev].filter(f=>f!==fn);}return this;}
-    getCanvas(){return this.__canvas;} loaded(){return this.__loaded;} isMoving(){return false;}
+    getCanvas(){return this.__canvas;} loaded(){return this.__loaded&&!window.__slow;} isMoving(){return false;}
     jumpTo(o){const s=this.__st;if(o.center){s.c=[o.center.lng!==undefined?o.center.lng:o.center[0],o.center.lat!==undefined?o.center.lat:o.center[1]];}
       if(o.zoom!=null)s.z=o.zoom;if(o.bearing!=null)s.b=o.bearing;if(o.pitch!=null)s.p=o.pitch;window.__jumps=(window.__jumps||0)+1;}
     triggerRepaint(){setTimeout(()=>window.__paint(),0);} resize(){} remove(){window.__ev.push({t:'remove',d:this.__isD});}
@@ -204,6 +204,44 @@ with sync_playwright() as p:
         and pg.query_selector('#mbResumeExport') is None)
     chk('no page errors (normal flow)', not errs, errs)
     ctx.close()
+
+    # ================= A2. pause blocks camera-driven requests and handles in-flight work =================
+    ctx2, pg2, errs2 = newctx(br)
+    pg2.evaluate(SETUP)
+    pg2.wait_for_timeout(300)
+    r = pg2.evaluate("""()=>{const bg=WX.S.show.scenes[0].bg;MB.liveFrame(bg,{c:[-71.2,42.5],z:7,b:0,p:0});return {jumps:window.__jumps||0,maps:window.__maps.length}}""")
+    base_j, base_m = r['jumps'], r['maps']
+    pg2.evaluate("()=>MB.setPaused(true)")
+    r = pg2.evaluate("""()=>{const bg=WX.S.show.scenes[0].bg,out=[];
+      for(let i=0;i<12;i++)out.push(MB.liveFrame(bg,{c:[-71.2+i*.3,42.5-i*.1],z:7+i*.1,b:i,p:0}));
+      const same=MB.liveFrame(bg,{c:[-71.2,42.5],z:7,b:0,p:0});
+      return {jumps:(window.__jumps||0),maps:window.__maps.length,nulls:out.filter(x=>!x).length,sameIsCanvas:!!same,status:MB.status}}""")
+    chk('paused: 12 live-preview camera changes issue no camera move (jumpTo) and no map', r['jumps'] == base_j and r['maps'] == base_m and r['status'] == 'ready', (r, base_j))
+    chk('paused: the canvas already at the requested camera is still shown', r['sameIsCanvas'])
+    pg2.evaluate("()=>{window.__tiles.b={state:'errored'};window.__fireIdle();}")
+    pg2.wait_for_timeout(2600)
+    chk('paused: a failed tile is NOT automatically re-requested, and "Reload map tiles" does nothing',
+        pg2.evaluate("()=>window.__tiles.b.state")=='errored' and pg2.evaluate("()=>MB.reloadTiles()") == 0)
+    pg2.evaluate("()=>{window.__tiles.b={state:'loaded'};MB.setPaused(false);}")
+    # -- in-flight snapshot: slow tiles, pause while it waits
+    pg2.evaluate("()=>{window.__slow=true;window.__snapRes=null;const bg=WX.S.show.scenes[0].bg;MB.snap(bg,{c:[-90,35],z:6,b:0,p:0}).then(v=>window.__snapRes={ok:!!v},e=>window.__snapRes={err:e.message,paused:!!e.mbPaused})}")
+    pg2.wait_for_function("()=>(window.__jumps||0)>%d" % base_j, timeout=5000)
+    j_started = pg2.evaluate("()=>window.__jumps")
+    pg2.evaluate("()=>MB.setPaused(true)")
+    pg2.wait_for_function("()=>window.__snapRes!==null", timeout=6000)
+    r = pg2.evaluate("()=>({res:window.__snapRes,status:MB.status,jumps:window.__jumps,maps:window.__maps.length})")
+    chk('in-flight snapshot ends promptly when paused, without latching a Mapbox error', (r['res'].get('paused') or r['res'].get('ok') is False) and r['status'] == 'ready', r)
+    chk('...and issues no further camera move or map after the pause', r['jumps'] == j_started and r['maps'] == base_m, (r, j_started))
+    pg2.evaluate("()=>{window.__slow=false}")
+    pg2.wait_for_timeout(800)
+    chk('paused afterwards: still no camera move / map / style change', pg2.evaluate("()=>[window.__jumps,window.__maps.length]") == [j_started, base_m])
+    # -- resume: no new billable map; the camera is re-applied by the normal redraw
+    r = pg2.evaluate("""async()=>{MB.setPaused(false);const bg=WX.S.show.scenes[0].bg;
+      MB.liveFrame(bg,{c:[-80,38],z:6.5,b:0,p:0});const cv=await MB.snap(bg,{c:[-90,35],z:6,b:0,p:0});
+      return {maps:window.__maps.length,ok:!!cv,status:MB.status,jumps:window.__jumps,u:MB.usage().page}}""")
+    chk('resume: live preview and snapshots work again with NO new map', r['ok'] and r['maps'] == base_m and r['status'] == 'ready' and r['jumps'] > j_started and r['u']['display'] == 1 and r['u']['projector'] == 0, r)
+    chk('pause/resume cycle raised no page errors', not errs2, errs2)
+    ctx2.close()
 
     # ================= B. starting paused (e.g. the tab was paused, then Streamlit reran) =================
     ctx, pg, errs = newctx(br, "sessionStorage.setItem('wx.mapbox.paused','1');")

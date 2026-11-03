@@ -1878,6 +1878,7 @@
       reload.textContent = w ? 'Reload anyway (rate-limited)' : 'Reload map tiles';
     };
     reload.addEventListener('click', () => {
+      if (g.MB.paused) { toast('Mapbox is paused – resume it first to reload map tiles'); return; }
       const r = g.MB.reloadTiles();
       if (r < 0) { toast('Reload already in progress – please wait a few seconds'); return; }
       reload.disabled = true; setTimeout(() => { reload.disabled = false; refresh(); }, g.MB.RELOAD_GUARD_MS);

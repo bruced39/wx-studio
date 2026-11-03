@@ -40,7 +40,9 @@ There is no guaranteed hard spending cap.
 3. **Reset mid-render safety.** A frame that fails because `MB.reset()` destroyed the map underneath it is ignored instead of latching a sticky "Mapbox error" on the new map (which previously pushed users to reload the page = another load).
 4. **Local usage accounting** (`MB.usage()`): maps started this page load (display / helper), resets, skipped reloads, tab-session total (`sessionStorage`), calendar-month total for this browser (`localStorage`, UTC month), Static-Images previews. Warnings (always labelled local estimates):
    more than 3 maps in one page load, more than 12 in one tab session, more than 5,000 this month in this browser. Shown in *Mapbox settings* and in *Map diagnostics*.
-5. **Pause Mapbox requests** (Scene panel button and Mapbox settings). Per tab (`sessionStorage`), so it cannot be forgotten for days. While paused: no `Map` is created (including the helper), uncached snapshots are refused *without* marking Mapbox as failed, no tile retries fire, no style-card image is requested. Still works: editing, other backgrounds, saved shows, Cloud Workspace, already-drawn map frames, object positions (pure maths). Starting paused is safe (init is refused, status stays `idle`).
+5. **Pause Mapbox requests** (Scene panel button and Mapbox settings). Per tab (`sessionStorage`), so it cannot be forgotten for days. While paused the display map is **never moved or restyled**: no `Map` is created (including the helper), `doSnap`, the live-preview paths (`liveCanvas()` / `stableEditorFrame()` – no `jumpTo`, no restore jump after an interrupted snapshot), automatic tile retries, "Reload map tiles", WebGL-context-restore recovery and the style-card image are all blocked. Uncached snapshots are refused *without* marking Mapbox as failed. A live canvas is shown only if it is already at the requested camera; otherwise cached frames or the "Mapbox is paused" placeholder are drawn.
+   Still works: editing, other backgrounds, saved shows, Cloud Workspace, already-drawn map frames, object positions (pure maths).
+   **In-flight work:** requests already sent to Mapbox before the click (tiles, a style being fetched) **cannot be cancelled and may finish**, and their tiles may still arrive. Pausing bumps the render generation, so a snapshot that was running stops at its next checkpoint (after the style step, after each wait for tiles, before any retry) and no further camera move, style change or retry is issued; queued snapshots refuse to start. Resuming does not create a map by itself – the existing display map is reused, the camera is re-applied by the next normal redraw (a map that was never started is created once, on resume).
    **Export:** a show with map scenes cannot start while paused – the preflight shows an error with a **Resume Mapbox** button, and `prepare()` also refuses, so a video can never silently contain placeholders. Exports of shows without map scenes are unaffected.
 6. **Tokens** (§5): `mapbox_token.py` picks a public token (optionally per host); secret/temporary tokens are refused by name; the settings dialog shows the masked token and its source, never asks to retype a Secrets token, and prints the URL to allow in Mapbox.
 7. **Diagnostics** gained: pause state, usage counters, projector mode + self-test result, token kind/source/page origin (never the token).
@@ -66,13 +68,13 @@ Not changed: tile recovery, 429/503 cool-down, 4 s manual-reload guard, 24-tile 
   ```toml
   [MAPBOX_PUBLIC_TOKENS_BY_HOST]
   "wx-studio.streamlit.app" = "pk.…production…"
-  "wx-studio-firefox-test.streamlit.app" = "pk.…test…"
+  "wx-studio-satellite-test.streamlit.app" = "pk.…test…"
   ```
   Priority: host table → `MAPBOX_PUBLIC_TOKEN` → `MAPBOX_TOKEN` (legacy).
 * With a Secrets token nobody has to paste anything. The dialog shows `pk.…abcd`, does **not** copy it into the browser, and ignores an older browser token (it says so).
 * **Create dedicated, restricted tokens** (Mapbox account → Tokens → Create a token): keep only the default public scopes (no secret or write scopes); under **URL restrictions** add exactly the sites that should use it:
   * production: `https://wx-studio.streamlit.app`
-  * the separate Firefox-test app: `https://<its-name>.streamlit.app` (use a **different token** so one can be revoked alone)
+  * the satellite test app: `https://wx-studio-satellite-test.streamlit.app` (use a **different token** from production so either can be revoked alone)
   * local development: a separate token with `http://localhost:8501`
   Mapbox checks the `Referer` of each request. The Streamlit component is an iframe of the app page, so the app's origin is what is sent. **This could not be verified in the sandbox** – after restricting a token, open the app once; a wrong URL shows "Mapbox rejected the token (403)" immediately and is fixed by adding the origin shown in *Map diagnostics → "page origin"*.
 * Browser-saved tokens are still synced by the Cloud Workspace (existing allow-listed setting `wx.mapbox.token`). A URL-restricted token saved that way works only on its allowed sites. Prefer Secrets so no token is saved at all. No cloud/Supabase file was changed.

@@ -1375,7 +1375,7 @@
   MB.setPaused = function (on) {
     on = !!on; if (on === MB.paused) return MB.paused;
     MB.paused = on; ss.set('wx.mapbox.paused', on ? '1' : '0');
-    if (on) { want = null; try { invalidateTileRetry(); } catch (e) { /* ignore */ } }
+    if (on) { want = null; renderGeneration++; try { invalidateTileRetry(); } catch (e) { /* ignore */ } }   // generation bump: an in-flight frame ends at its next checkpoint
     else { liveKey = null; }
     if (MB.onUpdate) MB.onUpdate();
     return MB.paused;
@@ -1547,7 +1547,7 @@
             // Mapbox rebuilds its GL state itself; drop every picture taken
             // from the lost context and request all tiles again.
             DIAG.contextRestored++; MB.cache.clear(); incompleteFrames.clear(); liveKey = null;
-            setTimeout(() => { try { if (D) { recoverTiles(D, true); D.triggerRepaint(); } } catch (e) { /* ignore */ } if (MB.onUpdate) MB.onUpdate(); }, 50);
+            setTimeout(() => { try { if (D && !MB.paused) { recoverTiles(D, true); D.triggerRepaint(); } } catch (e) { /* ignore */ } if (MB.onUpdate) MB.onUpdate(); }, 50);
           });
         } catch (e) { /* ignore */ }
         D.on('moveend',()=>refreshDynamicOverlays(D));
@@ -1644,7 +1644,7 @@
         if(error)reject(error);else resolve(value);
       };
       const wallTimer=setTimeout(()=>{
-        if(generation!==renderGeneration||MB.interacting)return done(false);
+        if(generation!==renderGeneration||MB.interacting||MB.paused)return done(false);
         // Rendered some tiles? Prefer the existing picture to a permanent
         // loading screen. A completely silent GPU gets an explicit error.
         if(sawRender)return done(true);
@@ -1653,7 +1653,7 @@
       const onRender=()=>{
         if(!active)return;
         sawRender=true;
-        if(generation!==renderGeneration||MB.interacting)return done(false);
+        if(generation!==renderGeneration||MB.interacting||MB.paused)return done(false);
         let ready=false;
         try{ready=m.loaded()&&!m.isMoving()}catch(ignore){}
         if(ready&&++ok>=2)return done(true);
@@ -1662,7 +1662,7 @@
       };
       const step=()=>{
         if(!active)return;
-        if(generation!==renderGeneration||MB.interacting)return done(false);
+        if(generation!==renderGeneration||MB.interacting||MB.paused)return done(false);
         try{
           // Register before repaint, so a fast mock or synchronous callback
           // cannot disappear between repaint and listener installation.
@@ -1768,6 +1768,7 @@
   // tiles per call (fewer while HTTP 429 back-off is active) so a mass failure
   // never turns into a request storm; the rest follow on later cycles.
   function recoverTiles(m,force,scope){
+    if(MB.paused)return 0;   // v0.10.3: paused – no tile re-requests, automatic or manual
     scope=scope||'critical';
     let n=0,room=force?(throttled()?RECOVER_BATCH:RECOVER_BATCH*2):(throttled()?RECOVER_BATCH_THROTTLED:RECOVER_BATCH);
     const h=tileHealth(m),caches=sourceCaches(m);
@@ -1838,7 +1839,7 @@
   function scheduleRecovery(wait,scope){
     const epoch=tileRetry.epoch;
     const fire=()=>{
-      if(MB.paused)return;
+      if(MB.paused){tileRetry.timer=null;return;}
       tileRetry.timer=null;
       if(epoch!==tileRetry.epoch||!D)return;                                  // camera/style changed: stale
       if(MB.interacting||snapshotBusy){tileRetry.timer=setTimeout(fire,500);return;}   // busy: wait, keep the attempt
@@ -1851,7 +1852,7 @@
     tileRetry.timer=setTimeout(fire,wait);
   }
   function onMapIdle(){
-    if(!D||MB.interacting||snapshotBusy)return;
+    if(!D||MB.interacting||snapshotBusy||MB.paused)return;
     const h=tileHealth(D);DIAG.lastHealth=h;
     if(!h.recoverable)return;
     if(h.complete){
@@ -1881,7 +1882,7 @@
     return 'Mapbox is rate-limiting map requests (HTTP 429/503). Reloading now sends extra requests and can make this worse – if tiles stay missing, wait about '+left+' s and try again.';
   };
   MB.reloadTiles=function(){
-    if(!D||MB.status!=='ready')return 0;
+    if(!D||MB.status!=='ready'||MB.paused)return 0;
     const now=Date.now(),R=MB.manualReload;
     if(now-R.at<RELOAD_GUARD_MS){R.ignored++;return -1;}      // rapid repeat: ignored
     R.at=now;R.count++;R.duringBackoff=throttled();
@@ -1961,6 +1962,7 @@
       if(!visualConfigReady(bg))return previewHold;
       const k=norm(cam),key=[k.c[0].toFixed(6),k.c[1].toFixed(6),
         k.z.toFixed(4),k.b.toFixed(3),k.p.toFixed(3)].join('|');
+      if(MB.paused)return previewHold;      // v0.10.3: paused – never move the display map (no camera-driven tile requests)
       if(key!==previewRestoreKey){
         try{D.off('render',onEditorFrameRendered)}catch(e){}
         D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
@@ -1984,6 +1986,7 @@
       if(!(MB.interacting&&sameStyle))return null;
     }
     const k=norm(cam), key=[k.c[0].toFixed(6),k.c[1].toFixed(6),k.z.toFixed(4),k.b.toFixed(3),k.p.toFixed(3)].join('|');
+    if(MB.paused&&key!==liveKey)return null;   // v0.10.3: paused – only show the canvas if it is ALREADY at this camera; never jump
     if(key!==liveKey){
       invalidateTileRetry();
       D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});
@@ -2007,6 +2010,7 @@
   MB.queue = Promise.resolve();
   async function doSnap(bg, cam, key) {
     await MB.init();{const hit=cachedFrame(key);if(hit)return hit;}
+    if(MB.paused)throw pausedError();   // v0.10.3: queued before the pause, starts after it
     if(MB.interacting)return null;
     // Capture before BOTH style changes and camera jumps.
     holdEditorFrame();
@@ -2014,19 +2018,22 @@
     try{
       await withTimeout(setup(bg),17000,
         'Mapbox map style configuration stalled. Refresh to retry; your scene and map settings are saved.');
+      if(MB.paused)throw pausedError();   // paused while the style was being applied: do not move the camera
       const k=norm(cam),generation=renderGeneration;
       D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});liveKey=null;
       const ready=await settle(D,generation);
+      if(MB.paused)throw pausedError();
       if(!ready||generation!==renderGeneration||MB.interacting)return null;
       // map.loaded() is TRUE even when tiles failed to download, so count
       // failed/pending tiles explicitly and give them two more chances.
       let health=tileHealth(D);
       for(let round=0;round<2&&!health.complete;round++){
         if(health.errored){
-          if(throttled())break;          // HTTP 429 cool-down: never hammer Mapbox, report the frame as incomplete
+          if(throttled()||MB.paused)break;          // HTTP 429 cool-down / paused: never hammer Mapbox, report the frame as incomplete
           recoverTiles(D);
         }
         const again=await settle(D,generation,6000);
+        if(MB.paused)throw pausedError();
         if(!again||generation!==renderGeneration||MB.interacting)return null;
         health=tileHealth(D);
       }
@@ -2057,7 +2064,7 @@
     if(MB.paused)return Promise.reject(pausedError());
     // v0.10.3: a reset (token / label-size change, reload) while this frame is rendering destroys the map under it.
     // That failure belongs to the OLD map; it must not latch an error on the NEW one.
-    const p=MB.queue.then(()=>{const gen=renderGeneration;return doSnap(b,cam,key).catch(e=>{if(gen!==renderGeneration){const x=new Error('Mapbox was reset while a frame was rendering');x.mbStale=true;throw x;}throw e;});}).catch(error=>{
+    const p=MB.queue.then(()=>{const gen=renderGeneration;return doSnap(b,cam,key).catch(e=>{if(e&&e.mbPaused)throw e;if(gen!==renderGeneration){const x=new Error('Mapbox was reset while a frame was rendering');x.mbStale=true;throw x;}throw e;});}).catch(error=>{
       // A fatal style/render exception must be visible to the user, not
       // swallowed by pump() and instantly retried every editor frame.
       if(error&&(error.mbPaused||error.mbStale))throw error;   // paused / reset mid-queue: not a Mapbox failure
