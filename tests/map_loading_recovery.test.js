@@ -63,7 +63,7 @@ test('startup waits for actual base map, not projector, and style has deadline',
   assert.match(map,/await withTimeout\(once\(D,'load'\),25000/);
   assert.doesNotMatch(map,/Promise\.all\(\[once\(D, 'load'\),once\(P, 'load'\)\]\)/);
   assert.match(map,/await withTimeout\(once\(D,'style\.load'\),12000/);
-  assert.match(map,/await withTimeout\(setup\(bg\),17000/);
+  assert.match(map,/await withTimeout\(setup\(bg(,generation)?\),17000/);
   assert.match(map,/if\(MB\.status==='error'\)return Promise\.reject/);
   assert.match(map,/if \(busy \|\| !want \|\| MB\.interacting \|\| MB\.status==='error'( \|\| MB\.paused)?\) return/);   // v0.10.3 adds the pause guard
 });

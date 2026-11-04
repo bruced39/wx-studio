@@ -1371,6 +1371,8 @@
      map frames keep working. It is per browser tab (sessionStorage) so it cannot
      be forgotten across days. It is NOT a spending limit. */
   MB.paused = ss.get('wx.mapbox.paused') === '1';
+  // The operation belongs to an older render generation (paused-then-resumed, or reset): it must change nothing more.
+  const staleError = () => { const e = new Error('Mapbox was paused or reset while a frame was rendering'); e.mbStale = true; return e; };
   const pausedError = () => { const e = new Error('Mapbox is paused: no map requests are being made. Resume it in Scene → Mapbox settings.'); e.mbPaused = true; return e; };
   MB.setPaused = function (on) {
     on = !!on; if (on === MB.paused) return MB.paused;
@@ -1604,13 +1606,19 @@
       D.setFog(fog);
     }catch(e){}
   }
-  async function setup(bg) {
+  async function setup(bg,generation) {
     MB.ensureConfig(bg);const st=styleOf(bg),pr=projOf(bg),styleKey=(bg.mbStyle||'stock')+'|'+st,cfgKey=wdConfigKey(bg);
     if(styleKey!==curStyleKey||cfgKey!==curCfgKey)invalidateTileRetry();
     if(styleKey!==curStyleKey){
       D.setStyle('mapbox://styles/mapbox/'+st);
       await withTimeout(once(D,'style.load'),12000,
         'Mapbox did not load the selected map style within 12 seconds. Check the Mapbox connection and refresh.');
+      // v0.10.3.1: a pause+resume (or reset) while the style was loading must not let this OLD operation keep changing the map.
+      if(generation!==undefined&&generation!==renderGeneration){
+        // The new style is now loaded but was never bookkept: forget what the map holds so the next frame re-applies its own style.
+        curStyle=curStyleKey=curCfgKey=curProj=null;
+        throw staleError();
+      }
       curStyle=st;curStyleKey=styleKey;curCfgKey=null;curProj=null;
       D.__wdOriginalZoomRanges={};D.__wdOriginalRasterVisibility={};
       D.__wdOriginalOverviewFilters={};D.__wdOriginalRoadTextSizes={};
@@ -2014,12 +2022,16 @@
     if(MB.interacting)return null;
     // Capture before BOTH style changes and camera jumps.
     holdEditorFrame();
+    // v0.10.3.1: the generation is captured BEFORE any await, so a pause/resume (or reset) that happens while the style is
+    // loading makes this whole operation stale instead of letting it carry on after the user resumed.
+    const generation=renderGeneration;
     snapshotBusy=true;invalidateTileRetry();
     try{
-      await withTimeout(setup(bg),17000,
+      await withTimeout(setup(bg,generation),17000,
         'Mapbox map style configuration stalled. Refresh to retry; your scene and map settings are saved.');
       if(MB.paused)throw pausedError();   // paused while the style was being applied: do not move the camera
-      const k=norm(cam),generation=renderGeneration;
+      if(generation!==renderGeneration)throw staleError();   // paused+resumed / reset meanwhile
+      const k=norm(cam);
       D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});liveKey=null;
       const ready=await settle(D,generation);
       if(MB.paused)throw pausedError();

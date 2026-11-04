@@ -41,14 +41,14 @@ FAKE_GL = r"""
     __un(x,y){const s=this.__st,world=512*2**s.z,ang=-s.b*Math.PI/180,u=x-this.__vw/2,v=y-this.__vh/2,dx=u*Math.cos(ang)+v*Math.sin(ang),dy=-u*Math.sin(ang)+v*Math.cos(ang);
       const X=mx(s.c[0])+dx/world,Y=my(s.c[1])+dy/world;return {lng:X*360-180,lat:Math.atan(Math.sinh(Math.PI*(1-2*Y)))*180/Math.PI};}
     on(ev,fn){(this.__ls[ev]=this.__ls[ev]||[]).push(fn);if(this.__isD){(window.__listeners[ev]=window.__listeners[ev]||[]).push(fn);}return this;}
-    once(ev,fn){const w=(...a)=>{this.off(ev,w);fn(...a)};this.on(ev,w);if(ev==='style.load')setTimeout(()=>{(this.__ls['style.load']||[]).slice().forEach(f=>f());},10);return this;}
+    once(ev,fn){const w=(...a)=>{this.off(ev,w);fn(...a)};this.on(ev,w);if(ev==='style.load')setTimeout(()=>{(this.__ls['style.load']||[]).slice().forEach(f=>f());},window.__styleDelay||10);return this;}
     off(ev,fn){for(const t of [this.__ls,window.__listeners]){if(t[ev])t[ev]=t[ev].filter(f=>f!==fn);}return this;}
     getCanvas(){return this.__canvas;} loaded(){return this.__loaded&&!window.__slow;} isMoving(){return false;}
     jumpTo(o){const s=this.__st;if(o.center){s.c=[o.center.lng!==undefined?o.center.lng:o.center[0],o.center.lat!==undefined?o.center.lat:o.center[1]];}
       if(o.zoom!=null)s.z=o.zoom;if(o.bearing!=null)s.b=o.bearing;if(o.pitch!=null)s.p=o.pitch;window.__jumps=(window.__jumps||0)+1;}
     triggerRepaint(){setTimeout(()=>window.__paint(),0);} resize(){} remove(){window.__ev.push({t:'remove',d:this.__isD});}
     getSource(){return undefined;} getLayer(){return undefined;} getStyle(){return {layers:[],sources:{}};}
-    setStyle(){window.__setStyleCalls=(window.__setStyleCalls||0)+1;setTimeout(()=>{(this.__ls['style.load']||[]).slice().forEach(f=>f());},5);}
+    setStyle(){window.__setStyleCalls=(window.__setStyleCalls||0)+1;setTimeout(()=>{(this.__ls['style.load']||[]).slice().forEach(f=>f());},window.__styleDelay||5);}
     setProjection(p){this.__proj=(p&&p.name)||p;} getProjection(){return {name:this.__proj};} setFog(){} setTerrain(){}
     addSource(){} addLayer(){} removeLayer(){} removeSource(){} setPaintProperty(){} setLayoutProperty(){} setFilter(){} setPadding(){}
     getCenter(){return new LngLat(this.__st.c[0],this.__st.c[1]);} getZoom(){return this.__st.z;} getBearing(){return this.__st.b;} getPitch(){return this.__st.p;}
@@ -125,7 +125,7 @@ with sync_playwright() as p:
     r = pg.evaluate("""async()=>{
       const out=[];const sc=WX.S.show.scenes[0];
       for(const st of ['streets-v12','dark-v11','satellite-streets-v12','outdoors-v12']){
-        const bg=Object.assign({},sc.bg,{mbStyle:'stock',style:st});
+        const bg=Object.assign({},sc.bg,{mbStyle:st});
         for(const z of [5,6.5,8.2]) await MB.snap(bg,{c:[-71+z/10,42+z/20],z:z,b:z*3,p:0});
       }
       const g=Object.assign({},sc.bg,{proj:'globe'});await MB.snap(g,{c:[-71,42],z:2.5,b:0,p:0});
@@ -240,6 +240,18 @@ with sync_playwright() as p:
       MB.liveFrame(bg,{c:[-80,38],z:6.5,b:0,p:0});const cv=await MB.snap(bg,{c:[-90,35],z:6,b:0,p:0});
       return {maps:window.__maps.length,ok:!!cv,status:MB.status,jumps:window.__jumps,u:MB.usage().page}}""")
     chk('resume: live preview and snapshots work again with NO new map', r['ok'] and r['maps'] == base_m and r['status'] == 'ready' and r['jumps'] > j_started and r['u']['display'] == 1 and r['u']['projector'] == 0, r)
+    # -- rapid pause + resume while setup() awaits style.load: the interrupted operation must not keep changing the map
+    sc0 = pg2.evaluate("()=>window.__setStyleCalls||0")
+    pg2.evaluate("()=>{window.__styleDelay=500;window.__snapRes2=null;const bg=Object.assign({},WX.S.show.scenes[0].bg,{mbStyle:'dark-v11'});MB.snap(bg,{c:[-100,40],z:5,b:0,p:0}).then(v=>window.__snapRes2={ok:!!v},e=>window.__snapRes2={err:e.message,stale:!!e.mbStale})}")
+    pg2.wait_for_function("(c)=>(window.__setStyleCalls||0)>c", arg=sc0, timeout=5000)
+    j0 = pg2.evaluate("()=>window.__jumps")
+    pg2.evaluate("()=>{MB.setPaused(true);MB.setPaused(false);}")        # rapid pause/resume mid style load
+    pg2.wait_for_function("()=>window.__snapRes2!==null", timeout=6000)
+    r = pg2.evaluate("()=>({res:window.__snapRes2,lng:window.__maps[0].getCenter().lng,status:MB.status,maps:window.__maps.length,paused:MB.paused})")
+    chk('pause+resume while the style loads: the old frame is dropped as stale and never moves the camera to its own view', r['res'].get('stale') is True and abs(r['lng'] + 100) > 1 and r['status'] == 'ready' and not r['paused'], (r, j0))
+    pg2.evaluate("()=>{window.__styleDelay=0}")
+    r = pg2.evaluate("""async()=>{const bg=Object.assign({},WX.S.show.scenes[0].bg,{mbStyle:'dark-v11'});const cv=await MB.snap(bg,{c:[-100,40],z:5,b:0,p:0});return {ok:!!cv,status:MB.status,maps:window.__maps.length}}""")
+    chk('...and the next frame re-applies its own style and renders, with no new map', r['ok'] and r['status'] == 'ready' and r['maps'] == base_m, r)
     chk('pause/resume cycle raised no page errors', not errs2, errs2)
     ctx2.close()
 
@@ -264,6 +276,14 @@ with sync_playwright() as p:
     pg.evaluate(SETUP)
     u = pg.evaluate("()=>MB.usage()")
     chk('after one reload: this page 1 map, this tab session 2 maps, this month 2', u['page']['maps'] == 1 and u['session']['maps'] == 2 and u['month']['maps'] == 2, u)
+    # pause state: kept across an ordinary reload of the same tab (Streamlit iframe reload), new tabs default to active
+    pg.evaluate("()=>MB.setPaused(true)")
+    pg.reload(); pg.wait_for_function("window.WX&&window.WX.S&&window.MB", timeout=20000)
+    chk('pause survives a reload of the same tab', pg.evaluate("()=>MB.paused===true"))
+    ctxn = br.new_context(); pgn = ctxn.new_page(); pgn.add_init_script(FAKE_GL); pgn.goto(HTML); pgn.wait_for_function("window.WX&&window.WX.S&&window.MB", timeout=20000)
+    chk('a new tab / browser session starts active (not paused)', pgn.evaluate("()=>MB.paused===false"))
+    ctxn.close()
+    pg.evaluate("()=>MB.setPaused(false)")
     ctx.close()
 
     # ================= D. forced native helper (troubleshooting switch) keeps the old behaviour =================

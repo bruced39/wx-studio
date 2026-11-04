@@ -300,3 +300,59 @@ test('setPaused(true) bumps the render generation so an in-flight snapshot ends 
   assert.equal(r.get().renderGeneration, gen0 + 1);
   r.MB.setPaused(false); assert.equal(r.get().renderGeneration, gen0 + 1, 'resume changes nothing else');
 });
+
+/* ---- v0.10.3.1: rapid pause/resume (or reset) while setup() awaits style.load ---- */
+function snapRig() {
+  const r = rig();
+  const SNAP = block('  async function doSnap(', '  MB.snap = function(');
+  const SETUP = block('  async function setup(bg,generation) {', '  // Bounded even when');
+  const pre = "'use strict';const W=1920,H=1080,norm=c=>c,withTimeout=p=>p,cachedFrame=()=>null,holdEditorFrame=()=>{},tileHealth=()=>({complete:true,errored:0}),throttled=()=>false,recoverTiles=()=>{};" +
+    "const settle=async()=>true,once=(m,ev)=>T.pending(ev),styleOf=bg=>bg.style||'streets-v12',projOf=()=>'mercator',wdConfigKey=()=>'cfg',fog=()=>T.calls.push('fog'),applyTerrain=()=>T.calls.push('terrain'),addBroadcastCartography=()=>{},applyWeatherUnderlay=()=>{};" +
+    "const WX_FRAME_LAYER='l',WX_FRAME_SOURCE='s';MB.ensureConfig=()=>{};MB.init=async()=>{};DIAG.incompleteSnaps=0;MB.cache=new Map();let setupImpl=null;";
+  const post = ";return {doSnap,setup,setupImpl:f=>{setupImpl=f},keys:()=>({curStyleKey,curCfgKey,curProj})};";
+  const T = { calls: [], pending: () => new Promise(res => { T.resolve = res; }), jumps: 0 };
+  const dsrc = SNAP.replace('await withTimeout(setup(bg,generation)', 'await withTimeout((setupImpl||setup)(bg,generation)');
+  const api = new Function('MB', 'ls', 'g', 'document', 'console', 'counters', 'sessionStorage', 'Date', 'T',
+    // reuse the rig's module scope pieces by re-declaring minimal state; SAFE gives setPaused/staleError/pausedError
+    "'use strict';let D=null,P=null,host=null,initP=null,curStyle=null,curStyleKey='stock|old',curCfgKey='cfg',curProj='mercator',pProj=null,pKey=null,liveKey=null,renderGeneration=0,snapshotBusy=false,previewHold=null,previewRestorePending=false,previewRestoreKey=null,want=null;" +
+    "const incompleteFrames=new Map(),DIAG={throttle:{level:0,until:0}};function invalidateTileRetry(){}MB.token=()=>'pk.x';" +
+    pre + SAFE + RESET.replace(/MB\.setToken[\s\S]*$/, '') + SETUP + dsrc + post.replace('return {', "D={jumpTo(){T.jumps++},setStyle(){T.calls.push('setStyle')},setProjection(){T.calls.push('proj')},getCanvas(){return {}}};return {setPaused:MB.setPaused,reset:MB.reset,gen:()=>renderGeneration,"))
+  (r.MB, r.local, r.g, { createElement: () => ({ style: {}, getContext: () => ({ drawImage() {} }) }), referrer: '' }, { warn() {}, log() {} }, {}, { getItem: k => r.session.get(k), setItem: (k, v) => r.session.set(k, v) }, Date, T);
+  return { api, T, MB: r.MB };
+}
+const BG = { style: 'dark-v11' };
+test('pause then immediate resume while the style is loading: the interrupted frame cannot move the camera or touch the map', async () => {
+  const { api, T, MB } = snapRig();
+  const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
+  await new Promise(r => setTimeout(r, 0));
+  assert.ok(T.calls.includes('setStyle'), 'style change started');
+  api.setPaused(true); api.setPaused(false);        // rapid pause/resume
+  T.resolve();                                       // the style finally loads
+  await assert.rejects(p, e => e.mbStale === true);
+  assert.equal(T.jumps, 0, 'no camera jump by the old operation');
+  assert.deepEqual(T.calls.filter(c => c !== 'setStyle'), [], 'no projection / fog / terrain changes by the old operation');
+  assert.deepEqual(api.keys(), { curStyleKey: null, curCfgKey: null, curProj: null }, 'bookkeeping reset so the next frame re-applies its own style');
+  assert.equal(MB.status, 'ready'); assert.equal(MB.paused, false);
+});
+test('pause (no resume) while the style is loading: pause error, no camera jump', async () => {
+  const { api, T } = snapRig();
+  const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
+  await new Promise(r => setTimeout(r, 0));
+  api.setPaused(true); T.resolve();
+  await assert.rejects(p, e => e.mbPaused === true || e.mbStale === true);
+  assert.equal(T.jumps, 0);
+});
+test('reset while the style is loading also makes the old frame stale', async () => {
+  const { api, T } = snapRig();
+  const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
+  await new Promise(r => setTimeout(r, 0));
+  api.reset(); T.resolve();
+  await assert.rejects(p, e => e.mbStale === true);
+  assert.equal(T.jumps, 0);
+});
+test('control: with no pause or reset the same frame completes and moves the camera once', async () => {
+  const { api, T } = snapRig();
+  const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
+  await new Promise(r => setTimeout(r, 0)); T.resolve();
+  const cv = await p; assert.ok(cv); assert.equal(T.jumps, 1);
+});
