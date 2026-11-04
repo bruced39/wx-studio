@@ -1867,10 +1867,31 @@
         const sc = E.sceneFromTemplate(st.kind, { title: st.title, lines: st.lines, safe: SAFE(), size: st.size, titleSize: st.titleSize }, bg); S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; closeModal(); commit(); refreshAll(); } } })]);
     hintFor();
   }
+  function mapDiagnosticsDialog() {
+    const pre = h('pre', { id: 'mbDiagText', style: 'max-height:42vh;overflow:auto;white-space:pre-wrap;font-size:12px;user-select:text', text: g.MB.diagnostics() });
+    const warn = h('div', { id: 'mbDiagWarn', style: 'display:none;margin:6px 0;padding:8px 10px;border-radius:6px;background:#5a3b00;color:#ffe2a8;font-size:13px' });
+    const reload = h('button', { id: 'mbDiagReload', text: 'Reload map tiles' });
+    const refresh = () => {
+      pre.textContent = g.MB.diagnostics();
+      const w = g.MB.reloadWarning(); warn.textContent = w ? '⚠ ' + w : ''; warn.style.display = w ? 'block' : 'none';
+      reload.textContent = w ? 'Reload anyway (rate-limited)' : 'Reload map tiles';
+    };
+    reload.addEventListener('click', () => {
+      const r = g.MB.reloadTiles();
+      if (r < 0) { toast('Reload already in progress – please wait a few seconds'); return; }
+      reload.disabled = true; setTimeout(() => { reload.disabled = false; refresh(); }, g.MB.RELOAD_GUARD_MS);
+      toast(g.MB.reloadWarning() ? 'Reloading anyway – Mapbox is rate-limiting; wait if tiles stay missing' : (r ? 'Reloading map tiles…' : 'Map tiles refreshed'));
+      refresh(); setTimeout(refresh, 1500);
+    });
+    refresh();
+    const body = h('div', {}, h('div', { className: 'hint', text: 'If satellite imagery shows gaps, wait a few seconds (missing tiles are retried automatically), then press “Reload map tiles”. Copy this report and send it with a screenshot.' }), warn, pre);
+    modal('Map diagnostics', body, [h('button', { text: 'Close', on: { click: closeModal } }), reload,
+      h('button', { className: 'pri', id: 'mbDiagCopy', text: 'Copy report', on: { click: () => { const t = g.MB.diagnostics(); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Report copied'), () => { const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Press Ctrl+C to copy the selected report'); }); } } })]);
+  }
   function mapboxSettings() {
     const tok = h('input', { type: 'password', value: g.MB.token(), placeholder: 'pk.eyJ1…', style: 'width:100%' }), sc = h('select', {}, [['1', 'Native / sharp (recommended)'], ['1.25', 'Slightly larger labels'], ['1.5', 'Large labels'], ['2', 'Extra large labels']].map(o => h('option', { value: o[0], text: o[1], selected: +o[0] === g.MB.scale })));
     const body = h('div', {}, h('div', { className: 'hint', text: 'Create a free account at mapbox.com, copy your default public token (it starts with pk.) and paste it here. It is stored only in this browser. Keep the page tab visible while exporting a Mapbox video.' }), fld('Public token', tok), fld('Label size', sc), h('div', { className: 'hint', id: 'mbstat', text: g.MB.status === 'error' ? 'Status: ' + g.MB.err : 'Status: ' + g.MB.status }));
-    modal('Mapbox settings', body, [h('button', { text: 'Close', on: { click: closeModal } }), h('button', { className: 'pri', text: 'Save & load map', on: { click: () => { const t = tok.value.trim(); if (t && !/^pk\./.test(t)) { toast('Use a public token that starts with pk.'); return; } g.MB.setToken(t); if (+sc.value !== g.MB.scale) g.MB.setScale(+sc.value); closeModal();
+    modal('Mapbox settings', body, [h('button', { text: 'Close', on: { click: closeModal } }), h('button', { id: 'mbDiag', text: 'Map diagnostics', title: 'Show a report of map tile loading and WebGL that you can copy and send', on: { click: mapDiagnosticsDialog } }), h('button', { className: 'pri', text: 'Save & load map', on: { click: () => { const t = tok.value.trim(); if (t && !/^pk\./.test(t)) { toast('Use a public token that starts with pk.'); return; } g.MB.setToken(t); if (+sc.value !== g.MB.scale) g.MB.setScale(+sc.value); closeModal();
       if (t && S.show.scenes.some(x => x.bg.type === 'map') && confirm('Switch your existing basic-map scenes to Mapbox?')) S.show.scenes.forEach(x => { if (x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; } });
       g.MB.init().then(() => toast('Mapbox ready')).catch(e => toast(e.message)).then(() => { commit(); refreshAll(); }); } } })]);
   }

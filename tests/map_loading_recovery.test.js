@@ -25,7 +25,7 @@ function clock(){
   return {set,clear,advance,count:()=>tasks.size};
 }
 function settle(c,m,g=0){
-  const source=block('  function settle(m,generation){','\n  function visualConfigReady(');
+  const source=block('  function settle(m,generation,wallMs){','\n  function visualConfigReady(');
   return new Function('setTimeout','clearTimeout','MB','renderGeneration',
     source+';return settle;')(c.set,c.clear,{interacting:false},0)(m,g);
 }
@@ -71,9 +71,9 @@ test('failed snapshot latches the error and prevents automatic WebGL retries',as
   const source=block('  MB.snap = function(bg,cam){','\n\n  /* Live editor preview');
   const MB={status:'ready',err:'',cache:new Map(),queue:Promise.resolve()};
   let attempts=0;
-  const snap=new Function('MB','keyOf','cloneBg','doSnap','console',
+  const snap=new Function('MB','keyOf','cloneBg','doSnap','console','cachedFrame',
     source+';return MB.snap;')(MB,()=>'key',x=>x,
-      async()=>{attempts++;throw Error('render failure')},{warn(){}});
+      async()=>{attempts++;throw Error('render failure')},{warn(){}},k=>MB.cache.get(k)||null);
   await assert.rejects(snap({},{}),/render failure/);
   assert.equal(MB.status,'error');assert.equal(MB.err,'render failure');
   await assert.rejects(snap({},{}),/render failure/);
@@ -102,6 +102,8 @@ test('Mapbox reset clears projector state even when optional P is unavailable',(
     '\n  function holdEditorFrame(');
   const reset=block('  MB.reset = function () {','\n  MB.setToken =');
   const simulate="'use strict';\n"+decl+"\n"+previewDecl+
+    "\nconst incompleteFrames=new Map(),tileRetry={n:3,optional:1,timer:null,epoch:0},DIAG={throttle:{level:2,until:5}};"+
+    "function invalidateTileRetry(){tileRetry.epoch++;tileRetry.n=0;tileRetry.optional=0;if(tileRetry.timer){clearTimeout(tileRetry.timer);tileRetry.timer=null;}}"+
     "\nconst MB={interacting:true,cache:{clear(){this.cleared=true}},last:'previous',"+
     "lastKey:'old frame',status:'ready',err:'previous error',queue:Promise.resolve()};"+
     "pProj='globe';pKey='camera';curProj='globe';"+

@@ -5,7 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../studio/mapbox.js'),'utf8');
 function harness(){
- const a=source.indexOf('  let snapshotBusy=false'),
+ const a=source.indexOf('  /* ---- tile completeness'),
        b=source.indexOf('  MB.setInteractive = function',a),
        c=source.indexOf('  async function doSnap(',b),
        d=source.indexOf('  MB.snap = function(',c),
