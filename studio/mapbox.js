@@ -2038,7 +2038,10 @@
       D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});liveKey=null;
       const ready=await settle(D,generation);
       if(MB.paused)throw pausedError();
-      if(!ready||generation!==renderGeneration||MB.interacting)return null;
+      // v0.10.3.4: a pause+resume / reset while tiles were loading is a STALE error, not a quiet "no frame" - otherwise a
+      // map export would carry on and encode a wrong (previous/blank) frame into a MP4 that looks successful.
+      if(generation!==renderGeneration)throw staleError();
+      if(!ready||MB.interacting)return null;
       // map.loaded() is TRUE even when tiles failed to download, so count
       // failed/pending tiles explicitly and give them two more chances.
       let health=tileHealth(D);
@@ -2049,7 +2052,8 @@
         }
         const again=await settle(D,generation,6000);
         if(MB.paused)throw pausedError();
-        if(!again||generation!==renderGeneration||MB.interacting)return null;
+        if(generation!==renderGeneration)throw staleError();   // v0.10.3.4 (see above)
+        if(!again||MB.interacting)return null;
         health=tileHealth(D);
       }
       DIAG.lastHealth=health;

@@ -259,29 +259,29 @@ function liveRig(paused) {
     "return {stable:stableEditorFrame,live:liveCanvas,get:()=>({jumps,repaints,invalidated,liveKey}),set:o=>{if('liveKey' in o)liveKey=o.liveKey;if('hold' in o){previewHold=o.hold;previewRestorePending=o.pending;previewRestoreKey=o.rkey||null}}};");
   return fn({ paused: !!paused, status: 'ready', interacting: false });
 }
-const CAM = { c: [-71, 42], z: 7, b: 0, p: 0 }, KEY = '-71.000000|42.000000|7.0000|0.000|0.000';
+const SNAPCAM = { c: [-71, 42], z: 7, b: 0, p: 0 }, KEY = '-71.000000|42.000000|7.0000|0.000|0.000';
 test('paused: the live-preview canvas never calls jumpTo / triggerRepaint for a new camera', () => {
   const r = liveRig(true);
-  assert.equal(r.live({}, CAM), null);
-  assert.equal(r.stable({}, CAM), null);
+  assert.equal(r.live({}, SNAPCAM), null);
+  assert.equal(r.stable({}, SNAPCAM), null);
   assert.deepEqual([r.get().jumps, r.get().repaints, r.get().invalidated], [0, 0, 0]);
 });
 test('paused: a canvas already at the requested camera may still be shown, still without any request', () => {
   const r = liveRig(true); r.set({ liveKey: KEY });
-  assert.equal(r.live({}, CAM), 'CANVAS'); assert.equal(r.get().jumps, 0);
+  assert.equal(r.live({}, SNAPCAM), 'CANVAS'); assert.equal(r.get().jumps, 0);
 });
 test('paused: the interrupted-snapshot restore jump is held back; after resume it happens once', () => {
   const MBo = { paused: true, status: 'ready', interacting: false };
   const r = liveRig(true); r.set({ hold: 'HELD', pending: true });
-  assert.equal(r.stable({}, CAM), 'HELD'); assert.equal(r.get().jumps, 0, 'no restore jump while paused');
+  assert.equal(r.stable({}, SNAPCAM), 'HELD'); assert.equal(r.get().jumps, 0, 'no restore jump while paused');
   const r2 = liveRig(false); r2.set({ hold: 'HELD', pending: true });
-  assert.equal(r2.stable({}, CAM), 'HELD'); assert.equal(r2.get().jumps, 1, 'resumed: camera restored');
+  assert.equal(r2.stable({}, SNAPCAM), 'HELD'); assert.equal(r2.get().jumps, 1, 'resumed: camera restored');
   assert.ok(MBo);
 });
 test('not paused: live preview still follows the camera (no regression)', () => {
   const r = liveRig(false);
-  assert.equal(r.live({}, CAM), 'CANVAS'); assert.equal(r.get().jumps, 1);
-  r.live({}, CAM); assert.equal(r.get().jumps, 1, 'same camera: no second jump');
+  assert.equal(r.live({}, SNAPCAM), 'CANVAS'); assert.equal(r.get().jumps, 1);
+  r.live({}, SNAPCAM); assert.equal(r.get().jumps, 1, 'same camera: no second jump');
 });
 test('source: every D-moving path checks the pause flag', () => {
   const snapBody = block('  async function doSnap(', '  MB.snap = function(');
@@ -306,8 +306,8 @@ function snapRig() {
   const r = rig();
   const SNAP = block('  async function doSnap(', '  MB.snap = function(');
   const SETUP = block('  async function setup(bg,generation) {', '  // Bounded even when');
-  const pre = "'use strict';const W=1920,H=1080,norm=c=>c,withTimeout=p=>p,cachedFrame=()=>null,holdEditorFrame=()=>{},tileHealth=()=>({complete:true,errored:0}),throttled=()=>false,recoverTiles=()=>{};" +
-    "const settle=async()=>true,once=(m,ev)=>T.pending(ev),styleOf=bg=>bg.style||'streets-v12',projOf=()=>'mercator',wdConfigKey=()=>'cfg',fog=()=>T.calls.push('fog'),applyTerrain=()=>T.calls.push('terrain'),addBroadcastCartography=()=>{},applyWeatherUnderlay=()=>{};" +
+  const pre = "'use strict';const W=1920,H=1080,norm=c=>c,withTimeout=p=>p,cachedFrame=()=>null,holdEditorFrame=()=>{},tileHealth=()=>(T.health?T.health():{complete:true,errored:0}),throttled=()=>false,recoverTiles=()=>{};" +
+    "const settle=()=>T.settleImpl?T.settleImpl():Promise.resolve(true),once=(m,ev)=>T.pending(ev),styleOf=bg=>bg.style||'streets-v12',projOf=()=>'mercator',wdConfigKey=()=>'cfg',fog=()=>T.calls.push('fog'),applyTerrain=()=>T.calls.push('terrain'),addBroadcastCartography=()=>{},applyWeatherUnderlay=()=>{};" +
     "const WX_FRAME_LAYER='l',WX_FRAME_SOURCE='s';MB.ensureConfig=()=>{};MB.init=()=>T.initGate||Promise.resolve();DIAG.incompleteSnaps=0;MB.cache=new Map();let setupImpl=null;";
   const post = ";return {doSnap,setup,setupImpl:f=>{setupImpl=f},keys:()=>({curStyleKey,curCfgKey,curProj})};";
   const T = { calls: [], pending: () => new Promise(res => { T.resolve = res; }), jumps: 0 };
@@ -426,4 +426,42 @@ test('source guard: MB.snap passes the REQUEST-time generation into doSnap', () 
   const snap = block('  MB.snap = function(', '  MB.liveFrame');
   assert.ok(snap.indexOf('const requestGen=renderGeneration') > 0 && snap.indexOf('const requestGen=renderGeneration') < snap.indexOf('MB.queue.then'));
   assert.match(snap, /doSnap\(b,cam,key,requestGen\)/);
+});
+
+/* ---- v0.10.3.4: pause+resume / reset while TILES are loading must be a stale ERROR, not a quiet `null` (export would encode a wrong frame) ---- */
+function tileRig() { const x = snapRig(); x.T.settleResolves = []; x.T.settleImpl = () => new Promise(res => x.T.settleResolves.push(res)); return x; }
+test('pause+resume while the first tile wait is pending: stale error (was a silent null), and nothing is cached', async () => {
+  const { api, T } = tileRig();
+  const p = api.doSnap(BG, SNAPCAM, 'k'); const caught = p.then(() => 'resolved', e => e);
+  await new Promise(r => setTimeout(r, 0)); T.resolve && T.resolve(); await new Promise(r => setTimeout(r, 0));
+  assert.equal(T.jumps, 1, 'camera moved for this request'); assert.equal(T.settleResolves.length, 1, 'now waiting for tiles');
+  api.setPaused(true); api.setPaused(false); T.settleResolves[0](true);
+  const r = await caught; assert.ok(r && r.mbStale === true, 'must reject as stale, got ' + r);
+});
+test('reset while tiles are loading, and the tile wait reports "not ready": still stale, not null', async () => {
+  const { api, T } = tileRig();
+  const caught = api.doSnap(BG, SNAPCAM, 'k').then(() => 'resolved', e => e);
+  await new Promise(r => setTimeout(r, 0)); T.resolve && T.resolve(); await new Promise(r => setTimeout(r, 0));
+  api.reset(); T.settleResolves[0](false);
+  const r = await caught; assert.ok(r && r.mbStale === true, 'got ' + r);
+});
+test('pause+resume during the SECOND (tile-recovery) wait is also stale, not null', async () => {
+  const { api, T } = tileRig(); T.health = () => ({ complete: false, errored: 0 });
+  const caught = api.doSnap(BG, SNAPCAM, 'k').then(() => 'resolved', e => e);
+  await new Promise(r => setTimeout(r, 0)); T.resolve && T.resolve(); await new Promise(r => setTimeout(r, 0));
+  T.settleResolves[0](true); await new Promise(r => setTimeout(r, 0));
+  assert.equal(T.settleResolves.length, 2, 'second wait started');
+  api.setPaused(true); api.setPaused(false); T.settleResolves[1](true);
+  const r = await caught; assert.ok(r && r.mbStale === true, 'got ' + r);
+});
+test('control: a tile wait that merely times out (no pause/reset) still gives the old quiet null', async () => {
+  const { api, T } = tileRig();
+  const p = api.doSnap(BG, SNAPCAM, 'k');
+  await new Promise(r => setTimeout(r, 0)); T.resolve && T.resolve(); await new Promise(r => setTimeout(r, 0));
+  T.settleResolves[0](false); assert.equal(await p, null);
+});
+test('source guard: no `return null` is guarded by a generation mismatch any more', () => {
+  const body = block('  async function doSnap(', '  MB.snap = function(').split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+  assert.doesNotMatch(body, /generation!==renderGeneration\|\|[^\n]*return null/); assert.doesNotMatch(body, /\|\|generation!==renderGeneration[^\n]*return null/);
+  assert.equal((body.match(/if\(generation!==renderGeneration\)throw staleError\(\)/g) || []).length, 4, 'init wait, style wait, tile wait, recovery wait');
 });
