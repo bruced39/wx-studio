@@ -277,6 +277,46 @@ with sync_playwright() as p:
     chk('initial-load pause/resume raised no page errors', not errs3, errs3)
     ctx3.close()
 
+    # ================= D. v0.10.3.4: an INTERRUPTED map export must FAIL, never yield a "successful" but incomplete MP4 =================
+    ctx4, pg4, errs4 = newctx(br)
+    downloads = []; pg4.on('download', lambda d: downloads.append(d.suggested_filename))
+    pg4.evaluate(SETUP, 'stock')
+    # a 1.5 s show whose camera moves the whole time, so EVERY frame needs its own Mapbox snapshot (45 frames)
+    pg4.evaluate("""()=>{const E=WX.E,sc=WX.S.show.scenes[0];sc.duration=1.5;sc.bg=Object.assign({},sc.bg,{view:{c:[-71.2,42.5],z:7,b:0,p:0},view2:{c:[-70.2,42.0],z:8,b:10,p:0},camDur:1.5,camDelay:0});
+      WX.S.show.scenes=[sc];WX.loadShow(JSON.parse(JSON.stringify(WX.S.show)));
+      window.__enc={frames:0,closed:0,hook:null};
+      window.VideoEncoder=class{constructor(o){this.o=o;this.encodeQueueSize=0;this.i=0}static async isConfigSupported(c){return{supported:/^avc1/.test(c.codec),config:c}}configure(){}
+        encode(f){const i=this.i++;window.__enc.frames++;if(window.__enc.hook)window.__enc.hook(i);this.o.output({byteLength:4,copyTo:b=>b.set([0,0,0,1]),timestamp:f.timestamp,duration:f.duration,type:i===0?'key':'delta'},i===0?{decoderConfig:{description:new Uint8Array([1,100,0,40,255,225,0,0])}}:{})}
+        async flush(){} close(){window.__enc.closed++}};
+      window.__runExport=async()=>{window.__enc.frames=0;try{const r=await Exporter.run(WX.S.show,{width:1920,height:1080,fps:30,bitrate:1e7});return{ok:true,kind:r.kind,size:r.blob.size,frames:r.frames,encoded:window.__enc.frames}}catch(e){return{ok:false,msg:String(e&&e.message||e),encoded:window.__enc.frames}}};}""")
+    r = pg4.evaluate("()=>window.__runExport()")
+    chk('control: an uninterrupted map export succeeds with a complete MP4 (45 of 45 frames)', r.get('ok') and r['kind'] == 'mp4' and r['size'] > 0 and r['encoded'] == 45 and r['frames'] == 45, r)
+    def interrupted(label, hook_js, expect_re):
+        pg4.evaluate("()=>{window.__slow=false;MB.setPaused(false)}")
+        pg4.evaluate("()=>{window.__enc.hook=" + hook_js + "}")
+        r = pg4.evaluate("()=>window.__runExport()")
+        pg4.evaluate("()=>{window.__enc.hook=null;window.__slow=false;MB.setPaused(false)}")
+        chk(label + ': export reports FAILURE, no MP4 is returned', (not r['ok']) and 'blob' not in r and 'size' not in r, r)
+        chk(label + ': the failure names the pause/reset reason', bool(__import__('re').search(expect_re, r.get('msg', ''), __import__('re').I)), r)
+        chk(label + ': stopped early - only part of the frames were encoded (never 45/45 passed off as complete)', 0 < r['encoded'] < 45, r)
+        return r
+    interrupted('pause mid-export', "i=>{if(i===10)MB.setPaused(true)}", r'paused')
+    interrupted('pause + immediate resume while a frame is rendering (stale)', "i=>{if(i===10){window.__slow=true;setTimeout(()=>{MB.setPaused(true);MB.setPaused(false)},80);setTimeout(()=>{window.__slow=false},300)}}", r'paused|reset')
+    interrupted('map reset while a frame is rendering', "i=>{if(i===10){window.__slow=true;setTimeout(()=>MB.reset(),80);setTimeout(()=>{window.__slow=false},300)}}", r'paused|reset')
+    chk('the encoder was closed or released after each failed export (no stuck export state)', pg4.evaluate("()=>!WX.E.exporting"), '')
+    r = pg4.evaluate("()=>window.__runExport()")
+    chk('after the failures a fresh export succeeds again (45/45)', r.get('ok') and r['encoded'] == 45, r)
+    # the dialog path: failure message shown, no file saved, no playable result offered
+    pg4.evaluate("()=>{window.__enc.hook=i=>{if(i===10)MB.setPaused(true)}}")
+    pg4.evaluate("()=>{document.getElementById('bExport').click()}"); pg4.wait_for_timeout(800)
+    n0 = len(downloads)
+    pg4.evaluate("()=>{const b=[...document.querySelectorAll('#modal .mb button')].find(b=>b.textContent==='Start export');b&&b.click()}"); pg4.wait_for_timeout(5000)
+    d = pg4.evaluate("()=>({msg:(document.querySelector('#modal .prog')||{nextElementSibling:{}}).nextElementSibling.textContent,video:document.querySelectorAll('#modal video').length})")
+    chk('dialog: shows "Export failed" for the interrupted map export', 'Export failed' in d['msg'], d)
+    chk('dialog: no video result and no file download after the failure', d['video'] == 0 and len(downloads) == n0, (d, downloads))
+    chk('interrupted-export section raised no page errors', not errs4, errs4)
+    ctx4.close()
+
     # ================= B. starting paused (e.g. the tab was paused, then Streamlit reran) =================
     ctx, pg, errs = newctx(br, "sessionStorage.setItem('wx.mapbox.paused','1');")
     r = pg.evaluate("""async()=>{
