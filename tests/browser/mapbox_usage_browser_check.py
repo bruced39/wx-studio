@@ -32,7 +32,7 @@ FAKE_GL = r"""
       this.__vw=(o.container&&o.container.clientWidth)||1280;this.__vh=(o.container&&o.container.clientHeight)||720;
       this.__proj=(o.projection&&o.projection.name)||o.projection||'mercator';
       window.__maps.push(this);window.__ev.push({t:'new',d:this.__isD});
-      if(this.__isD){window.__map=this;o.container.appendChild(this.__canvas);setTimeout(()=>{this.__loaded=true;(this.__ls.load||[]).forEach(f=>f());window.__paint();},20);}
+      if(this.__isD){window.__map=this;o.container.appendChild(this.__canvas);setTimeout(()=>{this.__loaded=true;(this.__ls.load||[]).forEach(f=>f());window.__paint();},window.__loadDelay||20);}
       const self=this;
       this.transform={clone(){const t={zoom:0,pitch:0,bearing:0,center:null,locationPoint(ll){return self.__pt(ll.lng,ll.lat,[t.center.lng,t.center.lat],t.zoom,t.bearing);}};return t;}};
     }
@@ -254,6 +254,28 @@ with sync_playwright() as p:
     chk('...and the next frame re-applies its own style and renders, with no new map', r['ok'] and r['status'] == 'ready' and r['maps'] == base_m, r)
     chk('pause/resume cycle raised no page errors', not errs2, errs2)
     ctx2.close()
+
+    # -- v0.10.3.3: rapid pause + resume while the INITIAL Mapbox load is still pending (before the first Map has loaded)
+    ctx3, pg3, errs3 = newctx(br, "window.__loadDelay=900;")
+    r = pg3.evaluate("""async()=>{
+      const bg=Object.assign({},WX.S.show.scenes[0].bg,{type:'mapbox',mbStyle:'stock',style:'streets-v12'});
+      window.__initSnap=null;const st0=MB.status;
+      MB.snap(bg,{c:[-100,40],z:5,b:0,p:0}).then(v=>window.__initSnap={ok:!!v},e=>window.__initSnap={err:e.message,stale:!!e.mbStale});
+      await new Promise(r=>setTimeout(r,150));
+      const loadedBefore=!!(window.__map&&window.__map.__loaded);
+      window.__jt=[];const mm=window.__map,oj=mm.jumpTo.bind(mm);mm.jumpTo=function(o){window.__jt.push(o&&o.center?(o.center.lng!==undefined?o.center.lng:o.center[0]):null);return oj(o)};
+      MB.setPaused(true);MB.setPaused(false);                 // rapid pause/resume while Mapbox is still loading for the first time
+      return {st0,loadedBefore,maps:window.__maps.length}}""")
+    chk('setup: the first Map exists but has not finished loading when pause+resume happens', r['maps'] == 1 and not r['loadedBefore'], r)
+    pg3.wait_for_function("()=>window.__initSnap!==null", timeout=8000)
+    r = pg3.evaluate("()=>({res:window.__initSnap,lng:window.__map.getCenter().lng,z:window.__map.getZoom(),status:MB.status,maps:window.__maps.length,paused:MB.paused,jumps:window.__jumps||0,jt:window.__jt})")
+    chk('pause+resume during the initial load: the outdated snapshot is dropped as stale', r['res'].get('stale') is True, r)
+    chk('...it never moves the camera to its own view', abs(r['lng'] + 100) > 1 and not any(l is not None and abs(l + 100) < 1 for l in r['jt']), r)   # the editor's own redraw may jump to the scene view; the stale request's view (-100) must never be applied
+    chk('...no error is latched and exactly one billable map load happened', r['status'] == 'ready' and r['maps'] == 1 and not r['paused'], r)
+    r = pg3.evaluate("""async()=>{const bg=Object.assign({},WX.S.show.scenes[0].bg,{type:'mapbox',mbStyle:'stock',style:'streets-v12'});const cv=await MB.snap(bg,{c:[-100,40],z:5,b:0,p:0});return {ok:!!cv,status:MB.status,maps:window.__maps.length,lng:window.__map.getCenter().lng}}""")
+    chk('a fresh snapshot after that renders normally with no new map', r['ok'] and r['status'] == 'ready' and r['maps'] == 1 and abs(r['lng'] + 100) < 1, r)
+    chk('initial-load pause/resume raised no page errors', not errs3, errs3)
+    ctx3.close()
 
     # ================= B. starting paused (e.g. the tab was paused, then Streamlit reran) =================
     ctx, pg, errs = newctx(br, "sessionStorage.setItem('wx.mapbox.paused','1');")

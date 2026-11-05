@@ -2016,15 +2016,18 @@
   };
 
   MB.queue = Promise.resolve();
-  async function doSnap(bg, cam, key) {
+  async function doSnap(bg, cam, key, requestGen) {
+    // v0.10.3.3: the generation is captured BEFORE the first await (the initial MB.init() load) - or, for a request that waited in
+    // the MB.snap queue, at the moment it was REQUESTED (requestGen), so a pause/resume while it waited behind another snapshot also drops it. v0.10.3.1 captured it after
+    // init, so a rapid pause/resume while Mapbox was still loading for the first time looked "fresh" afterwards and the
+    // outdated request went on to move the camera. A pause/resume or reset at ANY point from here on makes this operation stale.
+    const generation=requestGen!==undefined?requestGen:renderGeneration;
     await MB.init();{const hit=cachedFrame(key);if(hit)return hit;}
     if(MB.paused)throw pausedError();   // v0.10.3: queued before the pause, starts after it
+    if(generation!==renderGeneration)throw staleError();   // v0.10.3.3: paused+resumed / reset while Mapbox was initialising
     if(MB.interacting)return null;
     // Capture before BOTH style changes and camera jumps.
     holdEditorFrame();
-    // v0.10.3.1: the generation is captured BEFORE any await, so a pause/resume (or reset) that happens while the style is
-    // loading makes this whole operation stale instead of letting it carry on after the user resumed.
-    const generation=renderGeneration;
     snapshotBusy=true;invalidateTileRetry();
     try{
       await withTimeout(setup(bg,generation),17000,
@@ -2071,12 +2074,13 @@
   }
   MB.snap = function(bg,cam){
     if(MB.status==='error')return Promise.reject(new Error(MB.err||'Mapbox failed'));
+    const requestGen=renderGeneration;   // v0.10.3.3: generation at REQUEST time (see doSnap)
     const key=keyOf(bg,cam),b=cloneBg(bg);
     {const hit=cachedFrame(key);if(hit)return Promise.resolve(hit);}
     if(MB.paused)return Promise.reject(pausedError());
     // v0.10.3: a reset (token / label-size change, reload) while this frame is rendering destroys the map under it.
     // That failure belongs to the OLD map; it must not latch an error on the NEW one.
-    const p=MB.queue.then(()=>{const gen=renderGeneration;return doSnap(b,cam,key).catch(e=>{if(e&&e.mbPaused)throw e;if(gen!==renderGeneration){const x=new Error('Mapbox was reset while a frame was rendering');x.mbStale=true;throw x;}throw e;});}).catch(error=>{
+    const p=MB.queue.then(()=>{const gen=renderGeneration;return doSnap(b,cam,key,requestGen).catch(e=>{if(e&&e.mbPaused)throw e;if(gen!==renderGeneration){const x=new Error('Mapbox was reset while a frame was rendering');x.mbStale=true;throw x;}throw e;});}).catch(error=>{
       // A fatal style/render exception must be visible to the user, not
       // swallowed by pump() and instantly retried every editor frame.
       if(error&&(error.mbPaused||error.mbStale))throw error;   // paused / reset mid-queue: not a Mapbox failure
