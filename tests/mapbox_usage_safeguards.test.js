@@ -308,7 +308,7 @@ function snapRig() {
   const SETUP = block('  async function setup(bg,generation) {', '  // Bounded even when');
   const pre = "'use strict';const W=1920,H=1080,norm=c=>c,withTimeout=p=>p,cachedFrame=()=>null,holdEditorFrame=()=>{},tileHealth=()=>({complete:true,errored:0}),throttled=()=>false,recoverTiles=()=>{};" +
     "const settle=async()=>true,once=(m,ev)=>T.pending(ev),styleOf=bg=>bg.style||'streets-v12',projOf=()=>'mercator',wdConfigKey=()=>'cfg',fog=()=>T.calls.push('fog'),applyTerrain=()=>T.calls.push('terrain'),addBroadcastCartography=()=>{},applyWeatherUnderlay=()=>{};" +
-    "const WX_FRAME_LAYER='l',WX_FRAME_SOURCE='s';MB.ensureConfig=()=>{};MB.init=async()=>{};DIAG.incompleteSnaps=0;MB.cache=new Map();let setupImpl=null;";
+    "const WX_FRAME_LAYER='l',WX_FRAME_SOURCE='s';MB.ensureConfig=()=>{};MB.init=()=>T.initGate||Promise.resolve();DIAG.incompleteSnaps=0;MB.cache=new Map();let setupImpl=null;";
   const post = ";return {doSnap,setup,setupImpl:f=>{setupImpl=f},keys:()=>({curStyleKey,curCfgKey,curProj})};";
   const T = { calls: [], pending: () => new Promise(res => { T.resolve = res; }), jumps: 0 };
   const dsrc = SNAP.replace('await withTimeout(setup(bg,generation)', 'await withTimeout((setupImpl||setup)(bg,generation)');
@@ -355,4 +355,75 @@ test('control: with no pause or reset the same frame completes and moves the cam
   const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
   await new Promise(r => setTimeout(r, 0)); T.resolve();
   const cv = await p; assert.ok(cv); assert.equal(T.jumps, 1);
+});
+
+/* ---- v0.10.3.3: rapid pause/resume (or reset) while the INITIAL map load (MB.init) is still pending ---- */
+test('pause then immediate resume while MB.init() is still loading: the outdated snapshot cannot move the camera', async () => {
+  const { api, T, MB } = snapRig();
+  let release; T.initGate = new Promise(res => { release = res; });
+  const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
+  await new Promise(r => setTimeout(r, 0));
+  api.setPaused(true); api.setPaused(false);        // rapid pause/resume during the first Mapbox load
+  release();                                         // the initial load finally completes
+  await assert.rejects(p, e => e.mbStale === true);
+  assert.equal(T.jumps, 0, 'no camera jump by the pre-pause operation');
+  assert.deepEqual(T.calls, [], 'no style / projection / fog / terrain change by the pre-pause operation');
+  assert.equal(MB.status, 'ready'); assert.equal(MB.paused, false);
+});
+test('pause (no resume) while MB.init() is loading: pause error, no camera jump', async () => {
+  const { api, T } = snapRig();
+  let release; T.initGate = new Promise(res => { release = res; });
+  const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
+  await new Promise(r => setTimeout(r, 0));
+  api.setPaused(true); release();
+  await assert.rejects(p, e => e.mbPaused === true);
+  assert.equal(T.jumps, 0); assert.deepEqual(T.calls, []);
+});
+test('reset while MB.init() is loading also makes the old snapshot stale', async () => {
+  const { api, T } = snapRig();
+  let release; T.initGate = new Promise(res => { release = res; });
+  const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
+  await new Promise(r => setTimeout(r, 0));
+  api.reset(); release();
+  await assert.rejects(p, e => e.mbStale === true);
+  assert.equal(T.jumps, 0);
+});
+test('a fresh snapshot started AFTER the pause/resume still works (the guard only drops the interrupted one)', async () => {
+  const { api, T } = snapRig();
+  let release; T.initGate = new Promise(res => { release = res; });
+  const oldP = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'old'), old = oldP.then(() => null, e => { throw e; }); old.catch(() => { });
+  await new Promise(r => setTimeout(r, 0));
+  api.setPaused(true); api.setPaused(false);
+  const fresh = api.doSnap(BG, { c: [-72, 41], z: 6, b: 0, p: 0 }, 'new');
+  release(); await new Promise(r => setTimeout(r, 0)); T.resolve && T.resolve();
+  await assert.rejects(oldP, e => e.mbStale === true);
+  const cv = await fresh; assert.ok(cv); assert.equal(T.jumps, 1, 'only the fresh request moved the camera');
+});
+test('control: with no pause or reset the frame waits for init and then completes once', async () => {
+  const { api, T } = snapRig();
+  let release; T.initGate = new Promise(res => { release = res; });
+  const p = api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k');
+  await new Promise(r => setTimeout(r, 0)); release(); await new Promise(r => setTimeout(r, 0)); T.resolve();
+  const cv = await p; assert.ok(cv); assert.equal(T.jumps, 1);
+});
+test('source guard: doSnap captures renderGeneration BEFORE its first await (the MB.init wait)', () => {
+  const body = block('  async function doSnap(', '  MB.snap = function(');
+  const code = body.split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+  const gen = code.indexOf('const generation=requestGen!==undefined?requestGen:renderGeneration'), aw = code.indexOf('await ');
+  assert.ok(gen > 0 && aw > 0 && gen < aw, 'generation must be captured before any await');
+  assert.equal((body.match(/const generation=/g) || []).length, 1, 'captured exactly once');
+  const afterInit = body.slice(body.indexOf('await MB.init()'), body.indexOf('holdEditorFrame()'));
+  assert.match(afterInit, /generation!==renderGeneration\)throw staleError\(\)/, 'stale check right after the init wait');
+});
+test('a snapshot REQUESTED before a pause/resume but waiting in the queue is stale when it finally starts (requestGen)', async () => {
+  const { api, T } = snapRig();
+  const requestedAt = 0;                              // generation when MB.snap was called
+  api.setPaused(true); api.setPaused(false);         // rapid pause/resume while it waits behind another snapshot
+  await assert.rejects(api.doSnap(BG, { c: [-71, 42], z: 7, b: 0, p: 0 }, 'k', requestedAt), e => e.mbStale === true);
+  assert.equal(T.jumps, 0); assert.deepEqual(T.calls, []);
+});
+test('source guard: MB.snap passes the REQUEST-time generation into doSnap', () => {
+  const snap = block('  MB.snap = function(', '  MB.liveFrame');
+  assert.ok(snap.indexOf('const requestGen=renderGeneration') > 0 && snap.indexOf('const requestGen=renderGeneration') < snap.indexOf('MB.queue.then'));
+  assert.match(snap, /doSnap\(b,cam,key,requestGen\)/);
 });
