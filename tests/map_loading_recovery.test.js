@@ -68,10 +68,10 @@ test('startup waits for actual base map, not projector, and style has deadline',
   assert.match(map,/if \(busy \|\| !want \|\| MB\.interacting \|\| MB\.status==='error'( \|\| MB\.paused)?\) return/);   // v0.10.3 adds the pause guard
 });
 test('failed snapshot latches the error and prevents automatic WebGL retries',async()=>{
-  const source=block('  MB.snap = function(bg,cam){','\n\n  /* Live editor preview');
+  const source=block('  MB.snap = function(bg,cam,opts){','\n\n  /* Live editor preview');
   const MB={status:'ready',err:'',cache:new Map(),queue:Promise.resolve()};
   let attempts=0;
-  const snap=new Function('MB','keyOf','cloneBg','doSnap','console','cachedFrame',
+  const snap=new Function('MB','keyOf','cloneBg','doSnap','console','strictHit',
     'let renderGeneration=0;'+source+';return MB.snap;')(MB,()=>'key',x=>x,
       async()=>{attempts++;throw Error('render failure')},{warn(){}},k=>MB.cache.get(k)||null);
   await assert.rejects(snap({},{}),/render failure/);

@@ -19,15 +19,19 @@ FAKE_GL = r"""
   const W=1920,H=1080;
   window.WX_MAPBOX_TOKEN=window.WX_MAPBOX_TOKEN||'pk.eyJ1IjoidGVzdCJ9.FAKETESTTOKENabcd';
   window.__maps=[];window.__ev=[];window.__tiles={a:{state:'loaded'},b:{state:'loaded'},c:{state:'loaded'},d:{state:'loaded'}};
-  const cache={_tiles:window.__tiles,_removeTile(k){delete this._tiles[k];},update(){for(const k of ['a','b','c','d']){if(!this._tiles[k])this._tiles[k]={state:'loaded'};}window.__paint();}};
+  window.__updates=0;window.__failTiles={};window.__pendingRenders=0;
+  const cache={_tiles:window.__tiles,_removeTile(k){delete this._tiles[k];},update(){window.__updates++;for(const k of ['a','b','c','d']){if(!this._tiles[k])this._tiles[k]={state:window.__failTiles[k]?'errored':'loaded'};}window.__paint();}};
+  // optional (non-critical) source, only when a test asks for it: its tiles may be errored forever and must never block anything
+  window.__optTiles={x:{state:'loaded'}};
+  const optCache={_tiles:window.__optTiles,_removeTile(k){delete this._tiles[k];},update(){}};
   window.__listeners={};
-  window.__paint=function(){const m=window.__map;if(!m)return;const c=m.__canvas.getContext('2d');c.fillStyle='#2a6a3a';c.fillRect(0,0,W,H);m.__renders=(m.__renders||0)+1;(window.__listeners.render||[]).slice().forEach(f=>f());};
+  window.__paint=function(){const m=window.__map;if(!m)return;const c=m.__canvas.getContext('2d');c.fillStyle='#2a6a3a';c.fillRect(0,0,W,H);m.__renders=(m.__renders||0)+1;if(window.__pendingRenders>0&&--window.__pendingRenders===0){for(const k of Object.keys(window.__tiles))if(window.__tiles[k].state==='loading')window.__tiles[k]={state:'loaded'};}(window.__listeners.render||[]).slice().forEach(f=>f());};
   const mx=lng=>(180+lng)/360,my=lat=>(180-(180/Math.PI)*Math.log(Math.tan(Math.PI/4+lat*Math.PI/360)))/360;
   class LngLat{constructor(a,b){this.lng=a;this.lat=b;}}
   class Map{
     constructor(o){
       this.__canvas=document.createElement('canvas');this.__canvas.width=W;this.__canvas.height=H;
-      this.style={_sourceCaches:{'mapbox-satellite':cache}};this.__ls={};this.__loaded=false;this.__o=o;this.__isD=!!(o&&typeof o.style==='string');
+      this.style={_sourceCaches:Object.assign({'mapbox-satellite':cache},window.__withOptional?{'mapbox-terrain-dem':optCache}:{})};this.__ls={};this.__loaded=false;this.__o=o;this.__isD=!!(o&&typeof o.style==='string');
       const c=o.center||[0,0];this.__st={c:[c.lng!==undefined?c.lng:c[0],c.lat!==undefined?c.lat:c[1]],z:o.zoom==null?1:o.zoom,b:o.bearing||0,p:o.pitch||0};
       this.__vw=(o.container&&o.container.clientWidth)||1280;this.__vh=(o.container&&o.container.clientHeight)||720;
       this.__proj=(o.projection&&o.projection.name)||o.projection||'mercator';
@@ -80,6 +84,14 @@ def newctx(br, extra=''):
     return ctx, pg, errs
 def maps(pg): return pg.evaluate("()=>window.__maps.length")
 def news(pg): return pg.evaluate("()=>window.__ev.filter(e=>e.t==='new').length")
+
+EXPORT_SETUP_JS = """()=>{const E=WX.E,sc=WX.S.show.scenes[0];sc.duration=1.5;sc.bg=Object.assign({},sc.bg,{view:{c:[-71.2,42.5],z:7,b:0,p:0},view2:{c:[-70.2,42.0],z:8,b:10,p:0},camDur:1.5,camDelay:0});
+      WX.S.show.scenes=[sc];WX.loadShow(JSON.parse(JSON.stringify(WX.S.show)));
+      window.__enc={frames:0,closed:0,hook:null};
+      window.VideoEncoder=class{constructor(o){this.o=o;this.encodeQueueSize=0;this.i=0}static async isConfigSupported(c){return{supported:/^avc1/.test(c.codec),config:c}}configure(){}
+        encode(f){const i=this.i++;window.__enc.frames++;if(window.__enc.hook)window.__enc.hook(i);this.o.output({byteLength:4,copyTo:b=>b.set([0,0,0,1]),timestamp:f.timestamp,duration:f.duration,type:i===0?'key':'delta'},i===0?{decoderConfig:{description:new Uint8Array([1,100,0,40,255,225,0,0])}}:{})}
+        async flush(){} close(){window.__enc.closed++}};
+      window.__runExport=async()=>{window.__enc.frames=0;try{const r=await Exporter.run(WX.S.show,{width:1920,height:1080,fps:30,bitrate:1e7});return{ok:true,kind:r.kind,size:r.blob.size,frames:r.frames,encoded:window.__enc.frames}}catch(e){return{ok:false,msg:String(e&&e.message||e),encoded:window.__enc.frames}}};}"""
 
 with sync_playwright() as p:
     br = p.chromium.launch(args=['--no-sandbox'])
@@ -282,13 +294,7 @@ with sync_playwright() as p:
     downloads = []; pg4.on('download', lambda d: downloads.append(d.suggested_filename))
     pg4.evaluate(SETUP, 'stock')
     # a 1.5 s show whose camera moves the whole time, so EVERY frame needs its own Mapbox snapshot (45 frames)
-    pg4.evaluate("""()=>{const E=WX.E,sc=WX.S.show.scenes[0];sc.duration=1.5;sc.bg=Object.assign({},sc.bg,{view:{c:[-71.2,42.5],z:7,b:0,p:0},view2:{c:[-70.2,42.0],z:8,b:10,p:0},camDur:1.5,camDelay:0});
-      WX.S.show.scenes=[sc];WX.loadShow(JSON.parse(JSON.stringify(WX.S.show)));
-      window.__enc={frames:0,closed:0,hook:null};
-      window.VideoEncoder=class{constructor(o){this.o=o;this.encodeQueueSize=0;this.i=0}static async isConfigSupported(c){return{supported:/^avc1/.test(c.codec),config:c}}configure(){}
-        encode(f){const i=this.i++;window.__enc.frames++;if(window.__enc.hook)window.__enc.hook(i);this.o.output({byteLength:4,copyTo:b=>b.set([0,0,0,1]),timestamp:f.timestamp,duration:f.duration,type:i===0?'key':'delta'},i===0?{decoderConfig:{description:new Uint8Array([1,100,0,40,255,225,0,0])}}:{})}
-        async flush(){} close(){window.__enc.closed++}};
-      window.__runExport=async()=>{window.__enc.frames=0;try{const r=await Exporter.run(WX.S.show,{width:1920,height:1080,fps:30,bitrate:1e7});return{ok:true,kind:r.kind,size:r.blob.size,frames:r.frames,encoded:window.__enc.frames}}catch(e){return{ok:false,msg:String(e&&e.message||e),encoded:window.__enc.frames}}};}""")
+    pg4.evaluate(EXPORT_SETUP_JS)
     r = pg4.evaluate("()=>window.__runExport()")
     chk('control: an uninterrupted map export succeeds with a complete MP4 (45 of 45 frames)', r.get('ok') and r['kind'] == 'mp4' and r['size'] > 0 and r['encoded'] == 45 and r['frames'] == 45, r)
     def interrupted(label, hook_js, expect_re):
@@ -316,6 +322,66 @@ with sync_playwright() as p:
     chk('dialog: no video result and no file download after the failure', d['video'] == 0 and len(downloads) == n0, (d, downloads))
     chk('interrupted-export section raised no page errors', not errs4, errs4)
     ctx4.close()
+
+    # ================= E. v0.10.3.5: MP4 export validation - every required Mapbox snapshot must be COMPLETE for its camera =================
+    import re as _re
+    ctx5, pg5, errs5 = newctx(br, "window.__withOptional=true;")
+    dl5 = []; pg5.on('download', lambda d: dl5.append(d.suggested_filename))
+    pg5.evaluate(SETUP, 'stock'); pg5.evaluate(EXPORT_SETUP_JS)
+    pg5.evaluate("()=>{window.__showBefore=JSON.stringify(WX.S.show);window.__lsBefore=JSON.stringify(Object.keys(localStorage).sort().map(k=>[k,localStorage.getItem(k)]))}")
+    R = lambda: pg5.evaluate("()=>window.__runExport()")
+    def reset5():
+        pg5.evaluate("""()=>{window.__enc.hook=null;window.__slow=false;window.__pendingRenders=0;window.__failTiles={};window.__optTiles.x={state:'loaded'};
+          for(const k of ['a','b','c','d'])window.__tiles[k]={state:'loaded'};MB.setPaused(false);MB.cache.clear&&MB.cache.clear();}""")
+    r = R()
+    chk('control: complete satellite imagery exports 45/45 frames as an MP4', r.get('ok') and r['kind'] == 'mp4' and r['encoded'] == 45, r)
+    closed0 = pg5.evaluate("()=>window.__enc.closed")
+
+    # (1) critical tiles still loading when the frame is taken, then they arrive (recovered imagery): export still succeeds
+    reset5(); pg5.evaluate("()=>{window.__enc.hook=i=>{if(i===10){window.__tiles.b={state:'loading'};window.__pendingRenders=6}}}")
+    r = R(); chk('critical tile pending at first, loads during the bounded waits: export succeeds 45/45', r.get('ok') and r['encoded'] == 45, r)
+    # (2) failed critical tile that the existing tile recovery re-requests successfully
+    reset5(); pg5.evaluate("()=>{window.__updates=0;window.__enc.hook=i=>{if(i===10){window.__tiles.b={state:'errored'}}}}")
+    r = R(); u = pg5.evaluate("()=>window.__updates")
+    chk('failed critical tile is retried by the existing recovery and recovered: export succeeds 45/45', r.get('ok') and r['encoded'] == 45, (r, u))
+    # (3) optional overlay permanently errored: never blocks
+    reset5(); pg5.evaluate("()=>{window.__optTiles.x={state:'errored'};window.__enc.hook=null}")
+    r = R(); chk('optional (terrain/overlay) source failing permanently does not block the export', r.get('ok') and r['encoded'] == 45, r)
+    # (4) critical tile never loads (pending forever): export FAILS with a useful message, bounded, no MP4
+    reset5(); pg5.evaluate("()=>{window.__enc.hook=i=>{if(i===10){window.__tiles.b={state:'loading'};window.__pendingRenders=0}}}")
+    t0 = __import__('time').time(); r = R(); dt = __import__('time').time() - t0
+    chk('critical tile never loads: export reports failure, no MP4', (not r['ok']) and 'size' not in r, r)
+    chk('...message names the scene, the time and the missing imagery', bool(_re.search(r'Map scene ".*" at \d+\.\d s: Required map imagery did not finish loading: 1 still loading of \d+ required map tiles', r.get('msg', ''))), r)
+    chk('...stopped at the first bad frame (not 45) and within a bounded time', 0 < r['encoded'] < 45 and dt < 40, (r['encoded'], dt))
+    chk('...no editor-wide error was latched and no extra Mapbox map was created', pg5.evaluate("()=>MB.status")=='ready' and pg5.evaluate("()=>window.__maps.length") == 1, '')
+    # (5) critical tile fails and every retry fails: FAIL, retries bounded
+    reset5(); pg5.evaluate("()=>{window.__updates=0;window.__failTiles={b:true};window.__enc.hook=i=>{if(i===10){window.__tiles.b={state:'errored'}}}}")
+    r = R(); u = pg5.evaluate("()=>window.__updates")
+    chk('critical tile permanently failing: export fails with "failed to load" and no MP4', (not r['ok']) and 'size' not in r and 'Required map imagery failed to load' in r.get('msg', ''), r)
+    chk('...tile retries are bounded (existing recovery, no flood)', u <= 12, u)
+    # (6) 429 cool-down: no hammering, fail at once with the cool-down in the message
+    reset5(); pg5.evaluate("""()=>{window.__updates=0;window.__failTiles={b:true};window.__enc.hook=i=>{if(i===10){window.__tiles.b={state:'errored'};(window.__listeners.error||[]).forEach(f=>f({error:{status:429,message:'Too Many Requests',url:'https://api.mapbox.com/v4/x?access_token=pk.x'}}))}}}""")
+    r = R(); u = pg5.evaluate("()=>window.__updates")
+    chk('HTTP 429 cool-down: export fails and says Mapbox is rate-limiting', (not r['ok']) and _re.search(r'rate-limiting|429', r.get('msg', '')) is not None, r)
+    chk('...and sent no tile re-requests during the cool-down', u == 0, u)
+    # (7) cleanup + a later attempt works + saved show untouched
+    n_fail = 3
+    chk('encoder released after every failed export', pg5.evaluate("()=>window.__enc.closed") - closed0 >= n_fail + 3, pg5.evaluate("()=>window.__enc.closed"))
+    chk('exporting flag cleared, show data and saved storage untouched by the failures', pg5.evaluate("()=>!WX.E.exporting&&JSON.stringify(WX.S.show)===window.__showBefore&&JSON.stringify(Object.keys(localStorage).sort().map(k=>[k,localStorage.getItem(k)]))===window.__lsBefore"), '')
+    pg5.wait_for_timeout(300)
+    # the cool-down is a real state: wait it out by clearing it the way time would (expire), then a fresh export must succeed
+    reset5(); pg5.evaluate("()=>{window.__listeners.error=[];}")
+    pg5.wait_for_timeout(6500)
+    r = R(); chk('a later export attempt succeeds again (45/45)', r.get('ok') and r['encoded'] == 45, r)
+    # (8) export dialog: failure shown, nothing saved or offered
+    reset5(); pg5.evaluate("()=>{window.__tiles.b={state:'loading'};window.__enc.hook=null;window.__pendingRenders=0;MB.cache.clear&&MB.cache.clear()}")
+    n0 = len(dl5)
+    pg5.evaluate("()=>{document.getElementById('bExport').click()}"); pg5.wait_for_timeout(800)
+    pg5.evaluate("()=>{const b=[...document.querySelectorAll('#modal .mb button')].find(b=>b.textContent==='Start export');b&&b.click()}"); pg5.wait_for_timeout(9000)
+    d = pg5.evaluate("()=>({msg:(document.querySelector('#modal .prog')||{nextElementSibling:{}}).nextElementSibling.textContent,video:document.querySelectorAll('#modal video').length})")
+    chk('dialog: "Export failed" with the missing-imagery reason, no video, no download', 'Export failed' in d['msg'] and 'Required map imagery' in d['msg'] and d['video'] == 0 and len(dl5) == n0, (d, dl5))
+    chk('export-validation section raised no page errors', not [e for e in errs5 if 'Required map imagery' not in e], errs5)
+    ctx5.close()
 
     # ================= B. starting paused (e.g. the tab was paused, then Streamlit reran) =================
     ctx, pg, errs = newctx(br, "sessionStorage.setItem('wx.mapbox.paused','1');")

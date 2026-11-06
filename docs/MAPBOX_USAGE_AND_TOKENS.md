@@ -96,3 +96,20 @@ Nothing was changed on that branch. When it is reconciled with main after the ho
 * **Conflicts expected in `studio/ui.js` (`mapboxSettings`)** and in `studio/mapbox.js` around `MB.init` / `MB.reset` / `MB.snap` / `MB.xf` / `MB.diagnostics`: take the v0.10.3 versions, then re-run that branch's `map_animation_*` checks. Two source-slicing Node tests need the same small updates as here (`tests/map_loading_recovery.test.js`: pump guard regex, reset stub variables, `renderGeneration` in the `MB.snap` harness).
 * **Export while paused** uses the new preflight; animated map shows therefore also ask to resume first.
 * Its stored shows are unaffected (no show-file or cloud-format change here).
+
+
+## MP4 export validation (v0.10.3.5)
+
+An MP4 export may only encode **complete** map frames. `X.encodeFrames` calls `E.prepareFrame(show, T, {strict:true})`, which asks `MB.snap(bg, cam, {strict:true})` for every map frame:
+
+| situation | editor (unchanged) | MP4 export |
+|---|---|---|
+| critical tiles (satellite, or base vector tiles if no satellite) fully loaded | frame shown | frame accepted |
+| optional sources (terrain/DEM, images, labels) failed or pending | ignored | ignored - never blocks |
+| critical tiles pending/failed | incomplete picture shown, retried in the background | up to 3 bounded recovery rounds (existing `recoverTiles`, 24-tile cap, `settle` 6 s each), then **export fails** |
+| normal tile-loading timeout | quiet "no frame yet" | one more bounded wait per round, then **export fails** (`timeout`) |
+| HTTP 429/503 cool-down with failed tiles | waits | **fails at once**, no re-requests (`rate-limited`) |
+| pause / resume / reset while rendering | stale, dropped | **fails** (0.10.3.4) |
+| cached frame recorded as incomplete | may be shown | never accepted; re-rendered |
+
+Messages read like `Map scene "Radar" at 12.3 s: Required map imagery failed to load: 2 failed of 6 required map tiles. Check the connection or Mapbox token, use Reload map tiles, then export again.` No MP4 is returned or saved, the encoder is closed, the show and saved data are untouched, and the next export attempt works. Worst case for a bad frame is about 1 + 3 x 6 s of waiting; no extra Map instance is ever created. If Mapbox internals needed to verify tiles are unavailable, strict falls back to `map.loaded()` (as the editor does) and `DIAG.exportUnverified` counts those frames.
