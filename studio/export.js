@@ -133,15 +133,17 @@
     });
     const cfg = { codec, width: W, height: H, bitrate, framerate: fps, latencyMode: 'quality' }; if (codec.startsWith('avc')) cfg.avc = { format: 'avc' };
     enc.configure(cfg);
+    try {   // v0.10.3.5: any failure (incomplete map imagery, pause, encoder error, cancel) releases the encoder - nothing stays open for the next attempt
     for (let i = 0; i < N; i++) {
       if (err) throw err; if (o.signal && o.signal.aborted) { enc.close(); throw new Error('cancelled'); }
-      await E.prepareFrame(show, i / fps); E.renderShow(c, show, i / fps, { editing: false }); if (oc) oc.drawImage(cv, 0, 0, W, H);
+      await E.prepareFrame(show, i / fps, { strict: true }); E.renderShow(c, show, i / fps, { editing: false }); if (oc) oc.drawImage(cv, 0, 0, W, H);
       const frame = mkFrame(Math.round(i * 1e6 / fps), Math.round(1e6 / fps));
       enc.encode(frame, { keyFrame: i % (fps * 2) === 0 }); frame.close();
       while (enc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 1));
       if (i % 6 === 0) { if (o.onProgress) o.onProgress((i + 1) / N); await new Promise(r => setTimeout(r, 0)); }
     }
     await enc.flush(); enc.close(); if (err) throw err; if (o.onProgress) o.onProgress(1);
+    } catch (e) { try { if (enc.state !== 'closed') enc.close(); } catch (e2) { /* already closed */ } throw e; }
     return { frames: N, fps, color: colorMode };
   };
 

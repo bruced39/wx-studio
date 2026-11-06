@@ -1814,6 +1814,17 @@
   // (5 s, 10 s, 20 s, 40 s, max 60 s) in which NO automatic retry is sent.
   // A burst of many 429s from one load counts once.
   function throttled(){return Date.now()<DIAG.throttle.until;}
+  /* v0.10.3.5 export validation. A STRICT snapshot (MP4 export only) must come back complete for its camera: the CRITICAL
+     imagery (satellite, or the base vector tiles when there is no satellite) fully loaded; optional overlays never block it.
+     Anything else is a typed, non-latching error (mbExport) that stops the export with a readable reason instead of letting
+     a gap or the previous frame be encoded. The editor never passes strict, so its tolerant behaviour is unchanged. */
+  function exportTileError(code,msg,health){
+    const e=new Error(msg);e.mbExport=true;e.code=code;if(health)e.health={critical:{ready:health.ready,pending:health.pending,errored:health.errored},optional:{pending:health.optionalPending,errored:health.optionalErrored}};return e;
+  }
+  function describeHealth(h){
+    const parts=[];if(h.errored)parts.push(h.errored+' failed');if(h.pending)parts.push(h.pending+' still loading');
+    return (parts.join(' and ')||'incomplete')+' of '+(h.ready+h.pending+h.errored)+' required map tile'+((h.ready+h.pending+h.errored)===1?'':'s');
+  }
   function noteThrottle(status){
     if(status!==429&&status!==503)return;
     const T=DIAG.throttle,now=Date.now();
@@ -1826,6 +1837,11 @@
     DIAG.tileErrors.push({t:new Date().toISOString().slice(11,19),source:(e&&e.sourceId)||'',status:status==null?'':status,
       message:String(msg).replace(/access_token=[^&\s"']+/g,'access_token=…').slice(0,160)});
     if(DIAG.tileErrors.length>40)DIAG.tileErrors.shift();
+  }
+  /* Strict (export) cache lookup: a frame that is recorded as INCOMPLETE is never a valid export frame. */
+  function strictHit(key,strict){
+    if(strict&&incompleteFrames.has(key)){MB.cache.delete(key);incompleteFrames.delete(key);return null;}
+    return cachedFrame(key);
   }
   function cachedFrame(key){
     const cv=MB.cache.get(key);if(!cv)return null;
@@ -2016,13 +2032,13 @@
   };
 
   MB.queue = Promise.resolve();
-  async function doSnap(bg, cam, key, requestGen) {
+  async function doSnap(bg, cam, key, requestGen, strict) {
     // v0.10.3.3: the generation is captured BEFORE the first await (the initial MB.init() load) - or, for a request that waited in
     // the MB.snap queue, at the moment it was REQUESTED (requestGen), so a pause/resume while it waited behind another snapshot also drops it. v0.10.3.1 captured it after
     // init, so a rapid pause/resume while Mapbox was still loading for the first time looked "fresh" afterwards and the
     // outdated request went on to move the camera. A pause/resume or reset at ANY point from here on makes this operation stale.
     const generation=requestGen!==undefined?requestGen:renderGeneration;
-    await MB.init();{const hit=cachedFrame(key);if(hit)return hit;}
+    await MB.init();{const hit=strictHit(key,strict);if(hit)return hit;}
     if(MB.paused)throw pausedError();   // v0.10.3: queued before the pause, starts after it
     if(generation!==renderGeneration)throw staleError();   // v0.10.3.3: paused+resumed / reset while Mapbox was initialising
     if(MB.interacting)return null;
@@ -2036,16 +2052,20 @@
       if(generation!==renderGeneration)throw staleError();   // paused+resumed / reset meanwhile
       const k=norm(cam);
       D.jumpTo({center:k.c,zoom:k.z,bearing:k.b,pitch:k.p});liveKey=null;
-      const ready=await settle(D,generation);
+      let ready=await settle(D,generation);
       if(MB.paused)throw pausedError();
       // v0.10.3.4: a pause+resume / reset while tiles were loading is a STALE error, not a quiet "no frame" - otherwise a
       // map export would carry on and encode a wrong (previous/blank) frame into a MP4 that looks successful.
       if(generation!==renderGeneration)throw staleError();
-      if(!ready||MB.interacting)return null;
+      if(MB.interacting)return null;
+      if(!ready&&!strict)return null;   // editor: a missed tile wait just means no new frame yet. STRICT (export) falls through to the bounded recovery rounds below.
       // map.loaded() is TRUE even when tiles failed to download, so count
       // failed/pending tiles explicitly and give them two more chances.
       let health=tileHealth(D);
-      for(let round=0;round<2&&!health.complete;round++){
+      // STRICT (export) gets one extra bounded round, and a missed first wait is retried like pending tiles. Same recovery
+      // machinery, same 24-tile cap and 429/503 cool-down; no new map, no unbounded loop (<= 3 x 6 s per frame, then it fails).
+      const rounds=strict?3:2;
+      for(let round=0;round<rounds&&(!health.complete||(strict&&!ready));round++){
         if(health.errored){
           if(throttled()||MB.paused)break;          // HTTP 429 cool-down / paused: never hammer Mapbox, report the frame as incomplete
           recoverTiles(D);
@@ -2053,7 +2073,9 @@
         const again=await settle(D,generation,6000);
         if(MB.paused)throw pausedError();
         if(generation!==renderGeneration)throw staleError();   // v0.10.3.4 (see above)
-        if(!again||MB.interacting)return null;
+        if(MB.interacting)return null;
+        if(!again&&!strict)return null;
+        if(again)ready=true;
         health=tileHealth(D);
       }
       DIAG.lastHealth=health;
@@ -2068,6 +2090,14 @@
       MB.cache.set(key,cv);
       if(MB.cache.size>14){const old=MB.cache.keys().next().value;MB.cache.delete(old);incompleteFrames.delete(old);}
       MB.last=cv;MB.lastKey=key;
+      if(strict){
+        // The picture above is kept for the editor either way; but an export may only accept a COMPLETE frame.
+        if(health.errored&&throttled()){const sec=Math.max(1,Math.ceil((DIAG.throttle.until-Date.now())/1000));
+          throw exportTileError('rate-limited','Mapbox is rate-limiting this browser (HTTP 429/503 cool-down, about '+sec+' s left) and '+describeHealth(health)+'. Wait a minute, then export again.',health);}
+        if(!ready)throw exportTileError('timeout','Mapbox did not finish drawing this map view in time ('+describeHealth(health)+'). Check the connection, use Reload map tiles, then export again.',health);
+        if(!health.complete)throw exportTileError(health.errored?'tiles-failed':'tiles-pending',(health.errored?'Required map imagery failed to load: ':'Required map imagery did not finish loading: ')+describeHealth(health)+'. Check the connection or Mapbox token, use Reload map tiles, then export again.',health);
+        DIAG.exportFrames=(DIAG.exportFrames||0)+1;if(!health.verified)DIAG.exportUnverified=(DIAG.exportUnverified||0)+1;
+      }
       return cv;
     }finally{
       snapshotBusy=false;
@@ -2076,18 +2106,19 @@
       }
     }
   }
-  MB.snap = function(bg,cam){
+  MB.snap = function(bg,cam,opts){
+    const strict=!!(opts&&opts.strict);   // v0.10.3.5: export validation (see exportTileError)
     if(MB.status==='error')return Promise.reject(new Error(MB.err||'Mapbox failed'));
     const requestGen=renderGeneration;   // v0.10.3.3: generation at REQUEST time (see doSnap)
     const key=keyOf(bg,cam),b=cloneBg(bg);
-    {const hit=cachedFrame(key);if(hit)return Promise.resolve(hit);}
+    {const hit=strictHit(key,strict);if(hit)return Promise.resolve(hit);}
     if(MB.paused)return Promise.reject(pausedError());
     // v0.10.3: a reset (token / label-size change, reload) while this frame is rendering destroys the map under it.
     // That failure belongs to the OLD map; it must not latch an error on the NEW one.
-    const p=MB.queue.then(()=>{const gen=renderGeneration;return doSnap(b,cam,key,requestGen).catch(e=>{if(e&&e.mbPaused)throw e;if(gen!==renderGeneration){const x=new Error('Mapbox was reset while a frame was rendering');x.mbStale=true;throw x;}throw e;});}).catch(error=>{
+    const p=MB.queue.then(()=>{const gen=renderGeneration;return doSnap(b,cam,key,requestGen,strict).catch(e=>{if(e&&e.mbPaused)throw e;if(gen!==renderGeneration){const x=new Error('Mapbox was reset while a frame was rendering');x.mbStale=true;throw x;}throw e;});}).catch(error=>{
       // A fatal style/render exception must be visible to the user, not
       // swallowed by pump() and instantly retried every editor frame.
-      if(error&&(error.mbPaused||error.mbStale))throw error;   // paused / reset mid-queue: not a Mapbox failure
+      if(error&&(error.mbPaused||error.mbStale||error.mbExport))throw error;   // paused / reset mid-queue: not a Mapbox failure
       if(MB.status!=='error'){
         MB.err=error?.message||String(error);
         MB.status='error';

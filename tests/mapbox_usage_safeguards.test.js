@@ -235,11 +235,11 @@ test('source guards: pause checks in snap/pump/init/tile retry, and no Map is cr
 });
 
 test('a frame that fails because Mapbox was reset underneath it does not latch an error on the new map; a real failure still does', async () => {
-  const snapSrc = block('  MB.snap = function(bg,cam){', '\n\n  /* Live editor preview');
+  const snapSrc = block('  MB.snap = function(bg,cam,opts){', '\n\n  /* Live editor preview');
   const run = async (resetDuring) => {
     const MB = { status: 'ready', err: '', cache: new Map(), queue: Promise.resolve() };
     const holder = { gen: 0 };
-    const mk = new Function('MB', 'keyOf', 'cloneBg', 'doSnap', 'console', 'cachedFrame', 'holder', 'pausedError',
+    const mk = new Function('MB', 'keyOf', 'cloneBg', 'doSnap', 'console', 'strictHit', 'holder', 'pausedError',
       'let renderGeneration=0;Object.defineProperty(holder,"gen",{get:()=>renderGeneration,set:v=>{renderGeneration=v}});' + snapSrc + ';return MB.snap;');
     const snap = mk(MB, () => 'k', x => x, async () => { if (resetDuring) holder.gen++; throw new TypeError("Cannot read properties of null (reading 'setStyle')"); }, { warn() {} }, () => null, holder, () => new Error('p'));
     await assert.rejects(snap({}, {}));
@@ -306,7 +306,8 @@ function snapRig() {
   const r = rig();
   const SNAP = block('  async function doSnap(', '  MB.snap = function(');
   const SETUP = block('  async function setup(bg,generation) {', '  // Bounded even when');
-  const pre = "'use strict';const W=1920,H=1080,norm=c=>c,withTimeout=p=>p,cachedFrame=()=>null,holdEditorFrame=()=>{},tileHealth=()=>(T.health?T.health():{complete:true,errored:0}),throttled=()=>false,recoverTiles=()=>{};" +
+  const STRICT = block('  /* v0.10.3.5 export validation.', '  function cachedFrame(key){');
+  const pre = "'use strict';const W=1920,H=1080,norm=c=>c,withTimeout=p=>p,cachedFrame=key=>MB.cache.get(key)||null,holdEditorFrame=()=>{},tileHealth=()=>(T.health?T.health():{complete:true,errored:0}),throttled=()=>Date.now()<DIAG.throttle.until,recoverTiles=()=>{T.recovers=(T.recovers||0)+1};" +
     "const settle=()=>T.settleImpl?T.settleImpl():Promise.resolve(true),once=(m,ev)=>T.pending(ev),styleOf=bg=>bg.style||'streets-v12',projOf=()=>'mercator',wdConfigKey=()=>'cfg',fog=()=>T.calls.push('fog'),applyTerrain=()=>T.calls.push('terrain'),addBroadcastCartography=()=>{},applyWeatherUnderlay=()=>{};" +
     "const WX_FRAME_LAYER='l',WX_FRAME_SOURCE='s';MB.ensureConfig=()=>{};MB.init=()=>T.initGate||Promise.resolve();DIAG.incompleteSnaps=0;MB.cache=new Map();let setupImpl=null;";
   const post = ";return {doSnap,setup,setupImpl:f=>{setupImpl=f},keys:()=>({curStyleKey,curCfgKey,curProj})};";
@@ -316,7 +317,7 @@ function snapRig() {
     // reuse the rig's module scope pieces by re-declaring minimal state; SAFE gives setPaused/staleError/pausedError
     "'use strict';let D=null,P=null,host=null,initP=null,curStyle=null,curStyleKey='stock|old',curCfgKey='cfg',curProj='mercator',pProj=null,pKey=null,liveKey=null,renderGeneration=0,snapshotBusy=false,previewHold=null,previewRestorePending=false,previewRestoreKey=null,want=null;" +
     "const incompleteFrames=new Map(),DIAG={throttle:{level:0,until:0}};function invalidateTileRetry(){}MB.token=()=>'pk.x';" +
-    pre + SAFE + RESET.replace(/MB\.setToken[\s\S]*$/, '') + SETUP + dsrc + post.replace('return {', "D={jumpTo(){T.jumps++},setStyle(){T.calls.push('setStyle')},setProjection(){T.calls.push('proj')},getCanvas(){return {}}};return {setPaused:MB.setPaused,reset:MB.reset,gen:()=>renderGeneration,"))
+    pre + SAFE + RESET.replace(/MB\.setToken[\s\S]*$/, '') + SETUP + STRICT + dsrc + post.replace('return {', "D={jumpTo(){T.jumps++},setStyle(){T.calls.push('setStyle')},setProjection(){T.calls.push('proj')},getCanvas(){return {}}};return {DIAG,incomplete:incompleteFrames,setPaused:MB.setPaused,reset:MB.reset,gen:()=>renderGeneration,"))
   (r.MB, r.local, r.g, { createElement: () => ({ style: {}, getContext: () => ({ drawImage() {} }) }), referrer: '' }, { warn() {}, log() {} }, {}, { getItem: k => r.session.get(k), setItem: (k, v) => r.session.set(k, v) }, Date, T);
   return { api, T, MB: r.MB };
 }
@@ -425,7 +426,7 @@ test('a snapshot REQUESTED before a pause/resume but waiting in the queue is sta
 test('source guard: MB.snap passes the REQUEST-time generation into doSnap', () => {
   const snap = block('  MB.snap = function(', '  MB.liveFrame');
   assert.ok(snap.indexOf('const requestGen=renderGeneration') > 0 && snap.indexOf('const requestGen=renderGeneration') < snap.indexOf('MB.queue.then'));
-  assert.match(snap, /doSnap\(b,cam,key,requestGen\)/);
+  assert.match(snap, /doSnap\(b,cam,key,requestGen,strict\)/);
 });
 
 /* ---- v0.10.3.4: pause+resume / reset while TILES are loading must be a stale ERROR, not a quiet `null` (export would encode a wrong frame) ---- */
@@ -464,4 +465,73 @@ test('source guard: no `return null` is guarded by a generation mismatch any mor
   const body = block('  async function doSnap(', '  MB.snap = function(').split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
   assert.doesNotMatch(body, /generation!==renderGeneration\|\|[^\n]*return null/); assert.doesNotMatch(body, /\|\|generation!==renderGeneration[^\n]*return null/);
   assert.equal((body.match(/if\(generation!==renderGeneration\)throw staleError\(\)/g) || []).length, 4, 'init wait, style wait, tile wait, recovery wait');
+});
+
+/* ---- v0.10.3.5: export validation - STRICT snapshots (MP4 export) must be complete for the requested camera ---- */
+const HEALTH = (o = {}) => Object.assign({ complete: true, ready: 6, pending: 0, errored: 0, optionalPending: 0, optionalErrored: 0, verified: true }, o);
+function strictRig(healths, settles) {
+  const x = snapRig(); const T = x.T; T.resolve = null; T.settleCalls = 0;
+  T.settleImpl = () => { const v = settles[Math.min(T.settleCalls, settles.length - 1)]; T.settleCalls++; return Promise.resolve(v); };
+  let hi = 0; T.health = () => healths[Math.min(hi++, healths.length - 1)];
+  const run = (strict, key = 'k', cam = SNAPCAM) => { const p = x.api.doSnap(BG, cam, key, undefined, strict); const pr = p.then(v => ({ v }), e => ({ e })); return (async () => { await new Promise(r => setTimeout(r, 0)); T.resolve && T.resolve(); return pr; })(); };
+  return Object.assign(x, { run });
+}
+test('strict: a complete frame is accepted and counted', async () => {
+  const { run, api } = strictRig([HEALTH()], [true]); const r = await run(true);
+  assert.ok(r.v, 'frame returned'); assert.equal(api.DIAG.exportFrames, 1);
+});
+test('strict: a normal tile-loading timeout on the first wait is retried (recovered imagery) and then accepted', async () => {
+  const { run, T } = strictRig([HEALTH()], [false, true]); const r = await run(true);
+  assert.ok(r.v, 'recovered'); assert.equal(T.settleCalls, 2, 'one extra bounded wait');
+});
+test('strict: failed critical tiles are recovered with the existing tile recovery and then accepted', async () => {
+  const { run, T } = strictRig([HEALTH({ complete: false, errored: 2, ready: 4 }), HEALTH()], [true, true]); const r = await run(true);
+  assert.ok(r.v); assert.equal(T.recovers, 1, 'recoverTiles used once');
+});
+test('strict: critical tiles that never load fail with a useful message, bounded retries, nothing latched', async () => {
+  const { run, T, MB } = strictRig([HEALTH({ complete: false, errored: 3, ready: 3 })], [true]); const r = await run(true);
+  assert.ok(r.e && r.e.mbExport && r.e.code === 'tiles-failed', 'typed error, got ' + (r.e && r.e.message));
+  assert.match(r.e.message, /3 failed of 6 required map tiles/); assert.match(r.e.message, /Reload map tiles/);
+  assert.ok(T.recovers <= 3 && T.settleCalls <= 4, 'bounded: ' + T.recovers + ' recoveries, ' + T.settleCalls + ' waits');
+  assert.equal(MB.status, 'ready', 'no editor-wide error latched'); assert.equal(r.e.health.critical.errored, 3);
+});
+test('strict: critical tiles still pending after the bounded waits fail as tiles-pending', async () => {
+  const { run, T } = strictRig([HEALTH({ complete: false, pending: 2, ready: 4 })], [true]); const r = await run(true);
+  assert.equal(r.e && r.e.code, 'tiles-pending'); assert.match(r.e.message, /2 still loading/); assert.ok(T.settleCalls <= 4);
+});
+test('strict: a tile wait that never completes ends as a timeout error after at most 3 extra waits (no endless wait)', async () => {
+  const { run, T } = strictRig([HEALTH({ complete: false, pending: 1, ready: 5 })], [false]); const r = await run(true);
+  assert.equal(r.e && r.e.code, 'timeout'); assert.equal(T.settleCalls, 4, '1 initial + 3 bounded rounds');
+});
+test('the EDITOR (non-strict) is unchanged: a timeout is a quiet null, incomplete tiles still give a picture', async () => {
+  const a = strictRig([HEALTH()], [false]); assert.equal((await a.run(false)).v, null);
+  const b = strictRig([HEALTH({ complete: false, errored: 1 })], [true]); const r = await b.run(false);
+  assert.ok(r.v, 'incomplete picture still returned to the editor'); assert.ok(b.api.incomplete.has('k'), 'and flagged incomplete as before');
+});
+test('strict: optional overlays (terrain, image, labels) failing or pending never block an export', async () => {
+  const { run } = strictRig([HEALTH({ optionalPending: 3, optionalErrored: 2 })], [true]); assert.ok((await run(true)).v);
+});
+test('strict: during a 429/503 cool-down, failed tiles fail the export at once (no hammering, no waiting)', async () => {
+  const { run, T, api } = strictRig([HEALTH({ complete: false, errored: 2, ready: 4 })], [true]); api.DIAG.throttle.until = Date.now() + 45000;
+  const r = await run(true); assert.equal(r.e && r.e.code, 'rate-limited'); assert.match(r.e.message, /429\/503/); assert.match(r.e.message, /left\)/);
+  assert.equal(T.recovers, undefined, 'recoverTiles was NOT called'); assert.equal(T.settleCalls, 1, 'no extra waits');
+});
+test('strict never accepts a cached INCOMPLETE frame; the editor may; a complete cached frame is reused without a camera move', async () => {
+  const x = strictRig([HEALTH({ complete: false, errored: 1 })], [true]); await x.run(false);            // editor leaves an incomplete frame in the cache
+  const jumps0 = x.T.jumps; x.T.health = () => HEALTH();
+  const r = await x.run(true); assert.ok(r.v); assert.equal(x.T.jumps, jumps0 + 1, 'strict re-rendered instead of reusing the incomplete frame'); assert.ok(!x.api.incomplete.has('k'));
+  const j1 = x.T.jumps; const r2 = await x.run(true); assert.ok(r2.v); assert.equal(x.T.jumps, j1, 'complete cached frame reused');
+});
+test('strict: pause/resume (stale) still wins over completeness errors', async () => {
+  const { api, T } = strictRig([HEALTH({ complete: false, errored: 1 })], [true]);
+  const p = api.doSnap(BG, SNAPCAM, 'k', undefined, true).then(() => 'resolved', e => e); await new Promise(r => setTimeout(r, 0));
+  api.setPaused(true); api.setPaused(false); T.resolve && T.resolve(); const e = await p; assert.ok(e.mbStale === true || e.mbPaused === true);
+});
+test('source guards: strict only comes from MP4 export; the wrapper does not latch export errors; the encoder is released on failure', () => {
+  const eng = fs.readFileSync(path.join(__dirname, '..', 'studio', 'engine.js'), 'utf8'), exp = fs.readFileSync(path.join(__dirname, '..', 'studio', 'export.js'), 'utf8'), ui = fs.readFileSync(path.join(__dirname, '..', 'studio', 'ui.js'), 'utf8');
+  assert.match(exp, /E\.prepareFrame\(show, i \/ fps, \{ strict: true \}\)/); assert.doesNotMatch(ui, /strict: true/);
+  assert.match(eng, /g\.MB\.snap\(s\.bg, E\.viewAt\(s, tt\), strict \? \{ strict: true \} : undefined\)/);
+  assert.match(src, /error\.mbPaused\|\|error\.mbStale\|\|error\.mbExport/);
+  assert.match(exp, /catch \(e\) \{ try \{ if \(enc\.state !== 'closed'\) enc\.close\(\)/);
+  assert.match(src, /MB\.snap\(w\.bg, w\.cam\)\.catch/, 'editor pump still calls snap without strict');
 });
