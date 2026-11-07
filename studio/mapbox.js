@@ -1819,6 +1819,7 @@
      Anything else is a typed, non-latching error (mbExport) that stops the export with a readable reason instead of letting
      a gap or the previous frame be encoded. The editor never passes strict, so its tolerant behaviour is unchanged. */
   function exportTileError(code,msg,health){
+    DIAG.exportRefused=(DIAG.exportRefused||0)+1;DIAG.exportRefusedBy=DIAG.exportRefusedBy||{};DIAG.exportRefusedBy[code]=(DIAG.exportRefusedBy[code]||0)+1;
     const e=new Error(msg);e.mbExport=true;e.code=code;if(health)e.health={critical:{ready:health.ready,pending:health.pending,errored:health.errored},optional:{pending:health.optionalPending,errored:health.optionalErrored}};return e;
   }
   function describeHealth(h){
@@ -1839,9 +1840,14 @@
     if(DIAG.tileErrors.length>40)DIAG.tileErrors.shift();
   }
   /* Strict (export) cache lookup: a frame that is recorded as INCOMPLETE is never a valid export frame. */
+  /* v0.10.3.6: strict ONLY reuses a cached canvas that was positively VALIDATED when it was taken (snapshot ready, critical tiles
+     verified and complete). Every other cached frame - incomplete, timed out, rejected by an earlier strict request, or taken
+     while tile coverage could not be verified - stays available to the tolerant editor but can never satisfy an export. */
+  const verifiedFrames=new WeakSet();
   function strictHit(key,strict){
-    if(strict&&incompleteFrames.has(key)){MB.cache.delete(key);incompleteFrames.delete(key);return null;}
-    return cachedFrame(key);
+    const hit=cachedFrame(key);
+    if(!strict)return hit;
+    return hit&&!incompleteFrames.has(key)&&verifiedFrames.has(hit)?hit:null;
   }
   function cachedFrame(key){
     const cv=MB.cache.get(key);if(!cv)return null;
@@ -1947,6 +1953,7 @@
       }
       if(MB.reloadWarning())L.push('WARNING: '+MB.reloadWarning());
       const T=DIAG.throttle,left=Math.max(0,Math.round((T.until-Date.now())/1000));
+      L.push('MP4 export validation: '+(DIAG.exportFrames||0)+' map frame(s) accepted, '+(DIAG.exportRefused||0)+' refused'+(DIAG.exportRefused?' ('+Object.keys(DIAG.exportRefusedBy||{}).map(k=>k+' '+DIAG.exportRefusedBy[k]).join(', ')+')':'')+'; unverifiable-coverage refusals: '+(DIAG.exportUnverified||0));
       L.push('Rate limiting (HTTP 429/503): '+DIAG.throttleEvents+' event(s)'+(left?', back-off ACTIVE for '+left+' s (level '+T.level+')':', not active'));
       L.push('Tile errors since start: '+DIAG.tileErrorCount+', tile reload attempts: '+DIAG.recoveries+', style-reload fallbacks: '+DIAG.fallbackReloads+', manual reloads: '+MB.manualReload.count+' (ignored repeats: '+MB.manualReload.ignored+'), incomplete snapshots not trusted: '+DIAG.incompleteSnaps);
       for(const e of DIAG.tileErrors.slice(-12))L.push('  '+e.t+' '+(e.source||'?')+' '+(e.status===''?'':'HTTP '+e.status+' ')+e.message);
@@ -2062,6 +2069,12 @@
       // map.loaded() is TRUE even when tiles failed to download, so count
       // failed/pending tiles explicitly and give them two more chances.
       let health=tileHealth(D);
+      if(strict&&!health.verified){
+        // v0.10.3.6: no optimistic fallback to map.loaded() for an export. If Mapbox's internal tile status cannot be read, the
+        // coverage of the satellite/base imagery is unknowable, so the export stops with a clear, NON-latching error.
+        DIAG.exportUnverified=(DIAG.exportUnverified||0)+1;
+        throw exportTileError('unverified','Unable to verify required map imagery: '+(DIAG.limitation||'this browser does not expose Mapbox tile status')+' The export was stopped rather than risk missing satellite tiles in the video.',health);
+      }
       // STRICT (export) gets one extra bounded round, and a missed first wait is retried like pending tiles. Same recovery
       // machinery, same 24-tile cap and 429/503 cool-down; no new map, no unbounded loop (<= 3 x 6 s per frame, then it fails).
       const rounds=strict?3:2;
@@ -2079,6 +2092,15 @@
         health=tileHealth(D);
       }
       DIAG.lastHealth=health;
+      if(strict){
+        // v0.10.3.6: a strict snapshot is validated BEFORE anything is cached. A rejected frame is never stored, so neither the
+        // editor cache nor a later strict request can ever pick it up. (Frames the tolerant editor caches are separately
+        // refused by strictHit unless they were positively validated when taken.)
+        if(health.errored&&throttled()){const sec=Math.max(1,Math.ceil((DIAG.throttle.until-Date.now())/1000));
+          throw exportTileError('rate-limited','Mapbox is rate-limiting this browser (HTTP 429/503 cool-down, about '+sec+' s left) and '+describeHealth(health)+'. Wait a minute, then export again.',health);}
+        if(!ready)throw exportTileError('timeout','Mapbox did not finish drawing this map view in time ('+describeHealth(health)+'). Check the connection, use Reload map tiles, then export again.',health);
+        if(!health.complete)throw exportTileError(health.errored?'tiles-failed':'tiles-pending',(health.errored?'Required map imagery failed to load: ':'Required map imagery did not finish loading: ')+describeHealth(health)+'. Check the connection or Mapbox token, use Reload map tiles, then export again.',health);
+      }
       const cv=document.createElement('canvas');cv.width=W;cv.height=H;
       cv.getContext('2d').drawImage(D.getCanvas(),0,0,W,H);
       // An incomplete picture is still returned (better than a blank), but
@@ -2087,17 +2109,11 @@
       const prior=incompleteFrames.get(key);
       if(health.complete)incompleteFrames.delete(key);
       else{DIAG.incompleteSnaps++;incompleteFrames.set(key,{at:Date.now(),tries:(prior?prior.tries:0)+1});}
+      if(ready&&health.verified&&health.complete)verifiedFrames.add(cv);
       MB.cache.set(key,cv);
       if(MB.cache.size>14){const old=MB.cache.keys().next().value;MB.cache.delete(old);incompleteFrames.delete(old);}
       MB.last=cv;MB.lastKey=key;
-      if(strict){
-        // The picture above is kept for the editor either way; but an export may only accept a COMPLETE frame.
-        if(health.errored&&throttled()){const sec=Math.max(1,Math.ceil((DIAG.throttle.until-Date.now())/1000));
-          throw exportTileError('rate-limited','Mapbox is rate-limiting this browser (HTTP 429/503 cool-down, about '+sec+' s left) and '+describeHealth(health)+'. Wait a minute, then export again.',health);}
-        if(!ready)throw exportTileError('timeout','Mapbox did not finish drawing this map view in time ('+describeHealth(health)+'). Check the connection, use Reload map tiles, then export again.',health);
-        if(!health.complete)throw exportTileError(health.errored?'tiles-failed':'tiles-pending',(health.errored?'Required map imagery failed to load: ':'Required map imagery did not finish loading: ')+describeHealth(health)+'. Check the connection or Mapbox token, use Reload map tiles, then export again.',health);
-        DIAG.exportFrames=(DIAG.exportFrames||0)+1;if(!health.verified)DIAG.exportUnverified=(DIAG.exportUnverified||0)+1;
-      }
+      if(strict)DIAG.exportFrames=(DIAG.exportFrames||0)+1;
       return cv;
     }finally{
       snapshotBusy=false;

@@ -31,7 +31,7 @@ FAKE_GL = r"""
   class Map{
     constructor(o){
       this.__canvas=document.createElement('canvas');this.__canvas.width=W;this.__canvas.height=H;
-      this.style={_sourceCaches:Object.assign({'mapbox-satellite':cache},window.__withOptional?{'mapbox-terrain-dem':optCache}:{})};this.__ls={};this.__loaded=false;this.__o=o;this.__isD=!!(o&&typeof o.style==='string');
+      this.style=window.__noInternals?{}:{_sourceCaches:Object.assign({'mapbox-satellite':cache},window.__withOptional?{'mapbox-terrain-dem':optCache}:{})};this.__ls={};this.__loaded=false;this.__o=o;this.__isD=!!(o&&typeof o.style==='string');
       const c=o.center||[0,0];this.__st={c:[c.lng!==undefined?c.lng:c[0],c.lat!==undefined?c.lat:c[1]],z:o.zoom==null?1:o.zoom,b:o.bearing||0,p:o.pitch||0};
       this.__vw=(o.container&&o.container.clientWidth)||1280;this.__vh=(o.container&&o.container.clientHeight)||720;
       this.__proj=(o.projection&&o.projection.name)||o.projection||'mercator';
@@ -381,7 +381,34 @@ with sync_playwright() as p:
     d = pg5.evaluate("()=>({msg:(document.querySelector('#modal .prog')||{nextElementSibling:{}}).nextElementSibling.textContent,video:document.querySelectorAll('#modal video').length})")
     chk('dialog: "Export failed" with the missing-imagery reason, no video, no download', 'Export failed' in d['msg'] and 'Required map imagery' in d['msg'] and d['video'] == 0 and len(dl5) == n0, (d, dl5))
     chk('export-validation section raised no page errors', not [e for e in errs5 if 'Required map imagery' not in e], errs5)
+
+    # -- v0.10.3.6: the diagnostics expose the export counters; a rejected frame is not reused
+    dg = pg5.evaluate("()=>MB.diagnostics()")
+    chk('diagnostics show the MP4 export validation counters (accepted / refused by reason / unverifiable)', bool(_re.search(r'MP4 export validation: \d+ map frame\(s\) accepted, [1-9]\d* refused \(.*tiles-pending.*\); unverifiable-coverage refusals: 0', dg)), dg[-700:])
     ctx5.close()
+
+    # -- v0.10.3.6: tile coverage cannot be verified (Mapbox internal source-cache interface unavailable)
+    ctx6, pg6, errs6 = newctx(br, "window.__noInternals=true;")
+    dl6 = []; pg6.on('download', lambda d: dl6.append(d.suggested_filename))
+    pg6.evaluate(SETUP, 'stock'); pg6.evaluate(EXPORT_SETUP_JS)
+    pg6.evaluate("()=>{window.__showBefore=JSON.stringify(WX.S.show)}")
+    ed = pg6.evaluate("""async()=>{const sc=WX.S.show.scenes[0];const cv=await MB.snap(sc.bg,WX.E.viewAt(sc,0));let still='ok';try{await WX.E.prepareFrame(WX.S.show,0)}catch(e){still=e.message}
+      return {frame:!!cv,status:MB.status,still,diag:MB.diagnostics()}}""")
+    chk('unverifiable coverage: the EDITOR snapshot and the tolerant (PNG/JPG) frame preparation still work', ed['frame'] and ed['status'] == 'ready' and ed['still'] == 'ok', ed)
+    chk('...and diagnostics say the coverage is UNVERIFIED', 'Tile coverage: UNVERIFIED' in ed['diag'], ed['diag'][-500:])
+    r = pg6.evaluate("()=>window.__runExport()")
+    chk('unverifiable coverage: MP4 export FAILS with "Unable to verify required map imagery" and returns no MP4', (not r['ok']) and r['msg'].find('Unable to verify required map imagery') >= 0 and 'size' not in r, r)
+    chk('...the message names the scene and time and explains the limitation', bool(_re.search(r'Map scene ".*" at 0\.0 s: Unable to verify required map imagery: .*UNVERIFIED', r.get('msg', ''))), r)
+    chk('...it stopped on the very first frame, with the encoder released', r['encoded'] == 0 and pg6.evaluate("()=>window.__enc.closed") >= 1, (r, pg6.evaluate("()=>window.__enc.closed")))
+    st = pg6.evaluate("()=>({status:MB.status,maps:window.__maps.length,exporting:WX.E.exporting,same:JSON.stringify(WX.S.show)===window.__showBefore,diag:MB.diagnostics()})")
+    chk('...non-latching: Mapbox stays ready, one map only, show data untouched, exporting flag cleared', st['status'] == 'ready' and st['maps'] == 1 and not st['exporting'] and st['same'], st)
+    chk('...the unverifiable counter is exposed in the diagnostics', bool(_re.search(r'unverifiable-coverage refusals: [1-9]', st['diag'])) and '(unverified 1)' in st['diag'], st['diag'][-600:])
+    pg6.evaluate("()=>{document.getElementById('bExport').click()}"); pg6.wait_for_timeout(800)
+    pg6.evaluate("()=>{const b=[...document.querySelectorAll('#modal .mb button')].find(b=>b.textContent==='Start export');b&&b.click()}"); pg6.wait_for_timeout(4000)
+    d = pg6.evaluate("()=>({msg:(document.querySelector('#modal .prog')||{nextElementSibling:{}}).nextElementSibling.textContent,video:document.querySelectorAll('#modal video').length})")
+    chk('dialog: "Export failed … Unable to verify required map imagery", no video, no download', 'Export failed' in d['msg'] and 'Unable to verify required map imagery' in d['msg'] and d['video'] == 0 and len(dl6) == 0, (d, dl6))
+    chk('unverifiable-coverage section raised no page errors', not [e for e in errs6 if 'Unable to verify' not in e], errs6)
+    ctx6.close()
 
     # ================= B. starting paused (e.g. the tab was paused, then Streamlit reran) =================
     ctx, pg, errs = newctx(br, "sessionStorage.setItem('wx.mapbox.paused','1');")
