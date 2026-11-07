@@ -535,3 +535,52 @@ test('source guards: strict only comes from MP4 export; the wrapper does not lat
   assert.match(exp, /catch \(e\) \{ try \{ if \(enc\.state !== 'closed'\) enc\.close\(\)/);
   assert.match(src, /MB\.snap\(w\.bg, w\.cam\)\.catch/, 'editor pump still calls snap without strict');
 });
+
+/* ---- v0.10.3.6: a rejected strict frame can never be reused; unverifiable tile coverage fails an export ---- */
+test('rejected strict frame (timeout with otherwise COMPLETE tiles) is not cached and cannot be reused by a fresh strict request', async () => {
+  const x = strictRig([HEALTH()], [false]);                    // ready=false forever, but tile health looks complete
+  const r1 = await x.run(true); assert.equal(r1.e && r1.e.code, 'timeout');
+  assert.equal(x.MB.cache.has('k'), false, 'nothing was cached by the failed strict snapshot'); assert.equal(x.api.incomplete.has('k'), false);
+  const jumps0 = x.T.jumps; x.T.settleImpl = () => Promise.resolve(true);   // the network recovers
+  const r2 = await x.run(true); assert.ok(r2.v, 'fresh strict request succeeds');
+  assert.equal(x.T.jumps, jumps0 + 1, 'it rendered a NEW frame instead of reusing the rejected one'); assert.notEqual(r2.v, r1.v);
+});
+test('every kind of rejected strict snapshot leaves the cache untouched (pending, failed, rate-limited)', async () => {
+  for (const h of [HEALTH({ complete: false, pending: 2, ready: 4 }), HEALTH({ complete: false, errored: 2, ready: 4 })]) {
+    const x = strictRig([h], [true]); const r = await x.run(true); assert.ok(r.e && r.e.mbExport);
+    assert.equal(x.MB.cache.has('k'), false, 'not cached: ' + r.e.code); assert.equal(x.api.incomplete.has('k'), false);
+  }
+  const y = strictRig([HEALTH({ complete: false, errored: 1, ready: 5 })], [true]); y.api.DIAG.throttle.until = Date.now() + 30000;
+  assert.equal((await y.run(true)).e.code, 'rate-limited'); assert.equal(y.MB.cache.has('k'), false);
+});
+test('a frame the tolerant editor cached WITHOUT validation (unverified coverage) is never accepted by strict', async () => {
+  const x = strictRig([HEALTH({ verified: false, complete: true })], [true]);
+  const ed = await x.run(false); assert.ok(ed.v, 'editor still gets its frame (tolerant, unchanged)'); assert.equal(x.MB.cache.get('k'), ed.v);
+  x.T.health = () => HEALTH(); const jumps0 = x.T.jumps;
+  const r = await x.run(true); assert.ok(r.v && r.v !== ed.v, 'strict re-rendered and validated'); assert.equal(x.T.jumps, jumps0 + 1);
+  const j1 = x.T.jumps, r2 = await x.run(true); assert.equal(r2.v, r.v); assert.equal(x.T.jumps, j1, 'a validated frame IS reused');
+});
+test('a frame cached by a COMPLETE, verified editor snapshot is a valid export frame (no needless re-render)', async () => {
+  const x = strictRig([HEALTH()], [true]); const ed = await x.run(false); const j = x.T.jumps;
+  const r = await x.run(true); assert.equal(r.v, ed.v); assert.equal(x.T.jumps, j);
+});
+test('strict + unverifiable tile coverage (internal interface unavailable): clear non-latching error, no optimistic map.loaded() fallback', async () => {
+  const x = strictRig([HEALTH({ verified: false, supported: false, complete: true, ready: 0 })], [true]); x.api.DIAG.limitation = 'Mapbox internal source cache not available: failed satellite tiles cannot be detected, so tile coverage is UNVERIFIED (map.loaded()=true only).';
+  const r = await x.run(true);
+  assert.ok(r.e && r.e.mbExport && r.e.code === 'unverified', 'got ' + (r.e && r.e.message));
+  assert.match(r.e.message, /^Unable to verify required map imagery: /); assert.match(r.e.message, /internal source cache not available/);
+  assert.equal(x.MB.status, 'ready', 'not latched'); assert.equal(x.MB.cache.has('k'), false); assert.equal(x.api.DIAG.exportUnverified, 1); assert.equal(x.api.DIAG.exportFrames || 0, 0);
+  assert.equal(x.T.settleCalls, 1, 'no pointless recovery rounds'); assert.equal(x.T.recovers, undefined);
+});
+test('the SAME unverifiable situation does not affect the editor: it still gets its frame', async () => {
+  const x = strictRig([HEALTH({ verified: false, supported: false, complete: true, ready: 0 })], [true]);
+  const r = await x.run(false); assert.ok(r.v); assert.equal(x.api.DIAG.exportUnverified || 0, 0); assert.equal(x.MB.status, 'ready');
+});
+test('source guards: diagnostics expose the export counters; unverified is refused before any recovery loop', () => {
+  const diag = block('  MB.diagnostics=function(){', '  // The WebGL map used by the live editor');
+  assert.match(diag, /MP4 export validation: /); assert.match(diag, /DIAG\.exportFrames/); assert.match(diag, /unverifiable-coverage refusals: '\+\(DIAG\.exportUnverified\|\|0\)/);
+  const body = block('  async function doSnap(', '  MB.snap = function(');
+  assert.ok(body.indexOf("exportTileError('unverified'") > 0 && body.indexOf("exportTileError('unverified'") < body.indexOf('const rounds=strict'));
+  assert.ok(body.indexOf("exportTileError('tiles-pending'") < body.indexOf('MB.cache.set(key,cv)') || body.indexOf("'tiles-failed'") < body.indexOf('MB.cache.set(key,cv)'), 'strict validation precedes caching');
+  assert.match(body, /verifiedFrames\.add\(cv\)/);
+});
