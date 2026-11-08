@@ -37,7 +37,8 @@
 
   /* ---------- history / persistence ---------- */
   const snap = () => JSON.stringify({ name: S.show.name, accent: S.show.accent, bugText: S.show.bugText, logo: S.show.logo, scenes: S.show.scenes });
-  function commit() { const s = snap(); if (S.hist[S.hp] === s) return; S.hist = S.hist.slice(0, S.hp + 1); S.hist.push(s); if (S.hist.length > 120) S.hist.shift(); S.hp = S.hist.length - 1; autosave(); thumbSoon(); }
+  const attachMemo = new WeakMap();   // v0.11.5: where each attached child was last put (not saved)
+  function commit() { try { MA.syncAttach(cur().objects, attachMemo); } catch (e) { /* ignore */ } const s = snap(); if (S.hist[S.hp] === s) return; S.hist = S.hist.slice(0, S.hp + 1); S.hist.push(s); if (S.hist.length > 120) S.hist.shift(); S.hp = S.hist.length - 1; autosave(); thumbSoon(); }
   function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
@@ -494,8 +495,19 @@
   /* ---------- playback ---------- */
   function playFrom(a, b) { S.mode = 'play'; S.play = { a, b, t0: clock() }; }
   function stopPlay() { S.mode = 'edit'; S.play = null; if (S.present) exitPresent(); updateTransport(); }
+  /* v0.11.5: releasing a playhead on (or close to) a step puts you back in EDITING that step (control points, handles and tools work again).
+     Before this, a scrubbed playhead stayed in preview: the front showed its step shape but without its dots, and edits went to the old step. */
+  function scrubToEdit() {
+    if (S.mode !== 'scrub') return; const sc = S.show && S.show.scenes[S.si]; if (!sc || !MA.isAnimated(sc)) return;
+    const t = S.T - E.starts(S.show)[S.si]; if (t < -0.001 || t > sc.duration + 0.001) return;
+    let best = -1, bd = Infinity; for (let k = 0, n = MA.stepCount(sc); k < n; k++) { const w = MA.stepTimes(sc, k), d = t < w.arrive ? w.arrive - t : t > w.leave ? t - w.leave : 0; if (d < bd) { bd = d; best = k; } }
+    if (best < 0 || bd > 0.75) { toast('Between steps - drag the playhead onto a step (or click a step) to edit it'); return; }
+    S.stepSid = sc.id; S.step = best; S.mode = 'edit'; S.play = null; if (S.oid && !MA.stepObjects(sc, best).some(o => o.id === S.oid)) S.oid = null;
+    updateTransport(); renderStepbar(); renderPanels();
+  }
   function updateTransport() { const tot = E.total(S.show), sc = $('#scrub'); sc.max = tot; const T = S.mode === 'edit' ? E.starts(S.show)[S.si] : S.T; if (document.activeElement !== sc) sc.value = T; $('#tc').textContent = `${T.toFixed(1)} / ${tot.toFixed(1)} s`; if (typeof syncStepbar === 'function') syncStepbar(); }
   $('#scrub').addEventListener('input', e => { S.mode = 'scrub'; S.T = +e.target.value; S.play = null; updateTransport(); });
+  $('#scrub').addEventListener('change', scrubToEdit);
   $('#bPlayScene').onclick = () => { const st = E.starts(S.show)[S.si]; playFrom(st, st + cur().duration); };
   $('#bPlayShow').onclick = () => playFrom(0, E.total(S.show));
   $('#bStop').onclick = stopPlay;
@@ -562,7 +574,7 @@
         h('button', { text: 'Copy object → all steps', title: 'Put the selected object in every step exactly as it is here', on: { click: () => copyToAllSteps(false) } }),
         h('button', { text: 'Remove animation', className: 'dng', title: 'Keep only the selected step as the scene’s graphics', on: { click: animDisable } }),
         sz > SB_WARN ? h('span', { className: 'sbwarn', text: '⚠ animation data ' + kb + ' (cloud limit 8 MB)' }) : h('span', { className: 'mut', text: kb })));
-    const sl = $('#sbScrub'); sl.addEventListener('input', () => { S.mode = 'scrub'; S.play = null; S.T = E.starts(S.show)[S.si] + (+sl.value); updateTransport(); });
+    const sl = $('#sbScrub'); sl.addEventListener('input', () => { S.mode = 'scrub'; S.play = null; S.T = E.starts(S.show)[S.si] + (+sl.value); updateTransport(); }); sl.addEventListener('change', scrubToEdit);
     syncStepbar();
   }
   /* light per-frame sync (no DOM rebuild): playhead + scrub position */
@@ -616,6 +628,7 @@
       // Keep the zoom text synchronized independently of expensive map frames.
       updateZoomBadge();
       if (S.mode === 'edit') {
+        MA.syncAttach(cur().objects, attachMemo);   // v0.11.5: icons / text / H-L attached to a front follow it while you edit
         E.renderScene(sctx, S.show, cur(), clock(),
           {editing:true,camT:editT(),liveMap:true});
         // Keep the active map thumbnail current by copying the FINISHED
@@ -736,9 +749,26 @@
     }
     p.append(h('div', { className: 'h', text: 'Animation' }));
     B2(p, o.anim, 'in', 'select', { label: 'Entrance', options: E.ANIMS }); B2(p, o.anim, 'delay', 'range', { min: 0, max: 20, step: 0.1, label: 'Delay (s)' }); B2(p, o.anim, 'dur', 'range', { min: 0.1, max: 5, step: 0.1, label: 'Duration (s)' });
+    attachPanel(p, o);
     movePanel(p, o);
     if (isMap(cur().bg)) p.append(bind(o, 'geo', 'check', { label: 'Pin to map', after: v => { o.geo = !v; E.setGeo(o, cur(), editT(), v); } }), h('div', { className: 'hint', text: 'Pinned objects move and zoom with the map (position only – sizes stay fixed).' }));
     p.append(h('div', { className: 'h', text: 'Arrange' }), h('div', { className: 'btnrow' }, h('button', { text: 'Bring front', on: { click: () => layer('front') } }), h('button', { text: 'Send back', on: { click: () => layer('back') } }), h('button', { text: 'Duplicate', on: { click: dupObj } }), h('button', { text: 'Delete', className: 'dng', on: { click: delObj } })));
+  }
+  /* v0.11.5: "Follow" - a point-like object (icon, text, H/L ...) rides on another object: it keeps its spot along a front and follows it as the front moves, grows, shrinks or bends */
+  const hasXY = q => q && typeof q.x === 'number' && typeof q.y === 'number' && !q.pts;
+  function objLabel(q) { return q.type === 'front' ? (q.kind || 'front') + ' front' : q.type === 'hl' ? (q.kind === 'L' ? 'Low' : 'High') + (q.value ? ' ' + q.value : '') : q.type === 'text' ? 'Text "' + String(q.text || '').slice(0, 14) + '"' : q.type === 'icon' ? 'Icon ' + (q.icon || '') : q.type + (q.name ? ' ' + q.name : ''); }
+  function attachPanel(p, o) {
+    if (!hasXY(o)) return; const parents = cur().objects.filter(q => q.id !== o.id && (q.pts ? q.pts.length >= 2 : hasXY(q)) && !(q.attach && q.attach.to === o.id));
+    if (!parents.length && !o.attach) return;
+    p.append(h('div', { className: 'h', text: 'Follow (stay with another object)' }));
+    const sel = h('select', { id: 'attachTo' }, h('option', { value: '', text: 'Nothing - stays where I put it' }), ...parents.map(q => h('option', { value: q.id, text: objLabel(q), selected: !!(o.attach && o.attach.to === q.id) })));
+    sel.addEventListener('change', () => { const par = parents.find(q => q.id === sel.value); if (par) { o.attach = MA.makeAttach(par, o); attachMemo.set(o, [o.x, o.y]); } else { delete o.attach; attachMemo.delete(o); } commit(); renderPanels(); });
+    p.append(fld('Follows', sel));
+    if (o.attach) {
+      const par = cur().objects.find(q => q.id === o.attach.to);
+      p.append(h('div', { className: 'hint', text: 'It keeps this spot ' + (par && par.pts ? 'along the line and distance from it' : 'relative to it') + '. Move the ' + (par ? objLabel(par) : 'parent') + ', reshape or lengthen it, or change steps: this follows. Drag it to change its spot.' }));
+      if (par && par.pts) { const al = { v: Math.round(o.attach.u * 100) }; p.append(bind(al, 'v', 'range', { min: 0, max: 100, label: 'Along it (%)', after: v => { o.attach.u = v / 100; } })); }
+    }
   }
   const MLET = i => String.fromCharCode(65 + i);
   function movePanel(p, o) {
