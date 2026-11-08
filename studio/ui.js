@@ -628,7 +628,8 @@
           h('button', { text: '⌂ Default View', title: 'Return to your saved default starting map', on: { click: loadDefaultMap } }),
           h('button', { text: '★ Save Current as Default', title: 'Use the current map and map settings as the starting default', on: { click: saveCurrentMapDefault } })
         ),
-        h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } })),
+        h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } }),
+          g.MB.hasToken() ? h('button', { id: 'mbPauseBtn', text: g.MB.paused ? '▶ Resume Mapbox' : '⏸ Pause Mapbox', className: g.MB.paused ? 'on' : '', title: 'Temporarily stop all Mapbox requests from this browser tab. Editing and other backgrounds keep working.', on: { click: () => { g.MB.setPaused(!g.MB.paused); toast(g.MB.paused ? 'Mapbox paused – no map requests are being made' : 'Mapbox resumed'); refreshAll(); } } }) : null),
         h('div', { className: 'hint', text: b.mbStyle==='broadcast'?'Mouse: left-drag to pan · right-drag to rotate/tilt · wheel to zoom. Live Mapbox navigation uses the fast preview path; WXfusion Weather Director cartography remains active.':'Mouse: left-drag empty map to pan · right-drag to rotate/tilt · wheel to zoom.' })
       ];
       p.append(mapAccordion('basic','Map + Camera',basic,true));
@@ -1531,8 +1532,8 @@
       '<text x="38" y="96" fill="#fff" stroke="#111" stroke-width="2" paint-order="stroke" font-family="Arial" font-size="12" font-weight="bold">NEW YORK</text></svg>';
     const fallback='url("data:image/svg+xml,'+encodeURIComponent(svg)+'") center / cover no-repeat';
     if(isSat&&g.MB.hasToken()){
-      const url='https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/-71.5,42.4,6/280x142@2x?access_token='+encodeURIComponent(g.MB.token());
-      return 'url("'+url+'") center / cover no-repeat, '+fallback;
+      const url=g.MB.satellitePreviewUrl?g.MB.satellitePreviewUrl():null;   // null while Mapbox is paused
+      if(url)return 'url("'+url+'") center / cover no-repeat, '+fallback;
     }
     return fallback;
   }
@@ -1877,6 +1878,7 @@
       reload.textContent = w ? 'Reload anyway (rate-limited)' : 'Reload map tiles';
     };
     reload.addEventListener('click', () => {
+      if (g.MB.paused) { toast('Mapbox is paused – resume it first to reload map tiles'); return; }
       const r = g.MB.reloadTiles();
       if (r < 0) { toast('Reload already in progress – please wait a few seconds'); return; }
       reload.disabled = true; setTimeout(() => { reload.disabled = false; refresh(); }, g.MB.RELOAD_GUARD_MS);
@@ -1889,11 +1891,40 @@
       h('button', { className: 'pri', id: 'mbDiagCopy', text: 'Copy report', on: { click: () => { const t = g.MB.diagnostics(); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Report copied'), () => { const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Press Ctrl+C to copy the selected report'); }); } } })]);
   }
   function mapboxSettings() {
-    const tok = h('input', { type: 'password', value: g.MB.token(), placeholder: 'pk.eyJ1…', style: 'width:100%' }), sc = h('select', {}, [['1', 'Native / sharp (recommended)'], ['1.25', 'Slightly larger labels'], ['1.5', 'Large labels'], ['2', 'Extra large labels']].map(o => h('option', { value: o[0], text: o[1], selected: +o[0] === g.MB.scale })));
-    const body = h('div', {}, h('div', { className: 'hint', text: 'Create a free account at mapbox.com, copy your default public token (it starts with pk.) and paste it here. It is stored only in this browser. Keep the page tab visible while exporting a Mapbox video.' }), fld('Public token', tok), fld('Label size', sc), h('div', { className: 'hint', id: 'mbstat', text: g.MB.status === 'error' ? 'Status: ' + g.MB.err : 'Status: ' + g.MB.status }));
-    modal('Mapbox settings', body, [h('button', { text: 'Close', on: { click: closeModal } }), h('button', { id: 'mbDiag', text: 'Map diagnostics', title: 'Show a report of map tile loading and WebGL that you can copy and send', on: { click: mapDiagnosticsDialog } }), h('button', { className: 'pri', text: 'Save & load map', on: { click: () => { const t = tok.value.trim(); if (t && !/^pk\./.test(t)) { toast('Use a public token that starts with pk.'); return; } g.MB.setToken(t); if (+sc.value !== g.MB.scale) g.MB.setScale(+sc.value); closeModal();
-      if (t && S.show.scenes.some(x => x.bg.type === 'map') && confirm('Switch your existing basic-map scenes to Mapbox?')) S.show.scenes.forEach(x => { if (x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; } });
-      g.MB.init().then(() => toast('Mapbox ready')).catch(e => toast(e.message)).then(() => { commit(); refreshAll(); }); } } })]);
+    const M = g.MB, T = M.tokenInfo(), fromSecrets = T.source === 'Streamlit Secrets' && T.kind === 'public';
+    const tok = fromSecrets ? null : h('input', { type: 'password', value: M.token(), placeholder: 'pk.eyJ1…', style: 'width:100%' });
+    const sc = h('select', {}, [['1', 'Native / sharp (recommended)'], ['1.25', 'Slightly larger labels'], ['1.5', 'Large labels'], ['2', 'Extra large labels']].map(o => h('option', { value: o[0], text: o[1], selected: +o[0] === M.scale })));
+    const where = T.allowedUrl || 'https://YOUR-APP.streamlit.app';
+    const tokenBox = fromSecrets
+      ? h('div', { className: 'hint', id: 'mbTokenSrc', text: `Mapbox token: ${T.masked}, supplied by this app’s Streamlit Secrets – nothing to enter here, and it is not copied into your browser. To change it, edit Secrets in the Streamlit app settings.` + (T.browserTokenIgnored ? ' (A different token saved in this browser is ignored while Secrets supply one.)' : '') })
+      : h('div', {}, h('div', { className: 'hint', text: 'Create a free account at mapbox.com, copy a PUBLIC token (it starts with pk.) and paste it here. Never paste a secret (sk.) token. It is stored only in this browser. Keep the page tab visible while exporting a Mapbox video.' }), fld('Public token', tok));
+    const note = T.note ? h('div', { className: 'hint', id: 'mbTokenNote', style: 'color:#ffc24a', text: '⚠ ' + T.note }) : null;
+    const advice = h('div', { className: 'hint', id: 'mbUrlHint', text: `Safer: use a dedicated public token with “URL restrictions” set to ${where} in your Mapbox account, one token per app (production and test). Tokens are public by design, so restrictions are what keep other sites from using your allowance.` });
+    const usage = h('div', { className: 'hint', id: 'mbUsage' });
+    const pauseBtn = h('button', { id: 'mbPause', on: { click: () => { M.setPaused(!M.paused); toast(M.paused ? 'Mapbox paused – no map requests are being made' : 'Mapbox resumed'); paint(); refreshAll(); } } });
+    const nat = h('input', { type: 'checkbox', id: 'mbNativeProj', checked: M.projectorInfo().mode === 'native', on: { change: () => { M.setProjectorMode(nat.checked ? 'native' : 'math'); paint(); } } });
+    const stat = h('div', { className: 'hint', id: 'mbstat' });
+    function paint() {
+      const U = M.usage(), Q = M.projectorInfo();
+      stat.textContent = M.status === 'error' ? 'Status: ' + M.err : 'Status: ' + M.status + (M.paused ? ' (requests paused)' : '');
+      pauseBtn.textContent = M.paused ? '▶ Resume Mapbox requests' : '⏸ Pause Mapbox requests'; pauseBtn.className = M.paused ? 'on' : '';
+      usage.textContent = `Map loads started – local estimate from this browser only, not Mapbox billing: this page ${U.page.maps} (display ${U.page.display}, helper ${U.page.projector}); this tab ${U.session.maps}; this month ${U.month.maps}. Real usage and alerts: Mapbox account → Statistics / Billing.` + (U.warnings.length ? '\n⚠ ' + U.warnings.join('\n⚠ ') : '') + `\nCoordinates: ${Q.mode === 'native' ? 'native helper map (1 extra map load)' : Q.state === 'ok' ? 'exact maths, verified against Mapbox (no extra map load)' : 'helper map on demand (' + Q.reason + ')'}.`;
+      usage.style.whiteSpace = 'pre-wrap'; usage.style.color = U.warnings.length ? '#ffc24a' : '';
+    }
+    paint();
+    const body = h('div', {}, tokenBox, note, advice, fld('Label size', sc), stat, usage,
+      h('div', { className: 'btnrow' }, pauseBtn),
+      h('div', { className: 'hint', text: 'Pause stops WX Studio from starting Mapbox maps or requesting map snapshots in this tab (also reset when the tab is closed). Editing, other backgrounds, saved shows and already-drawn map frames keep working; exporting a map scene asks you to resume first. It is not a spending limit – set billing alerts in your Mapbox account.' }),
+      h('label', { className: 'hint', style: 'display:flex;gap:6px;align-items:center;margin-top:6px' }, nat, 'Troubleshooting: use a separate helper map for object positions (costs one extra map load per session)'));
+    modal('Mapbox settings', body, [h('button', { text: 'Close', on: { click: closeModal } }), h('button', { id: 'mbDiag', text: 'Map diagnostics', title: 'Show a report of map tile loading and WebGL that you can copy and send', on: { click: mapDiagnosticsDialog } }), h('button', { className: 'pri', text: 'Save & load map', on: { click: () => {
+      const t = tok ? tok.value.trim() : null;
+      if (t && !/^pk\./.test(t)) { toast('Use a public token that starts with pk.'); return; }
+      if (t !== null) M.setToken(t);   // unchanged token / label size: no map is rebuilt (see MB.setToken)
+      if (+sc.value !== M.scale) M.setScale(+sc.value);
+      closeModal();
+      if (M.hasToken() && S.show.scenes.some(x => x.bg.type === 'map') && confirm('Switch your existing basic-map scenes to Mapbox?')) S.show.scenes.forEach(x => { if (x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; } });
+      if (M.paused) { toast('Settings saved. Mapbox is paused – resume it to load the map.'); commit(); refreshAll(); return; }
+      M.init().then(() => toast('Mapbox ready')).catch(e => toast(e.message)).then(() => { commit(); refreshAll(); }); } } })]);
   }
   $('#b7').onclick = sevenDay; $('#bTpl').onclick = templatesDialog;
   /* ---------- video export dialog (v0.10.0): X / Facebook / Custom presets, preflight checklist, file check ---------- */
@@ -1927,7 +1958,7 @@
       const my = ++token, st = settings(); pf.innerHTML = ''; pf.append(h('div', { className: 'hint', text: 'Checking…' })); go.disabled = true;
       let items; try { const tg = target(); tot = E.total(tg.show); items = X.preflightItems(await X.gatherFacts(tg.show, st, tg.a), st, tot); } catch (e) { items = [{ level: 'warn', text: 'Could not run the checks: ' + (e && e.message || e) }]; }
       if (my !== token) return; cur = items; pf.innerHTML = '';
-      items.forEach(it => pf.append(h('div', { style: 'display:flex;gap:8px;margin:3px 0;font-size:13px;line-height:1.35' }, h('span', { text: ICON[it.level][0], style: 'color:' + ICON[it.level][1] + ';font-weight:700;width:14px;flex:none' }), h('span', { text: it.text }))));
+      items.forEach(it => pf.append(h('div', { style: 'display:flex;gap:8px;margin:3px 0;font-size:13px;line-height:1.35' }, h('span', { text: ICON[it.level][0], style: 'color:' + ICON[it.level][1] + ';font-weight:700;width:14px;flex:none' }), h('span', { text: it.text }), it.action === 'resumeMapbox' ? h('button', { id: 'mbResumeExport', text: 'Resume Mapbox', style: 'margin-left:auto;flex:none', on: { click: () => { g.MB.setPaused(false); toast('Mapbox resumed'); refreshChecks(); refreshAll(); } } }) : null)));
       go.disabled = busy || !X.canExport(items);
       if (!X.canExport(items) && items.some(i => /H\.264|encode MP4/.test(i.text) && i.level === 'error')) offerWebM();
     }

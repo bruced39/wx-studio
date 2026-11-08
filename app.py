@@ -4,6 +4,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import json
 
+from mapbox_token import TokenChoice, pick_token
 from wxbuild import build_html
 
 st.set_page_config(page_title="WX Studio", page_icon="🌦️", layout="wide", initial_sidebar_state="collapsed")
@@ -15,7 +16,7 @@ st.markdown(
 with st.sidebar:
     st.header("WX Studio")
     height = st.slider("Studio height (px)", 700, 1400, 940, 20)
-    st.caption("Mapbox: uses MAPBOX_PUBLIC_TOKEN (WXfusion) or MAPBOX_TOKEN from Streamlit secrets; you can also paste a public token inside the studio.")
+    st.caption("Mapbox: uses MAPBOX_PUBLIC_TOKEN (or MAPBOX_TOKEN, or a per-host MAPBOX_PUBLIC_TOKENS_BY_HOST table) from Streamlit secrets; public pk. tokens only. You can also paste a public token inside the studio.")
     st.caption("Tip: use Chrome or Edge. MP4 export uses your browser's H.264 encoder.")
     # Browser-side loopback access: NOAA processing stays on this Windows PC.
     # No cloud processor, paid hosting, public tunnel, or remote API key.
@@ -36,21 +37,31 @@ def _html() -> str:
     return build_html()
 
 
-def _token() -> str:
+def _request_host() -> str:
+    # Streamlit >= 1.37 exposes request headers; older versions simply have no host.
     try:
-        for key in ("MAPBOX_PUBLIC_TOKEN", "MAPBOX_TOKEN"):
-            value = str(st.secrets.get(key, "")).strip()
-            if value.startswith("pk."):
-                return value
-        return ""
+        return str(st.context.headers.get("Host", "") or "")
     except Exception:
         return ""
 
 
-_tok = _token()
+def _token_choice() -> TokenChoice:
+    # Public (pk.) tokens only; see mapbox_token.py for the supported secret names.
+    try:
+        return pick_token(st.secrets, _request_host())
+    except Exception:
+        return TokenChoice("", "", [])
+
+
+_choice = _token_choice()
+_tok = _choice.token
 _inject = ""
 if _tok.startswith("pk."):
-    _inject += "<script>window.WX_MAPBOX_TOKEN=" + json.dumps(_tok) + ";</script>"
+    _inject += "<script>window.WX_MAPBOX_TOKEN=" + json.dumps(_tok).replace("<", "\\u003c") + ";</script>"
+if _choice.rejected:
+    # Key NAMES only, never values. Shown in Mapbox settings so the mistake is easy to fix.
+    _note = "Ignored non-public Mapbox token in Secrets: " + ", ".join(_choice.rejected) + ". Use a public token that starts with pk."
+    _inject += "<script>window.WX_MAPBOX_TOKEN_NOTE=" + json.dumps(_note).replace("<", "\\u003c") + ";</script>"
 
 # Publishable Supabase keys are intended for browser usage. Never send a
 # service-role or secret key to the iframe, and do not bake API keys into Git.

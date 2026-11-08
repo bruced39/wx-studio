@@ -39,6 +39,7 @@
     else out.push({ level: 'ok', text: `H.264 encoder available (${f.h264}).` });
     if (f.mapboxScenes && f.mapboxScenes.length) {
       if (!f.mapboxToken) out.push({ level: 'error', text: `Scene${f.mapboxScenes.length > 1 ? 's' : ''} ${nums(f.mapboxScenes)} use${f.mapboxScenes.length > 1 ? '' : 's'} a Mapbox map but no Mapbox token is set (Scene → Mapbox settings).` });
+      else if (f.mapboxPaused) out.push({ level: 'error', action: 'resumeMapbox', text: `Mapbox requests are paused, so map scene${f.mapboxScenes.length > 1 ? 's' : ''} ${nums(f.mapboxScenes)} cannot be rendered. Resume Mapbox, then export. (Editing and other scenes are not affected.)` });
       else out.push({ level: 'info', text: `Map scenes (${nums(f.mapboxScenes)}) render slowly. Keep this tab visible while exporting.` });
     }
     (f.weather || []).forEach(w => {
@@ -61,7 +62,7 @@
   /* Browser: collect the facts for X.preflightItems. */
   X.gatherFacts = async function (show, st, off) {
     off = off || 0;     // v0.10.1.5: when only some scenes are exported, report their numbers as in the full show
-    const E = g.Engine, f = { webcodecs: X.supportsWebCodecs(), h264: null, mapboxScenes: [], mapboxToken: !!(g.MB && g.MB.hasToken && g.MB.hasToken()), missing: [] };
+    const E = g.Engine, f = { webcodecs: X.supportsWebCodecs(), h264: null, mapboxScenes: [], mapboxToken: !!(g.MB && g.MB.hasToken && g.MB.hasToken()), mapboxPaused: !!(g.MB && g.MB.paused), missing: [] };
     if (f.webcodecs) f.h264 = await X.pickCodec(st.width, st.height, st.fps, st.bitrate);
     const assets = show.assets || {};
     show.scenes.forEach((sc, i) => {
@@ -132,15 +133,17 @@
     });
     const cfg = { codec, width: W, height: H, bitrate, framerate: fps, latencyMode: 'quality' }; if (codec.startsWith('avc')) cfg.avc = { format: 'avc' };
     enc.configure(cfg);
+    try {   // v0.10.3.5: any failure (incomplete map imagery, pause, encoder error, cancel) releases the encoder - nothing stays open for the next attempt
     for (let i = 0; i < N; i++) {
       if (err) throw err; if (o.signal && o.signal.aborted) { enc.close(); throw new Error('cancelled'); }
-      await E.prepareFrame(show, i / fps); E.renderShow(c, show, i / fps, { editing: false }); if (oc) oc.drawImage(cv, 0, 0, W, H);
+      await E.prepareFrame(show, i / fps, { strict: true }); E.renderShow(c, show, i / fps, { editing: false }); if (oc) oc.drawImage(cv, 0, 0, W, H);
       const frame = mkFrame(Math.round(i * 1e6 / fps), Math.round(1e6 / fps));
       enc.encode(frame, { keyFrame: i % (fps * 2) === 0 }); frame.close();
       while (enc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 1));
       if (i % 6 === 0) { if (o.onProgress) o.onProgress((i + 1) / N); await new Promise(r => setTimeout(r, 0)); }
     }
     await enc.flush(); enc.close(); if (err) throw err; if (o.onProgress) o.onProgress(1);
+    } catch (e) { try { if (enc.state !== 'closed') enc.close(); } catch (e2) { /* already closed */ } throw e; }
     return { frames: N, fps, color: colorMode };
   };
 
@@ -149,7 +152,10 @@
     else if (g.WDMap && g.WDMap.status === 'loading') { for (let i = 0; i < 100 && g.WDMap.status === 'loading'; i++) await new Promise(r => setTimeout(r, 100)); }
     if (g.WDMap && g.WDMap.countyStatus === 'loading') { for (let i = 0; i < 100 && g.WDMap.countyStatus === 'loading'; i++) await new Promise(r => setTimeout(r, 100)); }
     if (g.WDMap && g.WDMap.placesStatus === 'loading') { for (let i = 0; i < 100 && g.WDMap.placesStatus === 'loading'; i++) await new Promise(r => setTimeout(r, 100)); }
-    if (g.MB && show.scenes.some(s => s.bg.type === 'mapbox')) await g.MB.init();
+    if (g.MB && show.scenes.some(s => s.bg.type === 'mapbox')) {
+      if (g.MB.paused) throw new Error('Mapbox requests are paused. Resume Mapbox in Scene → Mapbox settings, then export again.');
+      await g.MB.init();
+    }
     await g.Engine.preload(show);
     if (document.fonts && document.fonts.ready) { try { await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 1500))]); } catch (e) { /* ignore */ } }
   }

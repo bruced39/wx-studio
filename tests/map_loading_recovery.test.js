@@ -63,16 +63,16 @@ test('startup waits for actual base map, not projector, and style has deadline',
   assert.match(map,/await withTimeout\(once\(D,'load'\),25000/);
   assert.doesNotMatch(map,/Promise\.all\(\[once\(D, 'load'\),once\(P, 'load'\)\]\)/);
   assert.match(map,/await withTimeout\(once\(D,'style\.load'\),12000/);
-  assert.match(map,/await withTimeout\(setup\(bg\),17000/);
+  assert.match(map,/await withTimeout\(setup\(bg(,generation)?\),17000/);
   assert.match(map,/if\(MB\.status==='error'\)return Promise\.reject/);
-  assert.match(map,/if \(busy \|\| !want \|\| MB\.interacting \|\| MB\.status==='error'\) return/);
+  assert.match(map,/if \(busy \|\| !want \|\| MB\.interacting \|\| MB\.status==='error'( \|\| MB\.paused)?\) return/);   // v0.10.3 adds the pause guard
 });
 test('failed snapshot latches the error and prevents automatic WebGL retries',async()=>{
-  const source=block('  MB.snap = function(bg,cam){','\n\n  /* Live editor preview');
+  const source=block('  MB.snap = function(bg,cam,opts){','\n\n  /* Live editor preview');
   const MB={status:'ready',err:'',cache:new Map(),queue:Promise.resolve()};
   let attempts=0;
-  const snap=new Function('MB','keyOf','cloneBg','doSnap','console','cachedFrame',
-    source+';return MB.snap;')(MB,()=>'key',x=>x,
+  const snap=new Function('MB','keyOf','cloneBg','doSnap','console','strictHit',
+    'let renderGeneration=0;'+source+';return MB.snap;')(MB,()=>'key',x=>x,
       async()=>{attempts++;throw Error('render failure')},{warn(){}},k=>MB.cache.get(k)||null);
   await assert.rejects(snap({},{}),/render failure/);
   assert.equal(MB.status,'error');assert.equal(MB.err,'render failure');
@@ -104,6 +104,7 @@ test('Mapbox reset clears projector state even when optional P is unavailable',(
   const simulate="'use strict';\n"+decl+"\n"+previewDecl+
     "\nconst incompleteFrames=new Map(),tileRetry={n:3,optional:1,timer:null,epoch:0},DIAG={throttle:{level:2,until:5}};"+
     "function invalidateTileRetry(){tileRetry.epoch++;tileRetry.n=0;tileRetry.optional=0;if(tileRetry.timer){clearTimeout(tileRetry.timer);tileRetry.timer=null;}}"+
+    "\nconst USAGE={page:{resets:0}},PT={state:'ok',rot:true,rotTried:true,rotReason:'x',reason:'x'};let pEl=null,usedToken='tok';"+   // v0.10.3 usage/projector state
     "\nconst MB={interacting:true,cache:{clear(){this.cleared=true}},last:'previous',"+
     "lastKey:'old frame',status:'ready',err:'previous error',queue:Promise.resolve()};"+
     "pProj='globe';pKey='camera';curProj='globe';"+
@@ -111,7 +112,7 @@ test('Mapbox reset clears projector state even when optional P is unavailable',(
     "previewRestorePending=true;previewRestoreKey='old camera';"+
     "D={remove(){this.removed=true}};P=null;host={remove(){this.removed=true}};\n"+
     reset+"\nMB.reset();return {pProj,pKey,curProj,D,P,host,initP,MB,renderGeneration,"+
-    "snapshotBusy,previewHold,previewRestorePending,previewRestoreKey};";
+    "snapshotBusy,previewHold,previewRestorePending,previewRestoreKey,USAGE,PT,usedToken};";
   const result=new Function(simulate)();
   assert.equal(result.pProj,null);
   assert.equal(result.pKey,null);
@@ -123,6 +124,8 @@ test('Mapbox reset clears projector state even when optional P is unavailable',(
   assert.equal(result.previewRestorePending,false);
   assert.equal(result.previewRestoreKey,null);
   assert.equal(result.MB.lastKey,null);
+  assert.equal(result.USAGE.page.resets,1,'a reset of a live map is counted');
+  assert.equal(result.PT.state,'untested');assert.equal(result.usedToken,null);
   assert.equal(result.MB.status,'idle');
   assert.equal(result.MB.err,'');
   assert.equal(result.renderGeneration,1);
