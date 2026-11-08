@@ -163,17 +163,58 @@
     try{cv.getContext('2d').drawImage(stage,0,0,cv.width,cv.height);return true;}
     catch(e){return false;}
   }
-  function drawThumb(i) {
-    const sc=S.show.scenes[i],cv=document.querySelector(`.sc[data-i="${i}"] canvas`);
-    if(!cv)return;
-    if(i===S.si&&sc.bg.type==='mapbox'&&copyActiveMapThumb())return;
-    try{
-      E.renderScene(tbc,S.show,sc,Math.min(2.5,sc.duration),
-        {editing:true,camT:0,thumb:true});
-      cv.getContext('2d').drawImage(tb,0,0,cv.width,cv.height);
-    }catch(e){/* Thumbnail failure cannot disrupt editor. */}
+  /* v0.10.4 thumbnail pipeline.
+     Each scene card keeps a cached 192x108 thumbnail keyed by a signature of the scene (+ show-level
+     settings + an "epoch" bumped by anything external that changes pixels: assets, fonts, map data).
+     A scene click no longer re-renders anything; edits re-render only the scenes whose signature
+     changed, one scene per idle slice, active scene first. thumbSoon(true) still means "everything
+     may have changed" (epoch bump) so every existing caller keeps its meaning. */
+  const thumbCache = new Map(); let thumbEpoch = 0, thumbPend = -1, thumbRun = 0; const THUMB_TTL = 90000;
+  const thumbStats = { renders: 0, cacheHits: 0, slices: 0 };
+  const tkey = (sc, i) => sc.id != null ? String(sc.id) : 'i' + i;
+  function showSigStr() { const s = S.show; return JSON.stringify(Object.assign({}, s, { scenes: 0, assets: 0, name: 0 })); }
+  function thumbSig(sc, ss) { return thumbEpoch + '|' + ss + '|' + JSON.stringify(sc); }
+  function paintCached(cv, ent) { try { const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); c.drawImage(ent.cv, 0, 0); } catch (e) { /* ignore */ } }
+  function thumbFresh(sc, ent, ss) { return !!ent && ent.sig === thumbSig(sc, ss) && Date.now() - ent.t < THUMB_TTL; }
+  function drawThumb(i, force, ss) {
+    const sc = S.show.scenes[i], cv = document.querySelector(`.sc[data-i="${i}"] canvas`);
+    if (!cv) return false;
+    if (i === S.si && sc.bg.type === 'mapbox' && copyActiveMapThumb()) return true;
+    if (ss == null) ss = showSigStr();
+    const ent = thumbCache.get(tkey(sc, i));
+    if (!force && thumbFresh(sc, ent, ss)) { thumbStats.cacheHits++; paintCached(cv, ent); return false; }
+    try {
+      const sig = thumbSig(sc, ss);
+      E.renderScene(tbc, S.show, sc, Math.min(2.5, sc.duration),
+        { editing: true, camT: 0, thumb: true });
+      const c = cv.getContext('2d'); c.drawImage(tb, 0, 0, cv.width, cv.height); thumbStats.renders++;
+      // A map thumbnail is only trusted once its real frame existed; otherwise it is retried next pass.
+      const trust = sc.bg.type !== 'mapbox' || (g.MB.hasFrame && g.MB.hasFrame(sc.bg, E.viewAt(sc, 0)));
+      if (trust) { let e2 = ent && ent.cv; if (!e2) { e2 = document.createElement('canvas'); e2.width = cv.width; e2.height = cv.height; } e2.getContext('2d').clearRect(0, 0, e2.width, e2.height); e2.getContext('2d').drawImage(cv, 0, 0); thumbCache.set(tkey(sc, i), { sig, t: Date.now(), cv: e2 }); }
+      else thumbCache.delete(tkey(sc, i));
+    } catch (e) { /* Thumbnail failure cannot disrupt editor. */ }
+    return true;
   }
-  function thumbSoon(all) { clearTimeout(tk); tk = setTimeout(() => { if (all) S.show.scenes.forEach((_, i) => drawThumb(i)); else drawThumb(S.si); }, 450); }
+  /* level: -1 none, 0 active scene only, 1 every scene whose cached thumbnail is stale */
+  function thumbSoon(all) {
+    if (all === true) { thumbEpoch++; thumbPend = Math.max(thumbPend, 1); }
+    else if (all === 'dirty') thumbPend = Math.max(thumbPend, 1);
+    else thumbPend = Math.max(thumbPend, 0);
+    clearTimeout(tk); const run = ++thumbRun;
+    tk = setTimeout(() => {
+      const lvl = thumbPend; thumbPend = -1; if (run !== thumbRun || !S.show) return;
+      if (lvl === 0) { drawThumb(S.si, false); return; }
+      const ss = showSigStr(), n = S.show.scenes.length, order = [S.si]; const live = new Set(S.show.scenes.map(tkey)); thumbCache.forEach((_, k) => { if (!live.has(k)) thumbCache.delete(k); }); for (let d = 1; d < n; d++) { if (S.si + d < n) order.push(S.si + d); if (S.si - d >= 0) order.push(S.si - d); }
+      const step = () => {
+        if (run !== thumbRun || !S.show) return;
+        let did = false;
+        while (order.length && !did) { const i = order.shift(), sc = S.show.scenes[i]; if (!sc) continue; did = drawThumb(i, false, ss) === true; }
+        thumbStats.slices++;
+        if (order.length) setTimeout(step, 0);
+      };
+      step();
+    }, 450);
+  }
   E.onAsset = () => thumbSoon(true);
 
   /* ---------- objects ---------- */
@@ -432,8 +473,21 @@
 
   /* ---------- render loop ---------- */
   let last = 0,lastActiveMapThumbPaint=0;
+  /* v0.10.4 editor-loop pacing. The editor repaints continuously (icons/fronts animate even while you
+     are not touching anything). On a slow canvas/GPU one repaint can take 100+ ms, and a click that
+     lands behind it feels like lag. So: (1) while the user is idle, never spend more than ~1/3 of the
+     main thread on repainting (interval >= 3x the last repaint cost, capped at 600 ms); full rate
+     returns on any pointer/key/wheel input and during drawing, dragging and map interaction;
+     (2) if the browser reports pending input, skip this repaint so the click is handled first.
+     Playback/present are unchanged. */
+  const loopStats = { frames: 0, skippedInput: 0, lastCost: 0, throttled: 0 }; let lastInputAt = 0;
+  ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'].forEach(ev => window.addEventListener(ev, () => { lastInputAt = performance.now(); }, { capture: true, passive: true }));
   function loop(ts) {
-    requestAnimationFrame(loop); const liveMapScene=cur&&cur().bg&&cur().bg.type==='mapbox'; const frameMs=(liveMapScene&&(g.MB.interacting||S.mode!=='edit'))?15:30; if (ts - last < frameMs) return; last = ts;
+    requestAnimationFrame(loop); const liveMapScene=cur&&cur().bg&&cur().bg.type==='mapbox'; let frameMs=(liveMapScene&&(g.MB.interacting||S.mode!=='edit'))?15:30;
+    if (S.mode === 'edit' && !S.draft && !g.MB.interacting && performance.now() - lastInputAt > 1500 && loopStats.lastCost * 3 > frameMs) { frameMs = Math.min(600, loopStats.lastCost * 3); loopStats.throttled++; }
+    if (ts - last < frameMs) return;
+    if (S.mode === 'edit') { try { const sc = navigator.scheduling; if (sc && sc.isInputPending && sc.isInputPending()) { loopStats.skippedInput++; return; } } catch (e) { /* ignore */ } }
+    last = ts; const t0 = performance.now();
     try {
       // Keep the zoom text synchronized independently of expensive map frames.
       updateZoomBadge();
@@ -453,6 +507,7 @@
         E.renderShow(sctx, S.show, S.T, { liveMap: true }); octx.clearRect(0, 0, W, H); updateTransport();
       }
     } catch (err) { console.error(err); reportDrawErr(err); try { drawOverlay(); } catch (e2) { /* ignore */ } }
+    loopStats.frames++; loopStats.lastCost = performance.now() - t0;
   }
   let lastDrawErr = '';
   function reportDrawErr(err) { const m = String(err && err.message || err); if (m !== lastDrawErr) { lastDrawErr = m; toast('Drawing error: ' + m.slice(0, 140)); } }
@@ -1753,15 +1808,23 @@
     const l = $('#sceneList'); l.innerHTML = '';
     S.show.scenes.forEach((sc, i) => {
       const cv = h('canvas', { width: 192, height: 108 });
-      const card = h('div', { className: 'sc' + (i === S.si ? ' on' : ''), 'data-i': i, on: { click: () => { backToEdit(); S.si = i; S.oid = null; S.editEnd = false; refreshAll(); } } }, cv,
+      const card = h('div', { className: 'sc' + (i === S.si ? ' on' : ''), 'data-i': i, on: { click: () => selectScene(i) } }, cv,
         h('div', { className: 'nm' }, h('span', { text: (i + 1) + '. ' + sc.name }), h('span', { className: 'meta', text: sc.duration + 's' })),
         h('div', { className: 'meta', text: i ? (E.TRANSITIONS.find(t => t[0] === sc.transition.type) || [0, ''])[1] : 'Start' }),
         h('div', { className: 'acts' },
           h('button', { className: 'sm', text: '↑', on: { click: ev => { ev.stopPropagation(); mv(i, -1); } } }), h('button', { className: 'sm', text: '↓', on: { click: ev => { ev.stopPropagation(); mv(i, 1); } } }),
           h('button', { className: 'sm', text: '⧉', on: { click: ev => { ev.stopPropagation(); const c = JSON.parse(JSON.stringify(sc)); c.id = 's' + Date.now().toString(36); c.name += ' copy'; S.show.scenes.splice(i + 1, 0, c); S.si = i + 1; commit(); refreshAll(); } } }),
           h('button', { className: 'sm dng', text: '✕', on: { click: ev => { ev.stopPropagation(); if (S.show.scenes.length < 2) return toast('A show needs at least one scene'); S.show.scenes.splice(i, 1); S.si = clamp(S.si, 0, S.show.scenes.length - 1); commit(); refreshAll(); } } })));
-      l.append(card);
-    }); thumbSoon(true);
+      l.append(card); const ent = thumbCache.get(tkey(sc, i)); if (ent) paintCached(cv, ent);
+    }); thumbSoon('dirty');
+  }
+  /* v0.10.4: switching scenes only moves the highlight and refreshes the panels - no card/canvas rebuild, no thumbnail re-render. */
+  function selectScene(i) {
+    backToEdit(); S.si = i; S.oid = null; S.editEnd = false;
+    document.querySelectorAll('#sceneList .sc').forEach(c => c.classList.toggle('on', Number(c.dataset.i) === i));
+    renderPanels(); updateTransport(); const fk = $('#frontKind'); if (fk) fk.value = S.opt.front;
+    lastInputAt = performance.now(); last = 0;   // repaint the new scene on the very next frame, even from a throttled idle state
+    thumbSoon();
   }
   function mv(i, d) { const j = i + d, a = S.show.scenes; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; S.si = j; commit(); refreshAll(); }
   function refreshAll() { $('#showName').value = S.show.name; renderSceneList(); renderPanels(); updateTransport(); const fk = $('#frontKind'); if (fk) fk.value = S.opt.front; }
@@ -2211,7 +2274,7 @@
   function loadCloudShow(sh, o) {
     loadShow(sh, { keepCustom: true }); const id = o && o.sceneId; if (id != null) { const i = S.show.scenes.findIndex(x => String(x.id) === String(id)); if (i > 0) { S.si = i; S.oid = null; refreshAll(); } }
   }
-  g.WX = { S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog,
+  g.WX = { perf: { thumbStats, thumbCacheSize: () => thumbCache.size, loop: loopStats }, S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog,
     cloud: { hooks: HK, changeSeq: () => chgSeq, ns: () => NS, setNamespace, hasRealLocalWork, legacyInfo, claimLegacy, clearAccountData, keepLocalCopy, loadCloudShow, builtinAssets: builtinBGs, sceneId: () => (S.show.scenes[S.si] || {}).id, renameShow: n => { S.show.name = n; commit(); }, recentDialog, modal, closeModal, notice, toast, h, fmtMB, recentSnap, videos: () => E.videos } };
   boot();
 })(window);

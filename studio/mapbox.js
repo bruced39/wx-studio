@@ -2173,6 +2173,8 @@
     want={bg:cloneBg(bg),cam:norm(cam)};pump();
     return MB.lastKey===key?MB.last:null;
   };
+  /* v0.10.4: pure peek - is a finished snapshot for exactly this camera cached? (no request is made) */
+  MB.hasFrame=function(bg,cam){try{return !!cachedFrame(keyOf(bg,cam));}catch(e){return false;}};
   MB.frame=function(bg,cam){
     const key=keyOf(bg,cam),cached=cachedFrame(key);
     if(cached)return cached;

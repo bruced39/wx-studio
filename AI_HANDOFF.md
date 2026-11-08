@@ -3,6 +3,20 @@
 > Shared project continuity for ChatGPT and Claude. Update this file whenever code changes.
 > Never assume this snapshot is the latest: read `main`, `VERSION`, recent commits, and relevant source files before editing.
 
+## v0.10.4 — Performance review: scene switching, thumbnails, editor loop (2026-11-04; FEATURE BRANCH `claude/v0.10.4-performance`, stacked on the usage branch, NOT merged, NOT in production)
+
+- **Why:** user noticed a slight delay when clicking between scenes; wants performance verified before heavier map animation. Full review in `docs/PERFORMANCE_REVIEW.md` (baseline, bottlenecks, results, Chrome/Firefox profiling steps).
+- **Root cause:** a scene click ran `refreshAll` (rebuilt all cards/canvases) and `thumbSoon(true)` (re-rendered every scene at 1920x1080 ~450 ms later: ~2.5 s of main thread in the sandbox); the idle editor repainted the whole stage every ~30 ms (86-99 % busy in the sandbox). Stage render cost itself is canvas raster work (drawImage/shadow), not JS.
+- **Changes (Claude-owned files only):** `studio/ui.js` (new `selectScene`; thumbnail cache keyed by scene signature + epoch, sliced dirty refresh, TTL, pruning; idle loop pacing + `isInputPending`; `WX.perf` stats), `studio/mapbox.js` (`MB.hasFrame`, pure peek), tests + `tests/perf/` harness, docs, `VERSION` 0.10.3.2 -> 0.10.4.
+- **Contract for future code:** anything that changes pixels asynchronously (assets, fonts, map data, weather data) must call `thumbSoon(true)`; changes to the scene object are detected automatically. Scene switching must not rebuild the scene list or render thumbnails.
+- **Unchanged:** rendering output, export pipeline/timing (900/900 frames, no dup/gap before and after), Mapbox pause/projector/tile recovery, cloud sync, show files. **ChatGPT-owned files touched: NONE.**
+- **0.10.4.1:** merged the usage branch's v0.10.3.3 (doSnap generation-before-init fix) into this branch; no performance code changed.
+- **0.10.4.2:** merged the usage branch's v0.10.3.4 (interrupted map export now fails instead of finishing with a wrong frame); no performance code changed.
+- **0.10.4.3:** merged the usage branch's v0.10.3.5 (strict MP4 export validation); no performance code changed. Export render cost is unchanged (the strict check only adds a tile-health read per map frame).
+- **0.10.4.4:** merged the usage branch's v0.10.3.6 (rejected strict export frames never cached; unverifiable coverage fails an export); no performance code changed.
+- **Tests:** `tests/perf_scene_switch.test.js` (7), `tests/browser/perf_scene_switch_check.py` (21), full regression green (see report).
+- **Not verifiable in the sandbox:** Firefox, real GPU timing, real Mapbox tiles. Profiling instructions are in the doc.
+
 ## v0.10.3 — Mapbox usage safeguards (2026-11-02; FEATURE BRANCH `claude/v0.10.3-mapbox-usage-safeguards`, NOT merged, NOT in production)
 
 - **Why:** the account is moving to Mapbox pay-as-you-go so satellite works again; goal is to stay inside the free allowance (GL JS 50,000 map loads/month, Raster Tiles 750,000, no hard spending cap). Full audit, token guide and billing notes: `docs/MAPBOX_USAGE_AND_TOKENS.md`.
