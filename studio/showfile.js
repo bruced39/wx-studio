@@ -91,9 +91,11 @@
   const safeId = id => String(id).replace(/[^\w\-]+/g, '_').slice(0, 80) || 'media';
   const extOf = (name, mime, kind) => { if (kind === 'gif') return '.gif'; const m = String(mime || '').toLowerCase(); if (/mp4/.test(m)) return '.mp4'; if (/webm/.test(m)) return '.webm'; if (/quicktime/.test(m)) return '.mov'; if (/mpeg|mp3/.test(m)) return '.mp3'; if (/wav/.test(m)) return '.wav'; if (/ogg/.test(m)) return '.ogg'; if (/aac|m4a/.test(m)) return '.m4a'; const x = /\.(mp4|m4v|mov|webm|mp3|wav|ogg|m4a|aac)$/i.exec(name || ''); return x ? x[0].toLowerCase() : '.bin'; };
   const MEDIA_FIELDS = ['vid', 'audio'];   // scene.bg.vid today; objects may reference media too (v0.12)
+  /* objects of a scene including every map-animation step (v0.11.0) */
+  const objectsOfScene = sc => { const out = (sc.objects || []).slice(); if (sc.anim && Array.isArray(sc.anim.steps)) sc.anim.steps.forEach(st => (st && st.objects || []).forEach(o => out.push(o))); return out; };
   function mediaRefs(show) {
     const map = new Map(), add = (id, scene) => { if (!id || typeof id !== 'string') return; if (!map.has(id)) map.set(id, []); const a = map.get(id); if (scene && !a.includes(scene)) a.push(scene); };
-    (show.scenes || []).forEach((sc, i) => { const nm = sc.name || ('Scene ' + (i + 1)); const bg = sc.bg || {}; MEDIA_FIELDS.forEach(f => add(bg[f], nm)); (sc.objects || []).forEach(o => MEDIA_FIELDS.forEach(f => add(o && o[f], nm))); });
+    (show.scenes || []).forEach((sc, i) => { const nm = sc.name || ('Scene ' + (i + 1)); const bg = sc.bg || {}; MEDIA_FIELDS.forEach(f => add(bg[f], nm)); objectsOfScene(sc).forEach(o => MEDIA_FIELDS.forEach(f => add(o && o[f], nm))); });
     return map;
   }
   /* What this show needs vs. what this browser has. `videos` is the engine's E.videos registry. */
