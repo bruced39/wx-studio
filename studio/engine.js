@@ -510,7 +510,8 @@
       const cam=E.viewAt(scene,ct), fr=(opts&&opts.liveMap&&g.MB.liveFrame)?g.MB.liveFrame(b,cam):g.MB.frame(b,cam);
       if (fr) c.drawImage(fr, 0, 0, W, H); else { c.fillStyle = '#0b1a2e'; c.fillRect(0, 0, W, H); }
       c.save(); c.font = `600 26px ${SANS}`; c.textAlign = 'center';
-      if (!fr || g.MB.status !== 'ready') { c.fillStyle = g.MB.status === 'error' || !g.MB.hasToken() ? '#ffb4a8' : 'rgba(255,255,255,0.6)'; c.fillText(g.MB.status === 'error' ? 'Mapbox: ' + g.MB.err : (!g.MB.hasToken() ? 'Add your Mapbox token: Scene panel → Mapbox settings' : 'Loading Mapbox map…'), W / 2, H / 2); }
+      if (!fr && g.MB.paused) { c.fillStyle = '#ffd9a0'; c.fillText('Mapbox is paused – no map requests are being made. Resume: Scene panel → Mapbox settings', W / 2, H / 2); }
+      else if (!fr || g.MB.status !== 'ready') { c.fillStyle = g.MB.status === 'error' || !g.MB.hasToken() ? '#ffb4a8' : 'rgba(255,255,255,0.6)'; c.fillText(g.MB.status === 'error' ? 'Mapbox: ' + g.MB.err : (!g.MB.hasToken() ? 'Add your Mapbox token: Scene panel → Mapbox settings' : 'Loading Mapbox map…'), W / 2, H / 2); }
       c.textAlign = 'left'; c.font = `500 15px ${SANS}`; c.fillStyle = 'rgba(255,255,255,0.78)'; c.shadowColor = 'rgba(0,0,0,0.7)'; c.shadowBlur = 4; c.fillText('© Mapbox  © OpenStreetMap contributors', 14, H - 12); c.restore();
     } else if (b.type === 'map') {
       g.WDMap.draw(c, E.viewAt(scene, ct), b.theme, { W, H, cities: b.cities !== false, counties: b.counties !== false, density: b.cityDensity || 1 });
@@ -706,7 +707,7 @@
     c.restore();
   }
   /* export helper: make sure every Mapbox frame needed at show time T is rendered before the synchronous draw */
-  E.prepareFrame = async function (show, T) {
+  E.prepareFrame = async function (show, T, opts) {   // opts.strict (MP4 export only): every Mapbox snapshot must be COMPLETE or this throws
     const hasMb = g.MB && show.scenes.some(s => s.bg.type === 'mapbox'), hasVid = show.scenes.some(s => s.bg.type === 'video'), hasData = !!g.WXData && show.scenes.some(s => s.dataLoop && s.dataLoop.on);
     if (!hasMb && !hasVid && !hasData) return;
     const st = E.starts(show), tot = E.total(show); T = clamp(T, 0, Math.max(0, tot - 0.0001));
@@ -719,7 +720,13 @@
       // data was pasted ON TOP of text during export.
       if (hasData && s.dataLoop && s.dataLoop.on) await g.WXData.ensure(s);
       if (g.WXData?.useMapboxUnderlay)g.WXData.useMapboxUnderlay(s,tt,{editing:false});
-      if (hasMb && s.bg.type === 'mapbox') await g.MB.snap(s.bg, E.viewAt(s, tt));
+      if (hasMb && s.bg.type === 'mapbox') {
+        const strict = !!(opts && opts.strict), where = `Map scene "${s.name || 'Untitled'}" at ${T.toFixed(1)} s`;
+        let cv;
+        try { cv = await g.MB.snap(s.bg, E.viewAt(s, tt), strict ? { strict: true } : undefined); }
+        catch (e) { if (strict && e && e.mbExport) { const x = new Error(`${where}: ${e.message}`); x.code = e.code; x.mbExport = true; x.health = e.health; throw x; } throw e; }
+        if (strict && !cv) { const x = new Error(`${where}: Mapbox did not return an image for this view (the map was busy). Export again without touching the map.`); x.code = 'no-frame'; x.mbExport = true; throw x; }
+      }
       if (s.bg.type === 'video') await E.seekVideo(s.bg, tt);
     }
   };

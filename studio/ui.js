@@ -174,17 +174,58 @@
     try{cv.getContext('2d').drawImage(stage,0,0,cv.width,cv.height);return true;}
     catch(e){return false;}
   }
-  function drawThumb(i) {
-    const sc=S.show.scenes[i],cv=document.querySelector(`.sc[data-i="${i}"] canvas`);
-    if(!cv)return;
-    if(i===S.si&&sc.bg.type==='mapbox'&&copyActiveMapThumb())return;
-    try{
-      E.renderScene(tbc,S.show,sc,Math.min(2.5,sc.duration),
-        {editing:true,camT:0,thumb:true});
-      cv.getContext('2d').drawImage(tb,0,0,cv.width,cv.height);
-    }catch(e){/* Thumbnail failure cannot disrupt editor. */}
+  /* v0.10.4 thumbnail pipeline.
+     Each scene card keeps a cached 192x108 thumbnail keyed by a signature of the scene (+ show-level
+     settings + an "epoch" bumped by anything external that changes pixels: assets, fonts, map data).
+     A scene click no longer re-renders anything; edits re-render only the scenes whose signature
+     changed, one scene per idle slice, active scene first. thumbSoon(true) still means "everything
+     may have changed" (epoch bump) so every existing caller keeps its meaning. */
+  const thumbCache = new Map(); let thumbEpoch = 0, thumbPend = -1, thumbRun = 0; const THUMB_TTL = 90000;
+  const thumbStats = { renders: 0, cacheHits: 0, slices: 0 };
+  const tkey = (sc, i) => sc.id != null ? String(sc.id) : 'i' + i;
+  function showSigStr() { const s = S.show; return JSON.stringify(Object.assign({}, s, { scenes: 0, assets: 0, name: 0 })); }
+  function thumbSig(sc, ss) { return thumbEpoch + '|' + ss + '|' + JSON.stringify(sc); }
+  function paintCached(cv, ent) { try { const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); c.drawImage(ent.cv, 0, 0); } catch (e) { /* ignore */ } }
+  function thumbFresh(sc, ent, ss) { return !!ent && ent.sig === thumbSig(sc, ss) && Date.now() - ent.t < THUMB_TTL; }
+  function drawThumb(i, force, ss) {
+    const sc = S.show.scenes[i], cv = document.querySelector(`.sc[data-i="${i}"] canvas`);
+    if (!cv) return false;
+    if (i === S.si && sc.bg.type === 'mapbox' && copyActiveMapThumb()) return true;
+    if (ss == null) ss = showSigStr();
+    const ent = thumbCache.get(tkey(sc, i));
+    if (!force && thumbFresh(sc, ent, ss)) { thumbStats.cacheHits++; paintCached(cv, ent); return false; }
+    try {
+      const sig = thumbSig(sc, ss);
+      E.renderScene(tbc, S.show, sc, Math.min(2.5, sc.duration),
+        { editing: true, camT: 0, thumb: true });
+      const c = cv.getContext('2d'); c.drawImage(tb, 0, 0, cv.width, cv.height); thumbStats.renders++;
+      // A map thumbnail is only trusted once its real frame existed; otherwise it is retried next pass.
+      const trust = sc.bg.type !== 'mapbox' || (g.MB.hasFrame && g.MB.hasFrame(sc.bg, E.viewAt(sc, 0)));
+      if (trust) { let e2 = ent && ent.cv; if (!e2) { e2 = document.createElement('canvas'); e2.width = cv.width; e2.height = cv.height; } e2.getContext('2d').clearRect(0, 0, e2.width, e2.height); e2.getContext('2d').drawImage(cv, 0, 0); thumbCache.set(tkey(sc, i), { sig, t: Date.now(), cv: e2 }); }
+      else thumbCache.delete(tkey(sc, i));
+    } catch (e) { /* Thumbnail failure cannot disrupt editor. */ }
+    return true;
   }
-  function thumbSoon(all) { clearTimeout(tk); tk = setTimeout(() => { if (all) S.show.scenes.forEach((_, i) => drawThumb(i)); else drawThumb(S.si); }, 450); }
+  /* level: -1 none, 0 active scene only, 1 every scene whose cached thumbnail is stale */
+  function thumbSoon(all) {
+    if (all === true) { thumbEpoch++; thumbPend = Math.max(thumbPend, 1); }
+    else if (all === 'dirty') thumbPend = Math.max(thumbPend, 1);
+    else thumbPend = Math.max(thumbPend, 0);
+    clearTimeout(tk); const run = ++thumbRun;
+    tk = setTimeout(() => {
+      const lvl = thumbPend; thumbPend = -1; if (run !== thumbRun || !S.show) return;
+      if (lvl === 0) { drawThumb(S.si, false); return; }
+      const ss = showSigStr(), n = S.show.scenes.length, order = [S.si]; const live = new Set(S.show.scenes.map(tkey)); thumbCache.forEach((_, k) => { if (!live.has(k)) thumbCache.delete(k); }); for (let d = 1; d < n; d++) { if (S.si + d < n) order.push(S.si + d); if (S.si - d >= 0) order.push(S.si - d); }
+      const step = () => {
+        if (run !== thumbRun || !S.show) return;
+        let did = false;
+        while (order.length && !did) { const i = order.shift(), sc = S.show.scenes[i]; if (!sc) continue; did = drawThumb(i, false, ss) === true; }
+        thumbStats.slices++;
+        if (order.length) setTimeout(step, 0);
+      };
+      step();
+    }, 450);
+  }
   E.onAsset = () => thumbSoon(true);
 
   /* ---------- objects ---------- */
@@ -556,8 +597,21 @@
 
   /* ---------- render loop ---------- */
   let last = 0,lastActiveMapThumbPaint=0;
+  /* v0.10.4 editor-loop pacing. The editor repaints continuously (icons/fronts animate even while you
+     are not touching anything). On a slow canvas/GPU one repaint can take 100+ ms, and a click that
+     lands behind it feels like lag. So: (1) while the user is idle, never spend more than ~1/3 of the
+     main thread on repainting (interval >= 3x the last repaint cost, capped at 600 ms); full rate
+     returns on any pointer/key/wheel input and during drawing, dragging and map interaction;
+     (2) if the browser reports pending input, skip this repaint so the click is handled first.
+     Playback/present are unchanged. */
+  const loopStats = { frames: 0, skippedInput: 0, lastCost: 0, throttled: 0 }; let lastInputAt = 0;
+  ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'].forEach(ev => window.addEventListener(ev, () => { lastInputAt = performance.now(); }, { capture: true, passive: true }));
   function loop(ts) {
-    requestAnimationFrame(loop); const liveMapScene=cur&&cur().bg&&cur().bg.type==='mapbox'; const frameMs=(liveMapScene&&(g.MB.interacting||S.mode!=='edit'))?15:30; if (ts - last < frameMs) return; last = ts;
+    requestAnimationFrame(loop); const liveMapScene=cur&&cur().bg&&cur().bg.type==='mapbox'; let frameMs=(liveMapScene&&(g.MB.interacting||S.mode!=='edit'))?15:30;
+    if (S.mode === 'edit' && !S.draft && !g.MB.interacting && performance.now() - lastInputAt > 1500 && loopStats.lastCost * 3 > frameMs) { frameMs = Math.min(600, loopStats.lastCost * 3); loopStats.throttled++; }
+    if (ts - last < frameMs) return;
+    if (S.mode === 'edit') { try { const sc = navigator.scheduling; if (sc && sc.isInputPending && sc.isInputPending()) { loopStats.skippedInput++; return; } } catch (e) { /* ignore */ } }
+    last = ts; const t0 = performance.now();
     try {
       // Keep the zoom text synchronized independently of expensive map frames.
       updateZoomBadge();
@@ -577,6 +631,7 @@
         E.renderShow(sctx, S.show, S.T, { liveMap: true }); octx.clearRect(0, 0, W, H); updateTransport();
       }
     } catch (err) { console.error(err); reportDrawErr(err); try { drawOverlay(); } catch (e2) { /* ignore */ } }
+    loopStats.frames++; loopStats.lastCost = performance.now() - t0;
   }
   let lastDrawErr = '';
   function reportDrawErr(err) { const m = String(err && err.message || err); if (m !== lastDrawErr) { lastDrawErr = m; toast('Drawing error: ' + m.slice(0, 140)); } }
@@ -762,7 +817,8 @@
           h('button', { text: '⌂ Default View', title: 'Return to your saved default starting map', on: { click: loadDefaultMap } }),
           h('button', { text: '★ Save Current as Default', title: 'Use the current map and map settings as the starting default', on: { click: saveCurrentMapDefault } })
         ),
-        h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } })),
+        h('div', { className: 'btnrow' }, h('button', { text: g.MB.hasToken() ? 'Mapbox settings…' : 'Add Mapbox token…', className: g.MB.hasToken() ? '' : 'on', on: { click: mapboxSettings } }),
+          g.MB.hasToken() ? h('button', { id: 'mbPauseBtn', text: g.MB.paused ? '▶ Resume Mapbox' : '⏸ Pause Mapbox', className: g.MB.paused ? 'on' : '', title: 'Temporarily stop all Mapbox requests from this browser tab. Editing and other backgrounds keep working.', on: { click: () => { g.MB.setPaused(!g.MB.paused); toast(g.MB.paused ? 'Mapbox paused – no map requests are being made' : 'Mapbox resumed'); refreshAll(); } } }) : null),
         h('div', { className: 'hint', text: b.mbStyle==='broadcast'?'Mouse: left-drag to pan · right-drag to rotate/tilt · wheel to zoom. Live Mapbox navigation uses the fast preview path; WXfusion Weather Director cartography remains active.':'Mouse: left-drag empty map to pan · right-drag to rotate/tilt · wheel to zoom.' })
       ];
       p.append(mapAccordion('basic','Map + Camera',basic,true));
@@ -1665,8 +1721,8 @@
       '<text x="38" y="96" fill="#fff" stroke="#111" stroke-width="2" paint-order="stroke" font-family="Arial" font-size="12" font-weight="bold">NEW YORK</text></svg>';
     const fallback='url("data:image/svg+xml,'+encodeURIComponent(svg)+'") center / cover no-repeat';
     if(isSat&&g.MB.hasToken()){
-      const url='https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/-71.5,42.4,6/280x142@2x?access_token='+encodeURIComponent(g.MB.token());
-      return 'url("'+url+'") center / cover no-repeat, '+fallback;
+      const url=g.MB.satellitePreviewUrl?g.MB.satellitePreviewUrl():null;   // null while Mapbox is paused
+      if(url)return 'url("'+url+'") center / cover no-repeat, '+fallback;
     }
     return fallback;
   }
@@ -1886,15 +1942,23 @@
     const l = $('#sceneList'); l.innerHTML = '';
     S.show.scenes.forEach((sc, i) => {
       const cv = h('canvas', { width: 192, height: 108 });
-      const card = h('div', { className: 'sc' + (i === S.si ? ' on' : ''), 'data-i': i, on: { click: () => { backToEdit(); S.si = i; S.oid = null; S.editEnd = false; refreshAll(); } } }, cv,
+      const card = h('div', { className: 'sc' + (i === S.si ? ' on' : ''), 'data-i': i, on: { click: () => selectScene(i) } }, cv,
         h('div', { className: 'nm' }, h('span', { text: (i + 1) + '. ' + sc.name }), h('span', { className: 'meta', text: sc.duration + 's' })),
         h('div', { className: 'meta', text: i ? (E.TRANSITIONS.find(t => t[0] === sc.transition.type) || [0, ''])[1] : 'Start' }),
         h('div', { className: 'acts' },
           h('button', { className: 'sm', text: '↑', on: { click: ev => { ev.stopPropagation(); mv(i, -1); } } }), h('button', { className: 'sm', text: '↓', on: { click: ev => { ev.stopPropagation(); mv(i, 1); } } }),
           h('button', { className: 'sm', text: '⧉', on: { click: ev => { ev.stopPropagation(); const c = JSON.parse(JSON.stringify(sc)); c.id = 's' + Date.now().toString(36); c.name += ' copy'; S.show.scenes.splice(i + 1, 0, c); S.si = i + 1; commit(); refreshAll(); } } }),
           h('button', { className: 'sm dng', text: '✕', on: { click: ev => { ev.stopPropagation(); if (S.show.scenes.length < 2) return toast('A show needs at least one scene'); S.show.scenes.splice(i, 1); S.si = clamp(S.si, 0, S.show.scenes.length - 1); commit(); refreshAll(); } } })));
-      l.append(card);
-    }); thumbSoon(true);
+      l.append(card); const ent = thumbCache.get(tkey(sc, i)); if (ent) paintCached(cv, ent);
+    }); thumbSoon('dirty');
+  }
+  /* v0.10.4: switching scenes only moves the highlight and refreshes the panels - no card/canvas rebuild, no thumbnail re-render. */
+  function selectScene(i) {
+    backToEdit(); S.si = i; S.oid = null; S.editEnd = false;
+    document.querySelectorAll('#sceneList .sc').forEach(c => c.classList.toggle('on', Number(c.dataset.i) === i));
+    renderPanels(); renderStepbar(); updateTransport(); const fk = $('#frontKind'); if (fk) fk.value = S.opt.front;   // renderStepbar: the animation step bar belongs to the selected scene
+    lastInputAt = performance.now(); last = 0;   // repaint the new scene on the very next frame, even from a throttled idle state
+    thumbSoon();
   }
   function mv(i, d) { const j = i + d, a = S.show.scenes; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; S.si = j; commit(); refreshAll(); }
   function refreshAll() { $('#showName').value = S.show.name; renderSceneList(); renderPanels(); renderStepbar(); updateTransport(); const fk = $('#frontKind'); if (fk) fk.value = S.opt.front; }
@@ -2002,19 +2066,62 @@
     hintFor();
   }
   function mapDiagnosticsDialog() {
-    const pre = h('pre', { id: 'mbDiagText', style: 'max-height:46vh;overflow:auto;white-space:pre-wrap;font-size:12px;user-select:text', text: g.MB.diagnostics() });
-    const refresh = () => { pre.textContent = g.MB.diagnostics(); };
-    const body = h('div', {}, h('div', { className: 'hint', text: 'If satellite imagery shows gaps, press “Reload map tiles”, then copy this report and send it with a screenshot.' }), pre);
-    modal('Map diagnostics', body, [h('button', { text: 'Close', on: { click: closeModal } }),
-      h('button', { id: 'mbDiagReload', text: 'Reload map tiles', on: { click: () => { const n = g.MB.reloadTiles(); toast(n ? 'Reloading ' + n + ' map tiles…' : 'Map tiles refreshed'); setTimeout(refresh, 1500); } } }),
+    const pre = h('pre', { id: 'mbDiagText', style: 'max-height:42vh;overflow:auto;white-space:pre-wrap;font-size:12px;user-select:text', text: g.MB.diagnostics() });
+    const warn = h('div', { id: 'mbDiagWarn', style: 'display:none;margin:6px 0;padding:8px 10px;border-radius:6px;background:#5a3b00;color:#ffe2a8;font-size:13px' });
+    const reload = h('button', { id: 'mbDiagReload', text: 'Reload map tiles' });
+    const refresh = () => {
+      pre.textContent = g.MB.diagnostics();
+      const w = g.MB.reloadWarning(); warn.textContent = w ? '⚠ ' + w : ''; warn.style.display = w ? 'block' : 'none';
+      reload.textContent = w ? 'Reload anyway (rate-limited)' : 'Reload map tiles';
+    };
+    reload.addEventListener('click', () => {
+      if (g.MB.paused) { toast('Mapbox is paused – resume it first to reload map tiles'); return; }
+      const r = g.MB.reloadTiles();
+      if (r < 0) { toast('Reload already in progress – please wait a few seconds'); return; }
+      reload.disabled = true; setTimeout(() => { reload.disabled = false; refresh(); }, g.MB.RELOAD_GUARD_MS);
+      toast(g.MB.reloadWarning() ? 'Reloading anyway – Mapbox is rate-limiting; wait if tiles stay missing' : (r ? 'Reloading map tiles…' : 'Map tiles refreshed'));
+      refresh(); setTimeout(refresh, 1500);
+    });
+    refresh();
+    const body = h('div', {}, h('div', { className: 'hint', text: 'If satellite imagery shows gaps, wait a few seconds (missing tiles are retried automatically), then press “Reload map tiles”. Copy this report and send it with a screenshot.' }), warn, pre);
+    modal('Map diagnostics', body, [h('button', { text: 'Close', on: { click: closeModal } }), reload,
       h('button', { className: 'pri', id: 'mbDiagCopy', text: 'Copy report', on: { click: () => { const t = g.MB.diagnostics(); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Report copied'), () => { const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Press Ctrl+C to copy the selected report'); }); } } })]);
   }
   function mapboxSettings() {
-    const tok = h('input', { type: 'password', value: g.MB.token(), placeholder: 'pk.eyJ1…', style: 'width:100%' }), sc = h('select', {}, [['1', 'Native / sharp (recommended)'], ['1.25', 'Slightly larger labels'], ['1.5', 'Large labels'], ['2', 'Extra large labels']].map(o => h('option', { value: o[0], text: o[1], selected: +o[0] === g.MB.scale })));
-    const body = h('div', {}, h('div', { className: 'hint', text: 'Create a free account at mapbox.com, copy your default public token (it starts with pk.) and paste it here. It is stored only in this browser. Keep the page tab visible while exporting a Mapbox video.' }), fld('Public token', tok), fld('Label size', sc), h('div', { className: 'hint', id: 'mbstat', text: g.MB.status === 'error' ? 'Status: ' + g.MB.err : 'Status: ' + g.MB.status }));
-    modal('Mapbox settings', body, [h('button', { text: 'Close', on: { click: closeModal } }), h('button', { id: 'mbDiag', text: 'Map diagnostics', title: 'Show a report of map tile loading and WebGL that you can copy and send', on: { click: mapDiagnosticsDialog } }), h('button', { className: 'pri', text: 'Save & load map', on: { click: () => { const t = tok.value.trim(); if (t && !/^pk\./.test(t)) { toast('Use a public token that starts with pk.'); return; } g.MB.setToken(t); if (+sc.value !== g.MB.scale) g.MB.setScale(+sc.value); closeModal();
-      if (t && S.show.scenes.some(x => x.bg.type === 'map') && confirm('Switch your existing basic-map scenes to Mapbox?')) S.show.scenes.forEach(x => { if (x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; } });
-      g.MB.init().then(() => toast('Mapbox ready')).catch(e => toast(e.message)).then(() => { commit(); refreshAll(); }); } } })]);
+    const M = g.MB, T = M.tokenInfo(), fromSecrets = T.source === 'Streamlit Secrets' && T.kind === 'public';
+    const tok = fromSecrets ? null : h('input', { type: 'password', value: M.token(), placeholder: 'pk.eyJ1…', style: 'width:100%' });
+    const sc = h('select', {}, [['1', 'Native / sharp (recommended)'], ['1.25', 'Slightly larger labels'], ['1.5', 'Large labels'], ['2', 'Extra large labels']].map(o => h('option', { value: o[0], text: o[1], selected: +o[0] === M.scale })));
+    const where = T.allowedUrl || 'https://YOUR-APP.streamlit.app';
+    const tokenBox = fromSecrets
+      ? h('div', { className: 'hint', id: 'mbTokenSrc', text: `Mapbox token: ${T.masked}, supplied by this app’s Streamlit Secrets – nothing to enter here, and it is not copied into your browser. To change it, edit Secrets in the Streamlit app settings.` + (T.browserTokenIgnored ? ' (A different token saved in this browser is ignored while Secrets supply one.)' : '') })
+      : h('div', {}, h('div', { className: 'hint', text: 'Create a free account at mapbox.com, copy a PUBLIC token (it starts with pk.) and paste it here. Never paste a secret (sk.) token. It is stored only in this browser. Keep the page tab visible while exporting a Mapbox video.' }), fld('Public token', tok));
+    const note = T.note ? h('div', { className: 'hint', id: 'mbTokenNote', style: 'color:#ffc24a', text: '⚠ ' + T.note }) : null;
+    const advice = h('div', { className: 'hint', id: 'mbUrlHint', text: `Safer: use a dedicated public token with “URL restrictions” set to ${where} in your Mapbox account, one token per app (production and test). Tokens are public by design, so restrictions are what keep other sites from using your allowance.` });
+    const usage = h('div', { className: 'hint', id: 'mbUsage' });
+    const pauseBtn = h('button', { id: 'mbPause', on: { click: () => { M.setPaused(!M.paused); toast(M.paused ? 'Mapbox paused – no map requests are being made' : 'Mapbox resumed'); paint(); refreshAll(); } } });
+    const nat = h('input', { type: 'checkbox', id: 'mbNativeProj', checked: M.projectorInfo().mode === 'native', on: { change: () => { M.setProjectorMode(nat.checked ? 'native' : 'math'); paint(); } } });
+    const stat = h('div', { className: 'hint', id: 'mbstat' });
+    function paint() {
+      const U = M.usage(), Q = M.projectorInfo();
+      stat.textContent = M.status === 'error' ? 'Status: ' + M.err : 'Status: ' + M.status + (M.paused ? ' (requests paused)' : '');
+      pauseBtn.textContent = M.paused ? '▶ Resume Mapbox requests' : '⏸ Pause Mapbox requests'; pauseBtn.className = M.paused ? 'on' : '';
+      usage.textContent = `Map loads started – local estimate from this browser only, not Mapbox billing: this page ${U.page.maps} (display ${U.page.display}, helper ${U.page.projector}); this tab ${U.session.maps}; this month ${U.month.maps}. Real usage and alerts: Mapbox account → Statistics / Billing.` + (U.warnings.length ? '\n⚠ ' + U.warnings.join('\n⚠ ') : '') + `\nCoordinates: ${Q.mode === 'native' ? 'native helper map (1 extra map load)' : Q.state === 'ok' ? 'exact maths, verified against Mapbox (no extra map load)' : 'helper map on demand (' + Q.reason + ')'}.`;
+      usage.style.whiteSpace = 'pre-wrap'; usage.style.color = U.warnings.length ? '#ffc24a' : '';
+    }
+    paint();
+    const body = h('div', {}, tokenBox, note, advice, fld('Label size', sc), stat, usage,
+      h('div', { className: 'btnrow' }, pauseBtn),
+      h('div', { className: 'hint', text: 'Pause stops WX Studio from starting Mapbox maps or requesting map snapshots in this tab (also reset when the tab is closed). Editing, other backgrounds, saved shows and already-drawn map frames keep working; exporting a map scene asks you to resume first. It is not a spending limit – set billing alerts in your Mapbox account.' }),
+      h('label', { className: 'hint', style: 'display:flex;gap:6px;align-items:center;margin-top:6px' }, nat, 'Troubleshooting: use a separate helper map for object positions (costs one extra map load per session)'));
+    modal('Mapbox settings', body, [h('button', { text: 'Close', on: { click: closeModal } }), h('button', { id: 'mbDiag', text: 'Map diagnostics', title: 'Show a report of map tile loading and WebGL that you can copy and send', on: { click: mapDiagnosticsDialog } }), h('button', { className: 'pri', text: 'Save & load map', on: { click: () => {
+      const t = tok ? tok.value.trim() : null;
+      if (t && !/^pk\./.test(t)) { toast('Use a public token that starts with pk.'); return; }
+      if (t !== null) M.setToken(t);   // unchanged token / label size: no map is rebuilt (see MB.setToken)
+      if (+sc.value !== M.scale) M.setScale(+sc.value);
+      closeModal();
+      if (M.hasToken() && S.show.scenes.some(x => x.bg.type === 'map') && confirm('Switch your existing basic-map scenes to Mapbox?')) S.show.scenes.forEach(x => { if (x.bg.type === 'map') { x.bg.type = 'mapbox'; x.bg.view = null; x.bg.view2 = null; } });
+      if (M.paused) { toast('Settings saved. Mapbox is paused – resume it to load the map.'); commit(); refreshAll(); return; }
+      M.init().then(() => toast('Mapbox ready')).catch(e => toast(e.message)).then(() => { commit(); refreshAll(); }); } } })]);
   }
   $('#b7').onclick = sevenDay; $('#bTpl').onclick = templatesDialog;
   /* ---------- video export dialog (v0.10.0): X / Facebook / Custom presets, preflight checklist, file check ---------- */
@@ -2048,7 +2155,7 @@
       const my = ++token, st = settings(); pf.innerHTML = ''; pf.append(h('div', { className: 'hint', text: 'Checking…' })); go.disabled = true;
       let items; try { const tg = target(); tot = E.total(tg.show); items = X.preflightItems(await X.gatherFacts(tg.show, st, tg.a), st, tot); } catch (e) { items = [{ level: 'warn', text: 'Could not run the checks: ' + (e && e.message || e) }]; }
       if (my !== token) return; cur = items; pf.innerHTML = '';
-      items.forEach(it => pf.append(h('div', { style: 'display:flex;gap:8px;margin:3px 0;font-size:13px;line-height:1.35' }, h('span', { text: ICON[it.level][0], style: 'color:' + ICON[it.level][1] + ';font-weight:700;width:14px;flex:none' }), h('span', { text: it.text }))));
+      items.forEach(it => pf.append(h('div', { style: 'display:flex;gap:8px;margin:3px 0;font-size:13px;line-height:1.35' }, h('span', { text: ICON[it.level][0], style: 'color:' + ICON[it.level][1] + ';font-weight:700;width:14px;flex:none' }), h('span', { text: it.text }), it.action === 'resumeMapbox' ? h('button', { id: 'mbResumeExport', text: 'Resume Mapbox', style: 'margin-left:auto;flex:none', on: { click: () => { g.MB.setPaused(false); toast('Mapbox resumed'); refreshChecks(); refreshAll(); } } }) : null)));
       go.disabled = busy || !X.canExport(items);
       if (!X.canExport(items) && items.some(i => /H\.264|encode MP4/.test(i.text) && i.level === 'error')) offerWebM();
     }
@@ -2301,7 +2408,7 @@
   function loadCloudShow(sh, o) {
     loadShow(sh, { keepCustom: true }); const id = o && o.sceneId; if (id != null) { const i = S.show.scenes.findIndex(x => String(x.id) === String(id)); if (i > 0) { S.si = i; S.oid = null; refreshAll(); } }
   }
-  g.WX = { S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog,
+  g.WX = { perf: { thumbStats, thumbCacheSize: () => thumbCache.size, loop: loopStats }, S, E, setTool, addObject, newScene, commit, undo, redo, finishDraft, setTab, loadShow, sevenDay, exportDialog,
     cloud: { hooks: HK, changeSeq: () => chgSeq, ns: () => NS, setNamespace, hasRealLocalWork, legacyInfo, claimLegacy, clearAccountData, keepLocalCopy, loadCloudShow, builtinAssets: builtinBGs, sceneId: () => (S.show.scenes[S.si] || {}).id, renameShow: n => { S.show.name = n; commit(); }, recentDialog, modal, closeModal, notice, toast, h, fmtMB, recentSnap, videos: () => E.videos } };
   boot();
 })(window);

@@ -44,7 +44,7 @@ window.WX_MAPBOX_TOKEN='pk.fake-test-token';
     getCanvas(){return this.__canvas;} loaded(){return this.__loaded;} isMoving(){return false;}
     jumpTo(){} triggerRepaint(){setTimeout(()=>window.__paint(),0);} resize(){} remove(){}
     getSource(){return undefined;} getLayer(){return undefined;} getStyle(){return {layers:[],sources:{}};}
-    setStyle(){setTimeout(()=>{(this.__ls['style.load']||[]).slice().forEach(f=>f());},5);} setProjection(){} setFog(){} setTerrain(){}
+    setStyle(){window.__setStyleCalls=(window.__setStyleCalls||0)+1;setTimeout(()=>{(this.__ls['style.load']||[]).slice().forEach(f=>f());},5);} setProjection(){} setFog(){} setTerrain(){}
     addSource(){} addLayer(){} removeLayer(){} removeSource(){} setPaintProperty(){} setLayoutProperty(){} setFilter(){}
     getCenter(){return {lng:-73.5,lat:42};} project(){return {x:0,y:0};} unproject(){return {lng:0,lat:0};} panBy(){}
     areTilesLoaded(){return true;} queryRenderedFeatures(){return [];} querySourceFeatures(){return [];} setPadding(){} getZoom(){return 5;}
@@ -132,6 +132,55 @@ with sync_playwright() as p:
       await new Promise(r=>setTimeout(r,200));
       return {size:MB.cache.size,lost:MB.diag.contextLost,restored:MB.diag.contextRestored};}""")
     chk('context lost/restored is counted and stale frames dropped', r['lost'] == 1 and r['restored'] == 1 and r['size'] == 0, r)
+    # ---- 5b. an unrelated OPTIONAL source that keeps failing must not block or churn the satellite snapshot
+    r = pg.evaluate("""async()=>{
+      window.__map.style._sourceCaches.composite={_tiles:{v1:{state:'errored'}},_source:{type:'vector'},removed:0,_removeTile(k){this.removed++;delete this._tiles[k];},update(){}};
+      MB.cache.clear();const before=MB.diag.incompleteSnaps,t0=performance.now();
+      const cv=await MB.snap(WX.S.show.scenes[0].bg,%s);
+      return {have:!!cv,ms:performance.now()-t0,incomplete:MB.diag.incompleteSnaps-before,removed:window.__map.style._sourceCaches.composite.removed};}""" % cam)
+    chk('optional-source failure: snapshot returns promptly and is trusted as complete', r['have'] and r['incomplete'] == 0 and r['ms'] < 4000, r)
+    chk('optional-source failure is still listed in diagnostics but marked informational', 'composite [vector, informational]' in pg.evaluate("()=>MB.diagnostics()"))
+    pg.evaluate("()=>{delete window.__map.style._sourceCaches.composite}")
+
+    # ---- 5c. HTTP 429: a burst opens ONE cool-down; no retry request is sent inside it; recovery follows afterwards
+    ev0 = pg.evaluate("()=>MB.diag.throttleEvents")
+    pg.evaluate("()=>{window.__requests.length=0;window.__tiles.a={state:'errored'};for(let i=0;i<30;i++)window.__fireError(429);window.__fireIdle();}")
+    pg.wait_for_timeout(2600)
+    d = pg.evaluate("()=>MB.diagnostics()")
+    chk('429 burst counts as one rate-limit event with an active back-off', pg.evaluate("()=>MB.diag.throttleEvents") == ev0 + 1 and 'back-off ACTIVE' in d, d[-700:])
+    chk('no tile request is sent during the cool-down (no request storm)', pg.evaluate("()=>window.__requests.length") == 0 and pg.evaluate("()=>window.__tiles.a.state") == 'errored')
+    pg.wait_for_function("window.__tiles.a.state==='loaded'", timeout=15000)
+    chk('after the cool-down the failed tile is requested again, once', pg.evaluate("()=>window.__requests.filter(k=>k==='a').length") == 1)
+
+    # ---- 5d. private Mapbox cache interface unavailable: reported, never claimed complete; Reload falls back to a style rebuild
+    pg.evaluate("()=>{window.__savedCaches=window.__map.style._sourceCaches;window.__map.style._sourceCaches=undefined;}")
+    d = pg.evaluate("()=>MB.diagnostics()")
+    chk('unavailable interface is reported as UNVERIFIED, not as complete coverage', 'Tile coverage: UNVERIFIED' in d and 'COMPLETE' not in d, d[-500:])
+    calls = pg.evaluate("()=>window.__setStyleCalls||0")
+    n = pg.evaluate("()=>MB.reloadTiles()")
+    try: pg.wait_for_function("(c)=>(window.__setStyleCalls||0)>c", arg=calls, timeout=8000); ok = True
+    except Exception: ok = False
+    chk('Reload map tiles falls back to rebuilding the map style', n == 1 and ok, (n, calls, pg.evaluate("()=>window.__setStyleCalls")))
+    pg.evaluate("()=>{window.__map.style._sourceCaches=window.__savedCaches}")
+
+    # ---- 5e. manual Reload during a 429 cool-down: visible warning, short guard against rapid repeats, automatic retries still wait
+    if not pg.query_selector('#mbDiagReload'):
+        pg.evaluate("()=>{const b=[...document.querySelectorAll('button')].find(x=>/Mapbox Token \\/ Quality/.test(x.textContent));if(b)b.click()}")
+        pg.wait_for_selector('#mbDiag', timeout=4000); pg.click('#mbDiag'); pg.wait_for_selector('#mbDiagReload', timeout=4000)
+    pg.wait_for_timeout(4200)                                   # let any earlier manual-reload guard expire
+    pg.evaluate("()=>{window.__fireError(429);}")
+    pg.click('#mbDiagReload'); pg.wait_for_timeout(300)
+    warn = pg.inner_text('#mbDiagWarn') if pg.is_visible('#mbDiagWarn') else ''
+    chk('rate-limited: the dialog shows a visible warning and relabels the button', 'rate-limiting' in warn and 'Reload anyway' in pg.inner_text('#mbDiagReload'), warn)
+    chk('rate-limited: the manual reload was honoured (counted) and the cool-down is still active', pg.evaluate("()=>MB.manualReload.count>=1&&MB.diagnostics().includes('back-off ACTIVE')"))
+    chk('the button is disabled for the guard period (no rapid repeats)', pg.evaluate("()=>document.getElementById('mbDiagReload').disabled===true"))
+    ig = pg.evaluate("()=>{const a=MB.manualReload.ignored,r=MB.reloadTiles();return [r,MB.manualReload.ignored-a]}")
+    chk('a repeated reload inside the guard is ignored by the core as well', ig == [-1, 1], ig)
+    pg.evaluate("()=>{window.__requests.length=0;window.__tiles.c={state:'errored'};window.__fireIdle();}")
+    pg.wait_for_timeout(1900)
+    chk('automatic retries still respect the cool-down after a manual reload', pg.evaluate("()=>window.__requests.filter(k=>k==='c').length") == 0 and pg.evaluate("()=>window.__tiles.c.state") == 'errored')
+    pg.wait_for_function("window.__tiles.c.state==='loaded'", timeout=15000)
+
     # ---- 6. a failed tile (HTTP 429) must not be mistaken for a rejected token; a real 401 still is
     r = pg.evaluate("()=>{window.__fireError(429);const a=MB.status;window.__fireError(401);return [a,MB.status,MB.err]}")
     chk('HTTP 429 on a tile keeps the map usable (status stays ready)', r[0] == 'ready', r)
