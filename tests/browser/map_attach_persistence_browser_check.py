@@ -69,10 +69,11 @@ BUILD = r"""(name)=>{const E=WX.E,MA=MapAnim;
   MA.sanitizeAttach(A); MA.sanitizeAttach(B);   // every step: the followers sit on THAT step's front
   MA.enable(C); MA.addStep(C,0,{hold:1,dur:2}); C.anim.steps[1].objects.find(o=>o.id==='lf').pts=C.anim.steps[1].objects.find(o=>o.id==='lf').pts.map(p=>[p[0]+100,p[1]-40]);
   WX.commit(); return true;}"""
+# (attach is compared as [to,u,t,n]: key order is not significant - PostgreSQL jsonb re-orders keys)
 # a compact, comparable picture of every front / follower in every step of every scene
 SNAP = r"""()=>{const out=[];const r=v=>v==null?null:Math.round(v*1e6)/1e6;
   WX.S.show.scenes.forEach((sc,si)=>{const lists=[['s0',sc.objects]];(sc.anim&&sc.anim.steps||[]).forEach((st,k)=>{if(k>0)lists.push(['s'+k,st.objects])});
-    lists.forEach(([k,objs])=>objs.forEach(o=>{if(o.type==='front'||o.attach)out.push([si,k,o.id,r(o.x),r(o.y),o.pts?o.pts.map(p=>[r(p[0]),r(p[1])]):null,o.attach?[o.attach.to,r(o.attach.u),r(o.attach.t),r(o.attach.n)]:null])   // key order is not significant (PostgreSQL jsonb re-orders keys)}))});
+    lists.forEach(([k,objs])=>objs.forEach(o=>{if(o.type==='front'||o.attach)out.push([si,k,o.id,r(o.x),r(o.y),o.pts?o.pts.map(p=>[r(p[0]),r(p[1])]):null,o.attach?[o.attach.to,r(o.attach.u),r(o.attach.t),r(o.attach.n)]:null])}))});
   return JSON.stringify(out);}"""
 # is every follower exactly on its front in every step? -> list of worst distances (stored units)
 CONS = r"""()=>{const MA=MapAnim,worst=[];WX.S.show.scenes.forEach((sc,si)=>{const lists=[sc.objects];(sc.anim&&sc.anim.steps||[]).forEach((st,k)=>{if(k>0)lists.push(st.objects)});
