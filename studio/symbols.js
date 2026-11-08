@@ -68,17 +68,36 @@
   }
   if (typeof document !== 'undefined') Object.keys(g.WX_HL_ART || {}).forEach(hlArt);   // start decoding at page load so even the first preview/export frame already has the badge
   const lvW = l => l.naturalWidth || l.width;
+  /* Pressure-centre circulation arrows (v0.10.4.5), the way TV maps show them: THREE curved arrows orbit the badge.
+   * Northern-hemisphere flow - a LOW (red) spins COUNTER-clockwise, a HIGH (blue) spins CLOCKWISE. Canvas y points down,
+   * so an increasing angle is clockwise on screen. The spin is a pure function of the scene time t (deterministic, so
+   * preview and MP4 export match frame for frame). One revolution takes HL_SPIN seconds. */
+  const HL_SPIN = 7, HL_ARROWS = 3, HL_SPAN = 1.15;   // seconds per turn, arrows, radians of arc per arrow (~66 deg)
+  let HL_ARROWS_ON = true;                             // test hook: the artwork checks switch the arrows off so they cannot cover the pixels being sampled
+  const hlArrowAngles = (kind, t) => Array.from({ length: HL_ARROWS }, (_, k) => (kind === 'H' ? 1 : -1) * (t || 0) * TAU / HL_SPIN + k * TAU / HL_ARROWS);   // tail angles (rad, screen space; + = clockwise)
+  function hlArrows(c, kind, size, t, col) {
+    const dir = kind === 'H' ? 1 : -1, R = size * 0.82, lw = size * 0.07, tails = hlArrowAngles(kind, t);
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+    for (let pass = 0; pass < 2; pass++) {            // pass 0: soft white edge so the arrows read on any map; pass 1: the coloured arrow
+      for (let k = 0; k < HL_ARROWS; k++) {
+        const a0 = tails[k], ah = a0 + dir * HL_SPAN;       // tail angle, head angle
+        const hl = size * 0.19, hw = size * 0.115, px = Math.cos(ah) * R, py = Math.sin(ah) * R;
+        const tx = -Math.sin(ah) * dir, ty = Math.cos(ah) * dir, nx = Math.cos(ah), ny = Math.sin(ah);   // unit tangent (direction of travel) and outward normal at the head
+        const e = pass ? 0 : size * 0.05;
+        c.strokeStyle = pass ? col : 'rgba(255,255,255,0.9)'; c.fillStyle = c.strokeStyle; c.lineWidth = lw + e * 2;
+        c.beginPath(); c.arc(0, 0, R, a0, ah - dir * hl / R * 0.6, dir < 0); c.stroke();                  // the curved shaft (stops inside the head)
+        c.lineWidth = pass ? 0.0001 : e * 1.6;               // head: white pass = the triangle plus a thin round-joined edge
+        c.beginPath(); c.moveTo(px + tx * hl, py + ty * hl); c.lineTo(px + nx * hw, py + ny * hw); c.lineTo(px - nx * hw, py - ny * hw); c.closePath(); c.fill(); if (!pass) c.stroke();
+      }
+    }
+    c.restore();
+  }
   function drawHL(c, kind, x, y, size, value, t, o) {
-    o = o || {}; const col = kind === 'H' ? '#2f7bff' : '#ff3b3b', glow = kind === 'H' ? 'rgba(47,123,255,' : 'rgba(255,59,59,';
+    o = o || {}; const col = kind === 'H' ? '#2f7bff' : '#ff3b3b';
     const prog = o.progress == null ? 1 : o.progress, art = hlArt(kind), badge = size * 1.15;   // visible ring diameter
     c.save(); c.translate(x, y); c.globalAlpha *= clamp(prog * 1.5, 0, 1);
     const sc = 0.6 + 0.4 * Math.min(1, prog * 1.3); c.scale(sc, sc);
-    for (let k = 0; k < 2; k++) {                    // pulsing rings
-      const ph = fract(t * 0.5 + k * 0.5), r = art ? size * (0.6 + ph * 0.5) : size * (0.62 + ph * 0.5);
-      c.strokeStyle = glow + (0.55 * (1 - ph)) + ')'; c.lineWidth = size * 0.05; c.beginPath(); c.arc(0, 0, r, 0, TAU); c.stroke();
-    }
-    const gl = c.createRadialGradient(0, 0, size * 0.1, 0, 0, size * 0.8); gl.addColorStop(0, glow + '0.38)'); gl.addColorStop(1, glow + '0)');
-    c.fillStyle = gl; c.beginPath(); c.arc(0, 0, size * 0.8, 0, TAU); c.fill();
+    if (HL_ARROWS_ON) hlArrows(c, kind, size, t, col);   // v0.10.4.5: 3 circulating arrows (L = counter-clockwise red, H = clockwise blue) replace the pulsing rings
     const bob = Math.sin(t * 1.6) * size * 0.015;
     if (art) {
       const wd = badge / HL_RING, k = (c.getTransform ? c.getTransform().a : 1) || 1, want = wd * k;
@@ -92,7 +111,7 @@
     if (value !== '' && value != null) pill(c, String(value), 0, size * (art ? 0.78 : 0.66), size * 0.3, 'rgba(8,20,38,0.82)', '#fff');
     c.restore();
   }
-  const hlBounds = (x, y, size) => ({ x: x - size * 0.62, y: y - size * 0.62, w: size * 1.24, h: size * 1.6 });
+  const hlBounds = (x, y, size) => ({ x: x - size * 1.0, y: y - size * 1.0, w: size * 2.0, h: size * 2.0 });   // v0.10.4.5: includes the orbiting arrows
   g.WXHLBadgeReady = () => Object.keys(g.WX_HL_ART || {}).every(k => { hlArt(k); return !!(HLI[k] && HLI[k].ok); });
 
   /* ---------- fronts ----------
@@ -309,5 +328,5 @@
     c.restore();
   }
 
-  g.Sym = { FONT, catmull, measure, at, drawHL, hlBounds, drawFront, drawPath, drawFlow, drawJet, drawBarb, pill, FRONT_KINDS: [['cold', 'Cold front'], ['warm', 'Warm front'], ['stationary', 'Stationary front'], ['occluded', 'Occluded front'], ['trough', 'Trough'], ['dryline', 'Dry line']] };
+  g.Sym = { FONT, catmull, measure, at, drawHL, hlBounds, hlArrowAngles, hlArrowsEnabled: v => { HL_ARROWS_ON = !!v; }, drawFront, drawPath, drawFlow, drawJet, drawBarb, pill, FRONT_KINDS: [['cold', 'Cold front'], ['warm', 'Warm front'], ['stationary', 'Stationary front'], ['occluded', 'Occluded front'], ['trough', 'Trough'], ['dryline', 'Dry line']] };
 })(typeof window !== 'undefined' ? window : globalThis);

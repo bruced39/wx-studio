@@ -3,6 +3,16 @@
 > Shared project continuity for ChatGPT and Claude. Update this file whenever code changes.
 > Never assume this snapshot is the latest: read `main`, `VERSION`, recent commits, and relevant source files before editing.
 
+## v0.10.4.5 — H/L pressure badges: circulating arrows replace the pulsing rings (2026-11-07; FEATURE BRANCH `claude/v0.10.4.5-hl-rotating-arrows`, from main a0010e2 / 0.10.4.4, NOT merged)
+
+- **Request (user):** take the pulsing red/blue out of the Highs and Lows and show 3 arrows circling the badge like on TV: red counter-clockwise around the L, blue clockwise around the H.
+- **Change (`studio/symbols.js`, `Sym.drawHL`):** removed the two pulsing rings and the coloured radial glow. Added `hlArrows`: 3 curved arrows (shaft arc + triangular head, thin white edge so they read on any map) orbiting at 0.82 x size, one turn per 7 s. L = red `#ff3b3b`, counter-clockwise; H = blue `#2f7bff`, clockwise (Northern-hemisphere flow). The angle is a pure function of the scene time `t` (`Sym.hlArrowAngles(kind,t)`), so preview and MP4 export match frame for frame. Badge art, bob, draw-in progress, value pill and the letter fallback are unchanged.
+- **Bounds:** `Sym.hlBounds` is now a 2.0 x 2.0 x size square centred on the badge (it includes the arrows) - selection boxes/handles are a little larger than before.
+- **Test hooks:** `Sym.hlArrowsEnabled(bool)` (artwork pixel checks switch the arrows off), `Sym.hlArrowAngles`.
+- **Tests:** `tests/browser/hl_badge_browser_check.py` now 30 checks (3 arrows, directions, colours along the orbit, determinism, period, no pulse ring/glow, new bounds).
+- **Not touched:** engine, export pipeline, Mapbox, Supabase/cloud/ChatGPT-owned files: NO. Saved shows need no migration (no new object fields).
+- **Possible conflict:** the animation branch (`claude/v0.11.0-map-animation-steps` / integration branch) if it edits `drawHL` or `hlBounds`.
+
 ## v0.10.4 — Performance review: scene switching, thumbnails, editor loop (2026-11-04; FEATURE BRANCH `claude/v0.10.4-performance`, stacked on the usage branch, NOT merged, NOT in production)
 
 - **Why:** user noticed a slight delay when clicking between scenes; wants performance verified before heavier map animation. Full review in `docs/PERFORMANCE_REVIEW.md` (baseline, bottlenecks, results, Chrome/Firefox profiling steps).
