@@ -102,7 +102,7 @@ with sync_playwright() as p:
     chk('L arrows turn COUNTER-clockwise (screen angle decreases with time)', all(b < a for a, b in zip(ang['L0'], ang['L1'])), ang)
     def arrow_px(kind, t, off, k=0):
         a0 = pg.evaluate("(a)=>Sym.hlArrowAngles(a[0],a[1])[a[2]]", [kind, t, k]); d = 1 if kind == 'H' else -1
-        a = a0 + d * off; R = 0.82 * 300
+        a = a0 + d * off; R = 0.745 * 300
         return (round(700 + R * math.cos(a)), round(540 + R * math.sin(a)))
     for kind, want, name in (('H', lambda p: p[2] > 200 and p[0] < 90, 'blue'), ('L', lambda p: p[0] > 200 and p[1] < 110 and p[2] < 110, 'red')):
         o = dict(H0, kind=kind, value='')

@@ -3,6 +3,15 @@
 > Shared project continuity for ChatGPT and Claude. Update this file whenever code changes.
 > Never assume this snapshot is the latest: read `main`, `VERSION`, recent commits, and relevant source files before editing.
 
+## v0.10.4.6 — H/L arrows: clean-modern ribbon style + 4 new flow-arrow looks (Claude, 2026-11-08) — branch `claude/v0.10.4.6-ribbon-arrows-preview` (stacked on `claude/v0.10.4.5-hl-rotating-arrows`; from main a0010e2) — NOT merged
+
+- **Requests (user):** H/L arrows in the badge's own blue/red, more professional than cartoon -> after reviewing 8 style mock-ups the user chose **D "clean modern"**, asked for it a little tighter to the badge and a little fatter (approved from a preview), and asked for arrow styles A-D to be added to the flow-arrows **Look** list next to the existing ones.
+- **`studio/symbols.js`:** new shared `Sym.ribbonArrow(ctx, centreline, {style,color,size,w0,w1,hw,hl,sweep,alpha})` - a shaft that follows any polyline plus an arrowhead; styles `tube` (glossy tube, A), `comet` (tapered fading, B), `chrome` (silver-rimmed, C), `modern` (clean flat with white edge, D). `hlArrows` now draws the 3 H/L arrows with it: style `modern`, orbit radius 0.745 x size (was 0.82), shaft 0.088 x size (was 0.07), head half-width 0.145; colours are the badge's own `#0b24f0` (H) / `#e60a0a` (L) (were `#2f7bff` / `#ff3b3b`). Directions/timing unchanged (H clockwise, L counter-clockwise, 3 arrows, 7 s per turn, pure function of `t`). `drawFlow` gains looks `tube`/`comet`/`chrome`/`modern` via `ribbonGlyph` (arrows bend with the path).
+- **`studio/ui.js`:** flow **Look** list now: Glossy arrows with tails, Curved streak arrows, 3-D block arrows, Outlined chevrons, **Ribbon - glossy tube, Ribbon - tapered comet, Ribbon - chrome-rimmed, Ribbon - clean modern**, Plain arrows. The 5 original looks and their stored values are unchanged, so existing shows draw as before; the new values (`tube`,`comet`,`chrome`,`modern`) are plain strings in `style` - no schema change. An older build opening such a show falls back to the glossy look.
+- **Tests:** new `tests/ribbon_arrows.test.js` (6); `tests/browser/hl_badge_browser_check.py` (orbit radius updated, 30 checks); `tests/browser/flow_jet_options_browser_check.py` (all 9 looks draw and differ, 13 checks).
+- **Not touched:** Supabase/cloud/ChatGPT-owned files, engine, export, Mapbox.
+- **Merge notes:** this branch contains the v0.10.4.5 commit (85e814e); merging this one brings both. It touches `studio/symbols.js` and one line of `studio/ui.js` (flow Look list) - check against the animation integration branch, which also edits `ui.js`.
+
 ## v0.10.4.5 — H/L pressure badges: circulating arrows replace the pulsing rings (2026-11-07; FEATURE BRANCH `claude/v0.10.4.5-hl-rotating-arrows`, from main a0010e2 / 0.10.4.4, NOT merged)
 
 - **Request (user):** take the pulsing red/blue out of the Highs and Lows and show 3 arrows circling the badge like on TV: red counter-clockwise around the L, blue clockwise around the H.
