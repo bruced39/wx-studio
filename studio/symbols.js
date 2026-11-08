@@ -38,6 +38,40 @@
     let tx = b[0] - a[0], ty = b[1] - a[1]; const l = Math.hypot(tx, ty) || 1; tx /= l; ty /= l;
     return { x: a[0] + (b[0] - a[0]) * u, y: a[1] + (b[1] - a[1]) * u, tx, ty };
   }
+  /* Ribbon arrow (v0.10.4.6): ONE arrow renderer shared by the H/L badges and the flow-arrow looks. cl = centreline samples [{x,y}] from the
+   * tail to the tip; the shaft follows it (straight or curved), the head sits on the last o.hl px. Styles: 'tube' (glossy tube), 'comet'
+   * (tapered, fading tail), 'chrome' (silver-rimmed), 'modern' (clean flat with a white edge). o: {style,color,size,w0,w1,hw,hl,sweep,alpha}. */
+  function ribbonArrow(c, cl, o) {
+    const n = cl.length; if (n < 2) return;
+    const st = o.style || 'modern', col = o.color || '#3fa9ff', size = o.size, hw = o.hw, hl = o.hl, sweep = o.sweep || 0, w0 = o.w0, w1 = o.w1 == null ? o.w0 : o.w1;
+    const cum = [0]; for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(cl[i].x - cl[i - 1].x, cl[i].y - cl[i - 1].y)); const Lt = cum[n - 1]; if (Lt < hl * 0.8) return;
+    const P = s => { s = clamp(s, 0, Lt); let i = 1; while (i < n - 1 && cum[i] < s) i++; const a = cl[i - 1], b = cl[i], sg = (cum[i] - cum[i - 1]) || 1, u = (s - cum[i - 1]) / sg; let tx = b.x - a.x, ty = b.y - a.y; const l = Math.hypot(tx, ty) || 1; return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, tx: tx / l, ty: ty / l }; };
+    const baseS = Lt - hl, wingS = Math.max(0, baseS - sweep), M = 26, L = [], Rg = [], ctr = [];
+    for (let i = 0; i <= M; i++) { const f = i / M, q = P(baseS * f), w = (w0 + (w1 - w0) * Math.pow(f, 1.4)) / 2; L.push([q.x - q.ty * w, q.y + q.tx * w]); Rg.push([q.x + q.ty * w, q.y - q.tx * w]); ctr.push([q.x, q.y]); }
+    const wp = P(wingS), tip = P(Lt), pts = [...L, [wp.x - wp.ty * hw, wp.y + wp.tx * hw], [tip.x, tip.y], [wp.x + wp.ty * hw, wp.y - wp.tx * hw], ...Rg.reverse()];
+    const path = () => { c.beginPath(); pts.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); c.closePath(); };
+    const stroke = (lw, sty) => { c.beginPath(); ctr.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); c.lineWidth = lw; c.strokeStyle = sty; c.lineCap = 'butt'; c.lineJoin = 'round'; c.stroke(); };
+    const dark = shade(col, -0.62), mid = shade(col, 0.3), hi = shade(col, 0.62), rim = shade(col, -0.82), tail = P(0);
+    c.save(); c.globalAlpha *= o.alpha == null ? 1 : o.alpha; c.lineJoin = 'round';
+    if (st !== 'comet') { c.save(); c.shadowColor = 'rgba(0,0,0,0.5)'; c.shadowBlur = size * 0.05; c.shadowOffsetY = size * 0.02; path(); c.fillStyle = col; c.fill(); c.restore(); }
+    c.save(); path(); c.clip();
+    const lg = c.createLinearGradient(tail.x, tail.y, tip.x, tip.y);
+    if (st === 'comet') { lg.addColorStop(0, rgbaOf(col, 0.06)); lg.addColorStop(0.45, rgbaOf(col, 0.85)); lg.addColorStop(1, rgbaOf(mid, 1)); }
+    else if (st === 'modern') { lg.addColorStop(0, col); lg.addColorStop(1, shade(col, 0.14)); }
+    else { lg.addColorStop(0, dark); lg.addColorStop(1, col); }
+    c.fillStyle = lg; c.fillRect(tip.x - size * 8, tip.y - size * 8, size * 16, size * 16);
+    const w = Math.max(w0, w1);
+    if (st === 'tube' || st === 'chrome') { stroke(w * 0.9, col); stroke(w * 0.56, mid); stroke(w * 0.22, hi); c.globalAlpha *= 0.5; stroke(w * 0.1, '#ffffff'); }
+    else if (st === 'comet') { c.globalAlpha *= 0.55; stroke(w * 0.22, hi); }
+    else { c.globalAlpha *= 0.22; stroke(w * 0.45, mid); }
+    c.restore();
+    if (st === 'chrome') {
+      path(); const sg = c.createLinearGradient(0, tip.y - size, 0, tip.y + size); sg.addColorStop(0, '#fdfdfd'); sg.addColorStop(0.5, '#8d8d8d'); sg.addColorStop(1, '#f1f1f1');
+      c.strokeStyle = sg; c.lineWidth = size * 0.022; c.stroke(); path(); c.strokeStyle = 'rgba(0,0,0,0.55)'; c.lineWidth = Math.max(1, size * 0.004); c.stroke();
+    } else if (st === 'modern') { path(); c.strokeStyle = 'rgba(255,255,255,0.92)'; c.lineWidth = Math.max(1.2, size * 0.012); c.stroke(); }
+    else if (st === 'tube') { path(); c.strokeStyle = rim; c.lineWidth = Math.max(1, size * 0.007); c.stroke(); path(); c.strokeStyle = 'rgba(255,255,255,0.45)'; c.lineWidth = Math.max(0.8, size * 0.003); c.stroke(); }
+    c.restore();
+  }
   function upTo(m, Lp) {
     if (Lp >= m.L - 0.01) return m.poly;
     const out = []; for (let i = 0; i < m.poly.length && m.cum[i] <= Lp; i++) out.push(m.poly[i]);
@@ -72,28 +106,18 @@
    * Northern-hemisphere flow - a LOW (red) spins COUNTER-clockwise, a HIGH (blue) spins CLOCKWISE. Canvas y points down,
    * so an increasing angle is clockwise on screen. The spin is a pure function of the scene time t (deterministic, so
    * preview and MP4 export match frame for frame). One revolution takes HL_SPIN seconds. */
-  const HL_SPIN = 7, HL_ARROWS = 3, HL_SPAN = 1.15;   // seconds per turn, arrows, radians of arc per arrow (~66 deg)
+  const HL_SPIN = 7, HL_ARROWS = 3, HL_SPAN = 1.15, HL_ORBIT = 0.745;   // seconds per turn, arrows, radians of arc per arrow (~66 deg)
   let HL_ARROWS_ON = true;                             // test hook: the artwork checks switch the arrows off so they cannot cover the pixels being sampled
   const hlArrowAngles = (kind, t) => Array.from({ length: HL_ARROWS }, (_, k) => (kind === 'H' ? 1 : -1) * (t || 0) * TAU / HL_SPIN + k * TAU / HL_ARROWS);   // tail angles (rad, screen space; + = clockwise)
-  function hlArrows(c, kind, size, t, col) {
-    const dir = kind === 'H' ? 1 : -1, R = size * 0.82, lw = size * 0.07, tails = hlArrowAngles(kind, t);
-    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
-    for (let pass = 0; pass < 2; pass++) {            // pass 0: soft white edge so the arrows read on any map; pass 1: the coloured arrow
-      for (let k = 0; k < HL_ARROWS; k++) {
-        const a0 = tails[k], ah = a0 + dir * HL_SPAN;       // tail angle, head angle
-        const hl = size * 0.19, hw = size * 0.115, px = Math.cos(ah) * R, py = Math.sin(ah) * R;
-        const tx = -Math.sin(ah) * dir, ty = Math.cos(ah) * dir, nx = Math.cos(ah), ny = Math.sin(ah);   // unit tangent (direction of travel) and outward normal at the head
-        const e = pass ? 0 : size * 0.05;
-        c.strokeStyle = pass ? col : 'rgba(255,255,255,0.9)'; c.fillStyle = c.strokeStyle; c.lineWidth = lw + e * 2;
-        c.beginPath(); c.arc(0, 0, R, a0, ah - dir * hl / R * 0.6, dir < 0); c.stroke();                  // the curved shaft (stops inside the head)
-        c.lineWidth = pass ? 0.0001 : e * 1.6;               // head: white pass = the triangle plus a thin round-joined edge
-        c.beginPath(); c.moveTo(px + tx * hl, py + ty * hl); c.lineTo(px + nx * hw, py + ny * hw); c.lineTo(px - nx * hw, py - ny * hw); c.closePath(); c.fill(); if (!pass) c.stroke();
-      }
+  function hlArrows(c, kind, size, t, col) {         // v0.10.4.6: "clean modern" ribbon arrows (shared ribbonArrow), snug around the badge ring
+    const dir = kind === 'H' ? 1 : -1, tails = hlArrowAngles(kind, t), R = size * HL_ORBIT;
+    for (let k = 0; k < HL_ARROWS; k++) {
+      const cl = []; for (let i = 0; i <= 28; i++) { const a = tails[k] + dir * HL_SPAN * i / 28; cl.push({ x: Math.cos(a) * R, y: Math.sin(a) * R }); }
+      ribbonArrow(c, cl, { style: 'modern', color: col, size, w0: size * 0.088, hw: size * 0.145, hl: size * 0.17, sweep: size * 0.05 });
     }
-    c.restore();
   }
   function drawHL(c, kind, x, y, size, value, t, o) {
-    o = o || {}; const col = kind === 'H' ? '#2f7bff' : '#ff3b3b';
+    o = o || {}; const col = kind === 'H' ? '#0b24f0' : '#e60a0a';   // the badge's own blue / red
     const prog = o.progress == null ? 1 : o.progress, art = hlArt(kind), badge = size * 1.15;   // visible ring diameter
     c.save(); c.translate(x, y); c.globalAlpha *= clamp(prog * 1.5, 0, 1);
     const sc = 0.6 + 0.4 * Math.min(1, prog * 1.3); c.scale(sc, sc);
@@ -232,6 +256,10 @@
     c.shadowColor = 'rgba(0,0,0,0.45)'; c.shadowBlur = size * 0.2; c.shadowOffsetY = size * 0.08; const gr = c.createLinearGradient(0, -hw, 0, hw); gr.addColorStop(0, shade(col, 0.5)); gr.addColorStop(0.5, col); gr.addColorStop(1, shade(col, -0.45));
     c.fillStyle = gr; c.fill(); c.shadowColor = 'transparent'; c.lineJoin = 'round'; c.lineWidth = Math.max(1.2, size * 0.04); c.strokeStyle = rgbaOf(shade(col, -0.6), 0.8); c.stroke(); c.restore();
   }
+  function ribbonGlyph(c, m, s, size, col, style, alpha) {   // v0.10.4.6: ribbon arrows (tube / comet / chrome / modern) that follow the bend of the path
+    const len = Math.min(size * 2.1, s); if (len < size * 0.9) return; const cl = []; for (let j = 0; j <= 14; j++) { const q = at(m, s - len + len * j / 14); cl.push({ x: q.x, y: q.y }); }
+    ribbonArrow(c, cl, { style, color: col, size, w0: size * (style === 'comet' ? 0.08 : 0.3), w1: size * (style === 'comet' ? 0.42 : 0.3), hw: size * 0.55, hl: size * 0.78, sweep: style === 'comet' ? size * 0.28 : style === 'modern' ? size * 0.16 : 0, alpha });
+  }
   function chevronGlyph(c, p, size, col, alpha) {          // outlined double chevron  >>
     c.save(); c.translate(p.x, p.y); c.rotate(Math.atan2(p.ty, p.tx)); c.globalAlpha *= alpha; c.lineCap = 'round'; c.lineJoin = 'round';
     const path = dx => { c.beginPath(); c.moveTo(dx - size * 0.32, -size * 0.45); c.lineTo(dx + size * 0.1, 0); c.lineTo(dx - size * 0.32, size * 0.45); };
@@ -241,13 +269,13 @@
   }
   function drawFlow(c, pts, o) {
     o = o || {}; if (!pts || pts.length < 2) return;
-    const size = Math.max(3, o.size || 46), col = o.color || '#3fa9ff', style = ['plain', 'streak', 'block', 'chevron'].includes(o.style) ? o.style : 'glossy', gap = Math.max(1.2, o.spacing || 2.8), spd = o.speed == null ? 1 : o.speed, t = o.t || 0;
+    const size = Math.max(3, o.size || 46), col = o.color || '#3fa9ff', style = ['plain', 'streak', 'block', 'chevron', 'tube', 'comet', 'chrome', 'modern'].includes(o.style) ? o.style : 'glossy', gap = Math.max(1.2, o.spacing || 2.8), spd = o.speed == null ? 1 : o.speed, t = o.t || 0;
     const m = measure(catmull(pts, false, 10)); if (m.L < 2) return; const Lp = m.L * (o.progress == null ? 1 : o.progress), sp = size * gap, shift = ((t * spd * size * 2.4) % sp + sp) % sp, edge = size * 1.6;
     c.save();
     for (let k = -1; ; k++) {
       const s = k * sp + shift; if (s > Lp) break; if (s < 0) continue;
       const a = clamp(Math.min(s, Lp - s) / edge, 0, 1);
-      if (style === 'streak') streakGlyph(c, m, s, size, col, a); else if (style === 'block') blockGlyph(c, at(m, s), size, col, a); else if (style === 'chevron') chevronGlyph(c, at(m, s), size, col, a); else flowGlyph(c, at(m, s), size, col, style, a);
+      if (style === 'streak') streakGlyph(c, m, s, size, col, a); else if (style === 'block') blockGlyph(c, at(m, s), size, col, a); else if (style === 'chevron') chevronGlyph(c, at(m, s), size, col, a); else if (style === 'tube' || style === 'comet' || style === 'chrome' || style === 'modern') ribbonGlyph(c, m, s, size, col, style, a); else flowGlyph(c, at(m, s), size, col, style, a);
     }
     c.restore();
   }
@@ -328,5 +356,5 @@
     c.restore();
   }
 
-  g.Sym = { FONT, catmull, measure, at, drawHL, hlBounds, hlArrowAngles, hlArrowsEnabled: v => { HL_ARROWS_ON = !!v; }, drawFront, drawPath, drawFlow, drawJet, drawBarb, pill, FRONT_KINDS: [['cold', 'Cold front'], ['warm', 'Warm front'], ['stationary', 'Stationary front'], ['occluded', 'Occluded front'], ['trough', 'Trough'], ['dryline', 'Dry line']] };
+  g.Sym = { FONT, catmull, measure, at, ribbonArrow, drawHL, hlBounds, hlArrowAngles, hlArrowsEnabled: v => { HL_ARROWS_ON = !!v; }, drawFront, drawPath, drawFlow, drawJet, drawBarb, pill, FRONT_KINDS: [['cold', 'Cold front'], ['warm', 'Warm front'], ['stationary', 'Stationary front'], ['occluded', 'Occluded front'], ['trough', 'Trough'], ['dryline', 'Dry line']] };
 })(typeof window !== 'undefined' ? window : globalThis);
