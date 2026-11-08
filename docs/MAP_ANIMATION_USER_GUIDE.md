@@ -27,13 +27,17 @@ One map scene can move your weather graphics from step to step, so a 30–60 s f
 * Text, icons, H/L: change text, size, colour, font, icon type in the normal Object panel – size and colour glide, text/icon/type changes cross-fade.
 
 ## Scrubbing the playhead, then editing (v0.11.5)
-Drag either playhead (the top bar or the one under the step blocks) and **release it on a step, or within about three-quarters of a second of one**. WX Studio goes back to editing that step: the front's control points, the rotate / scale handles and every tool work again, and your changes go to that step only. Release in the middle of a move between two steps and it stays a preview (a note tells you so) - drag the playhead onto a step, or click a step block, to edit it.
+Drag either playhead (the top bar or the one under the step blocks) and **release it on a step, or within about three-quarters of a second of one**. Both playheads then sit on that step (the top one at the scene's start plus the step's time). WX Studio goes back to editing that step: the front's control points, the rotate / scale handles and every tool work again, and your changes go to that step only. Release in the middle of a move between two steps and it stays a preview (a note tells you so) - drag the playhead onto a step, or click a step block, to edit it.
 
 ## Follow - icons, labels and H/L that stay with a front (v0.11.5)
 Select an icon, text, H or L, open the **Follow** section of the Object tab and pick the front (or any other object) it belongs to. It stays exactly where you put it - nothing jumps - and remembers *where along the front* (for example 40 % of the way) and how far to the side it sits.
 * Move, rotate, lengthen, shorten or bend the front in any step and the attached items ride along, keeping their spot.
 * Add a step and reshape the front: the attached items glide between the steps on the front's new shape.
 * Drag an attached item to give it a new spot; use **Along it (%)** to slide it along the front; choose **Nothing** to detach it.
+* Items can follow each other in a chain (a label that follows an icon that follows a front). A loop is never allowed - the list simply does not offer an object that would make one.
+* **Pinned vs. not pinned:** an item can only follow something positioned the same way - both pinned to the map, or both fixed on the screen. The list shows only those, and a note says how many were left out and why.
+* Switching **Pin to map** on or off for an item that is part of a Follow group switches the whole group together (front, icons, H/L, labels), so nothing jumps and the links stay.
+* Between two steps the item is placed on the in-between front at every frame, so it keeps its distance from the front and its place along it even while the front turns or stretches.
 * Deleting the front releases the items. Older WX Studio builds still show the saved positions.
 
 ## What happens between steps

@@ -59,6 +59,7 @@
         if (!ease[st.ease]) st.ease = 'inout';
       }
     });
+    try { sanitizeAttach(sc); } catch (e) { /* ignore */ }
     syncDuration(sc); return sc;
   }
 
@@ -176,54 +177,140 @@
   /* ---------------- attachments (v0.11.5): a point-like object (icon, text, H/L ...) rides on another object ----------------
    * obj.attach = { to: parentId, u: 0..1 (fraction ALONG the parent's drawn curve, by length), t, n: offset from that spot along / across the curve }.
    * Stored coordinates (lng/lat for pinned objects). Because every step stores the child's own x,y (kept in step with its parent), the normal
-   * step interpolation already makes the child glide with the parent while a front grows, shrinks or bends. */
-  const hasPts = o => Array.isArray(o.pts) && o.pts.length >= 2;
-  function denseOf(o) { return RAW[o.type] ? o.pts.map(p => [p[0], p[1]]) : catmull(o.pts, false, 12); }
+   * step interpolation already makes the child glide with the parent while a front grows, shrinks or bends; between two steps that both attach the same
+   * child to the same parent, interpolate() goes one better and re-places the child on the in-between front (exact, even when the front turns).
+   *
+   * Rules (stabilisation round): a child and its parent must use the SAME positioning (both screen, or both pinned to the map) - the link is released
+   * otherwise; chains (A follows B follows C ...) are fine but cycles of any length are broken; broken / foreign data is dropped, never trusted.
+   * `ctx.lngLat` (Mapbox scenes) makes pinned objects measure along / across in a locally square space (longitude x cos latitude), because a degree of
+   * longitude is shorter than a degree of latitude on screen - without it a turning front would pull a pinned icon sideways. */
+  const hasPts = o => !!o && Array.isArray(o.pts) && o.pts.length >= 2 && o.pts.every(p => Array.isArray(p) && isNum(p[0]) && isNum(p[1]));
+  const hasXY = o => !!o && isNum(o.x) && isNum(o.y);
+  const r6 = v => Math.round(v * 1e6) / 1e6;
+  const kxOf = (parent, ctx) => {
+    if (!(ctx && ctx.lngLat && parent && parent.geo)) return 1;
+    const lat = hasPts(parent) ? parent.pts.reduce((s, p) => s + p[1], 0) / parent.pts.length : parent.y;
+    return clamp(Math.cos((isNum(lat) ? lat : 0) * Math.PI / 180), 0.05, 1);
+  };
+  function denseOf(o, kx) { const d = RAW[o.type] ? o.pts.map(p => [p[0], p[1]]) : catmull(o.pts, false, 12); return kx === 1 ? d : d.map(p => [p[0] * kx, p[1]]); }
   function cumOf(d) { const c = [0]; for (let i = 1; i < d.length; i++) c.push(c[i - 1] + Math.hypot(d[i][0] - d[i - 1][0], d[i][1] - d[i - 1][1])); return c; }
-  function frameAt(parent, u) {
-    if (!hasPts(parent)) return { x: parent.x, y: parent.y, tx: 1, ty: 0 };
-    const d = denseOf(parent), c = cumOf(d), L = c[c.length - 1]; if (!(L > 0)) return { x: d[0][0], y: d[0][1], tx: 1, ty: 0 };
+  /* point + unit tangent at fraction u of the parent's drawn curve, in the (possibly longitude-scaled) measuring space */
+  function frameScaled(parent, u, kx) {
+    if (!hasPts(parent)) return { x: parent.x * kx, y: parent.y, tx: 1, ty: 0 };
+    const d = denseOf(parent, kx), c = cumOf(d), L = c[c.length - 1]; if (!(L > 0)) return { x: d[0][0], y: d[0][1], tx: 1, ty: 0 };
     const s = clamp(u, 0, 1) * L; let j = 1; while (j < d.length - 1 && c[j] < s) j++;
     const seg = c[j] - c[j - 1] || 1, f = clamp((s - c[j - 1]) / seg, 0, 1), dx = d[j][0] - d[j - 1][0], dy = d[j][1] - d[j - 1][1], l = Math.hypot(dx, dy) || 1;
     return { x: d[j - 1][0] + dx * f, y: d[j - 1][1] + dy * f, tx: dx / l, ty: dy / l };
   }
+  /* the same, reported in stored coordinates (x back in degrees); the tangent stays in measuring space */
+  function frameAt(parent, u, ctx) { const kx = kxOf(parent, ctx), f = frameScaled(parent, u, kx); return { x: f.x / kx, y: f.y, tx: f.tx, ty: f.ty }; }
   /* where (u, t, n) the point x,y sits relative to the parent; for a point-like parent it is a plain offset */
-  function attachFromPoint(parent, x, y) {
-    let u = 0;
+  function attachFromPoint(parent, x, y, ctx) {
+    const kx = kxOf(parent, ctx); let u = 0; const X = x * kx;
     if (hasPts(parent)) {
-      const d = denseOf(parent), c = cumOf(d), L = c[c.length - 1]; let best = Infinity, bs = 0;
+      const d = denseOf(parent, kx), c = cumOf(d), L = c[c.length - 1]; let best = Infinity, bs = 0;
       for (let i = 1; i < d.length; i++) {
-        const ax = d[i - 1][0], ay = d[i - 1][1], bx = d[i][0] - ax, by = d[i][1] - ay, l2 = bx * bx + by * by || 1e-12, f = clamp(((x - ax) * bx + (y - ay) * by) / l2, 0, 1), dd = Math.hypot(x - ax - bx * f, y - ay - by * f);
+        const ax = d[i - 1][0], ay = d[i - 1][1], bx = d[i][0] - ax, by = d[i][1] - ay, l2 = bx * bx + by * by || 1e-12, f = clamp(((X - ax) * bx + (y - ay) * by) / l2, 0, 1), dd = Math.hypot(X - ax - bx * f, y - ay - by * f);
         if (dd < best) { best = dd; bs = c[i - 1] + f * Math.sqrt(l2); }
       }
       u = L > 0 ? bs / L : 0;
     }
-    const f = frameAt(parent, u), dx = x - f.x, dy = y - f.y;
+    const f = frameScaled(parent, u, kx), dx = X - f.x, dy = y - f.y;
     return { u: r6(u), t: r6(dx * f.tx + dy * f.ty), n: r6(-dx * f.ty + dy * f.tx) };
   }
-  const r6 = v => Math.round(v * 1e6) / 1e6;
-  function makeAttach(parent, child) { return Object.assign({ to: parent.id }, attachFromPoint(parent, child.x, child.y)); }
-  function applyAttach(child, parent) {
-    const a = child.attach, f = frameAt(parent, a.u || 0), x = f.x + (a.t || 0) * f.tx - (a.n || 0) * f.ty, y = f.y + (a.t || 0) * f.ty + (a.n || 0) * f.tx;
-    const moved = Math.abs(x - child.x) > 1e-9 || Math.abs(y - child.y) > 1e-9; child.x = x; child.y = y; return moved;
+  function makeAttach(parent, child, ctx) { return Object.assign({ to: parent.id }, attachFromPoint(parent, child.x, child.y, ctx)); }
+  /* where a child with attach `a` belongs on `parent` -> [x, y] in stored coordinates */
+  function attachPos(a, parent, ctx) {
+    const kx = kxOf(parent, ctx), f = frameScaled(parent, a.u || 0, kx), t = a.t || 0, n = a.n || 0;
+    return [(f.x + t * f.tx - n * f.ty) / kx, f.y + t * f.ty + n * f.tx];
+  }
+  function applyAttach(child, parent, ctx) {
+    const p = attachPos(child.attach, parent, ctx), moved = Math.abs(p[0] - child.x) > 1e-9 || Math.abs(p[1] - child.y) > 1e-9; child.x = p[0]; child.y = p[1]; return moved;
+  }
+  /* is `a` something we can use? (plain object, finite numbers) - fixes up harmless oddities in place */
+  function cleanAttach(a) {
+    if (!a || typeof a !== 'object' || Array.isArray(a)) return false;
+    if (!(typeof a.to === 'string' || isNum(a.to)) || a.to === '') return false;
+    for (const k of ['u', 't', 'n']) { if (a[k] == null) a[k] = 0; if (!isNum(a[k]) || Math.abs(a[k]) > 1e7) return false; }
+    a.u = clamp(a.u, 0, 1); return true;
+  }
+  /* Decide which attachments of `objs` are usable and in which order to apply them (parents first).
+   * Returns { order: [child ...], drop: [child ...] }. A link is dropped when: it is malformed, the parent is missing / is the child itself / has no position,
+   * the two objects do not share the same positioning (geo), or it closes a cycle (of ANY length; the member listed last in the array loses its link). */
+  function attachPlan(objs) {
+    const plan = { order: [], drop: [], parent: new Map() }; if (!Array.isArray(objs)) return plan;
+    const byId = new Map(); let any = false;
+    objs.forEach(o => { if (o && typeof o === 'object') { if (o.id != null && !byId.has(String(o.id))) byId.set(String(o.id), o); if (o.attach !== undefined) any = true; } });
+    if (!any) return plan;
+    const live = new Map();   // child -> parent
+    objs.forEach(c => {
+      if (!c || typeof c !== 'object' || c.attach === undefined) return;
+      const p = cleanAttach(c.attach) ? byId.get(String(c.attach.to)) : null;
+      if (!p || p === c || !hasXY(c) || !(hasXY(p) || hasPts(p)) || !!p.geo !== !!c.geo || hasPts(c)) { plan.drop.push(c); return; }
+      live.set(c, p);
+    });
+    /* break cycles: walk up from each child; if the walk returns to a member already on the path, drop the last-listed member of that loop */
+    const idx = new Map(); objs.forEach((o, i) => idx.set(o, i));
+    for (let guard = 0; guard <= objs.length; guard++) {
+      let loop = null;
+      for (const start of live.keys()) {
+        const path = [], seen = new Set(); let cur = start;
+        while (cur && live.has(cur) && !seen.has(cur)) { seen.add(cur); path.push(cur); cur = live.get(cur); }
+        if (cur && seen.has(cur)) { loop = path.slice(path.indexOf(cur)); break; }
+      }
+      if (!loop) break;
+      const loser = loop.reduce((a, b) => (idx.get(b) > idx.get(a) ? b : a)); live.delete(loser); plan.drop.push(loser);
+    }
+    const depth = new Map(), dep = c => { if (depth.has(c)) return depth.get(c); const p = live.get(c), d = p && live.has(p) ? dep(p) + 1 : 0; depth.set(c, d); return d; };
+    const kids = Array.from(live.keys()); kids.forEach(dep);
+    plan.order = kids.map((c, i) => [c, i]).sort((a, b) => depth.get(a[0]) - depth.get(b[0]) || a[1] - b[1]).map(a => a[0]);
+    plan.parent = live; return plan;
   }
   /* Keep every attached child on its parent. `memo` (a WeakMap owned by the editor) remembers where each child was last put: a child found somewhere ELSE was moved
-   * by the user (drag, nudge, number box) - it stays there and learns its new place on the parent instead of being pulled back. Returns the number of objects changed. */
-  function syncAttach(objs, memo) {
-    if (!Array.isArray(objs)) return 0; let changed = 0, any = false; for (const o of objs) if (o && o.attach) { any = true; break; } if (!any) return 0;
-    const byId = {}; objs.forEach(o => { if (o && o.id != null) byId[o.id] = o; });
-    for (let pass = 0; pass < 4; pass++) {
-      let moved = false;
-      for (const c of objs) {
-        const a = c && c.attach; if (!a) continue; const p = byId[a.to];
-        if (!p || p === c || !isNum(c.x) || !isNum(c.y) || (p.attach && p.attach.to === c.id) || !(isNum(p.x) || hasPts(p))) { delete c.attach; if (memo) memo.delete(c); changed++; continue; }
-        const last = memo && memo.get(c);
-        if (last && (Math.abs(last[0] - c.x) > 1e-9 || Math.abs(last[1] - c.y) > 1e-9)) { Object.assign(a, attachFromPoint(p, c.x, c.y)); memo.set(c, [c.x, c.y]); changed++; continue; }
-        if (applyAttach(c, p)) { moved = true; changed++; } if (memo) memo.set(c, [c.x, c.y]);
-      }
-      if (!moved) break;
+   * by the user (drag, nudge, number box) - it stays there and learns its new place on the parent instead of being pulled back. Without a memo (loading a file,
+   * export) every child is simply placed on its parent. Returns the number of objects changed; a second call right after a first one returns 0. */
+  function syncAttach(objs, memo, ctx) {
+    if (!Array.isArray(objs)) return 0; let changed = 0;
+    const plan = attachPlan(objs); if (!plan.order.length && !plan.drop.length) return 0;
+    plan.drop.forEach(c => { delete c.attach; if (memo) memo.delete(c); changed++; });
+    for (const c of plan.order) {
+      const p = plan.parent.get(c), last = memo && memo.get(c);
+      if (last && (Math.abs(last[0] - c.x) > 1e-9 || Math.abs(last[1] - c.y) > 1e-9)) { Object.assign(c.attach, attachFromPoint(p, c.x, c.y, ctx)); applyAttach(c, p, ctx); changed++; }
+      else if (applyAttach(c, p, ctx)) changed++;
+      if (memo) memo.set(c, [c.x, c.y]);
     }
     return changed;
+  }
+  /* load / import safety: drop unusable links and put the rest exactly on their parents, in the scene's own objects and in every step */
+  function sanitizeAttach(sc, ctx) {
+    if (!sc) return 0; let n = 0; const c2 = ctx || { lngLat: !!(sc.bg && sc.bg.type === 'mapbox') };
+    if (Array.isArray(sc.objects)) n += syncAttach(sc.objects, null, c2);
+    if (sc.anim && Array.isArray(sc.anim.steps)) sc.anim.steps.forEach((st, i) => { if (i > 0 && st && Array.isArray(st.objects)) n += syncAttach(st.objects, null, c2); });
+    return n;
+  }
+  /* between two steps: a child attached to the same parent in both is placed on the in-between parent with in-between (u, t, n) */
+  function reattachInBetween(out, a, b, u, ctx) {
+    const byA = new Map(), byB = new Map(); a.forEach(o => byA.set(String(o.id), o)); b.forEach(o => byB.set(String(o.id), o));
+    const cand = []; out.forEach(o => { if (o && o.attach && !o.move) cand.push(o); }); if (!cand.length) return;
+    const first = new Map(); out.forEach(o => { if (o && o.id != null && !first.has(String(o.id))) first.set(String(o.id), o); });
+    const kids = new Map(); // child out-object -> {pa,pb}
+    cand.forEach(c => {
+      const ca = byA.get(String(c.id)), cb = byB.get(String(c.id)); if (!ca || !cb || !ca.attach || !cb.attach || ca.move || cb.move) return;
+      if (!cleanAttach(Object.assign({}, ca.attach)) || !cleanAttach(Object.assign({}, cb.attach)) || String(ca.attach.to) !== String(cb.attach.to)) return;
+      if (!!ca.geo !== !!cb.geo || !hasXY(ca) || !hasXY(cb)) return;
+      kids.set(c, { ca, cb });
+    });
+    if (!kids.size) return;
+    /* a parent that is itself a child is placed first: order by chain depth */
+    const par = o => first.get(String(o.attach.to)), depth = new Map();
+    const dep = (o, seen) => { if (depth.has(o)) return depth.get(o); if (seen.has(o)) return 0; seen.add(o); const p = par(o), d = p && kids.has(p) ? dep(p, seen) + 1 : 0; depth.set(o, d); return d; };
+    const order = Array.from(kids.keys()); order.forEach(o => dep(o, new Set())); order.sort((x, y) => depth.get(x) - depth.get(y));
+    for (const c of order) {
+      const p = par(c), k = kids.get(c); if (!p || p === c || !(hasPts(p) || hasXY(p)) || !!p.geo !== !!c.geo) continue;
+      const A = k.ca.attach, B = k.cb.attach, mix = (x, y) => (x || 0) + ((y || 0) - (x || 0)) * u;
+      const at = { u: clamp(mix(A.u, B.u), 0, 1), t: mix(A.t, B.t), n: mix(A.n, B.n) }, pos = attachPos(at, p, ctx);
+      if (isNum(pos[0]) && isNum(pos[1])) { c.x = pos[0]; c.y = pos[1]; }
+    }
   }
   const centroid = o => {
     if (Array.isArray(o.pts) && o.pts.length) { let x = 0, y = 0; o.pts.forEach(p => { x += p[0]; y += p[1]; }); return [x / o.pts.length, y / o.pts.length]; }
@@ -287,7 +374,7 @@
   /* ---------------- objects at a given time ---------------- */
   const fade = (u, a, b) => clamp((u - a) / (b - a), 0, 1), smooth = x => x * x * (3 - 2 * x);
   /* A -> B at progress u (0..1, already eased). `prev` = the objects of the step before A (used to know which way a leaving object was already moving). */
-  function interpolate(A, B, u, prev) {
+  function interpolate(A, B, u, prev, ctx) {
     const vis = arr => (arr || []).filter(o => o && !o.hidden), a = vis(A), b = vis(B), pv = {};
     vis(prev).forEach(o => { pv[o.id] = o; });
     const mapB = {}; b.forEach(o => { mapB[o.id] = o; }); const inA = {}; a.forEach(o => { inA[o.id] = o; });
@@ -318,6 +405,7 @@
       const idx = a.indexOf(oa); let at = 0; for (let k = idx - 1; k >= 0; k--) { const j = out.findIndex(q => q.id === a[k].id); if (j >= 0) { at = j + 1; break; } }
       out.splice(at, 0, o);
     });
+    try { reattachInBetween(out, a, b, u, ctx); } catch (e) { /* keep the plain blend */ }
     return out;
   }
 
@@ -329,10 +417,10 @@
     if (s.kind === 'hold') return stepObjects(sc, s.step);
     const span = s.t1 - s.t0, p = span > 0 ? clamp((t - s.t0) / span, 0, 1) : 1, u = (ease[s.ease] || ease.inout)(p);
     if (u <= 0) return stepObjects(sc, s.from); if (u >= 1) return stepObjects(sc, s.to);
-    return interpolate(stepObjects(sc, s.from), stepObjects(sc, s.to), u, s.from > 0 ? stepObjects(sc, s.from - 1) : null);
+    return interpolate(stepObjects(sc, s.from), stepObjects(sc, s.to), u, s.from > 0 ? stepObjects(sc, s.from - 1) : null, { lngLat: !!(sc.bg && sc.bg.type === 'mapbox') });
   }
 
-  const API = { attachFromPoint, makeAttach, syncAttach, attachFrame: frameAt, LIMITS, EASES, isAnimated, stepCount, stepObjects, allObjects, normalize, timeline, totalDuration, syncDuration, stepTimes, stepAt, enable, addStep, dupStep, delStep, moveStep, setStep, setSpeed, flatten, simplifyPts, simplifyFronts, fewerPoints, sizeBytes, resample, catmull, centroid, interpolate, objectsAt, blendObject };
+  const API = { attachFromPoint, makeAttach, syncAttach, sanitizeAttach, attachPlan, attachPos, attachFrame: frameAt, LIMITS, EASES, isAnimated, stepCount, stepObjects, allObjects, normalize, timeline, totalDuration, syncDuration, stepTimes, stepAt, enable, addStep, dupStep, delStep, moveStep, setStep, setSpeed, flatten, simplifyPts, simplifyFronts, fewerPoints, sizeBytes, resample, catmull, centroid, interpolate, objectsAt, blendObject };
   g.MapAnim = API;
   if (g.Engine) { g.Engine.objectsAt = objectsAt; g.Engine.animTimeline = timeline; }
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

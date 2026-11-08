@@ -38,7 +38,8 @@
   /* ---------- history / persistence ---------- */
   const snap = () => JSON.stringify({ name: S.show.name, accent: S.show.accent, bugText: S.show.bugText, logo: S.show.logo, scenes: S.show.scenes });
   const attachMemo = new WeakMap();   // v0.11.5: where each attached child was last put (not saved)
-  function commit() { try { MA.syncAttach(cur().objects, attachMemo); } catch (e) { /* ignore */ } const s = snap(); if (S.hist[S.hp] === s) return; S.hist = S.hist.slice(0, S.hp + 1); S.hist.push(s); if (S.hist.length > 120) S.hist.shift(); S.hp = S.hist.length - 1; autosave(); thumbSoon(); }
+  const attachCtx = sc => ({ lngLat: !!(sc || cur()).bg && (sc || cur()).bg.type === 'mapbox' });   // pinned objects are lng/lat on Mapbox scenes
+  function commit() { try { MA.syncAttach(cur().objects, attachMemo, attachCtx()); } catch (e) { /* ignore */ } const s = snap(); if (S.hist[S.hp] === s) return; S.hist = S.hist.slice(0, S.hp + 1); S.hist.push(s); if (S.hist.length > 120) S.hist.shift(); S.hp = S.hist.length - 1; autosave(); thumbSoon(); }
   function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
@@ -159,7 +160,7 @@
     const sh=E.newShow(); if(sh.scenes&&sh.scenes[0]&&sh.scenes[0].bg&&sh.scenes[0].bg.type==='mapbox')sh.scenes[0].bg=JSON.parse(JSON.stringify(defaultMapBg()));
     return sh;
   }
-  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); sh.scenes.forEach(x => { if (x && x.anim && MA) MA.normalize(x); }); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
+  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); sh.scenes.forEach(x => { if (x && x.anim && MA) MA.normalize(x); if (x && MA) { try { MA.sanitizeAttach(x); } catch (e) { /* bad Follow links are simply dropped */ } } }); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
@@ -241,13 +242,14 @@
   function alsoLaterSteps(ob) {
     const sc = realScene(); if (!MA.isAnimated(sc)) return; const i = stepIdx(), n = sc.anim.steps.length; if (i >= n - 1) return;
     for (let k = i + 1; k < n; k++) MA.stepObjects(sc, k).push(JSON.parse(JSON.stringify(ob)));
+    if (ob.attach) MA.sanitizeAttach(sc);   // in each later step the copy sits on THAT step's parent
     toast('Added to step ' + (i + 1) + ' and the ' + (n - 1 - i === 1 ? 'next step' : (n - 1 - i) + ' later steps') + '.');
   }
   function delObj() {
     const sc = cur(); if (!S.oid) return; const id = S.oid; sc.objects = sc.objects.filter(o => o.id !== id); S.oid = null;
     const rs = realScene(); if (MA.isAnimated(rs)) { const i = stepIdx(); if (rs.anim.steps.some((st, k) => k > i && MA.stepObjects(rs, k).some(o => o.id === id))) toast('Removed from this step only – it fades out here and later steps still have it.'); }
     commit(); renderPanels(); }
-  function dupObj() { const o = selObj(); if (!o) return; const c = JSON.parse(JSON.stringify(o)); c.id = 'o' + Date.now().toString(36); const xf = E.xf(cur(), editT()); E.move(c, 30, 30, xf); cur().objects.push(c); alsoLaterSteps(c); S.oid = c.id; commit(); renderPanels(); }
+  function dupObj() { const o = selObj(); if (!o) return; const c = JSON.parse(JSON.stringify(o)); c.id = 'o' + Date.now().toString(36); const xf = E.xf(cur(), editT()); E.move(c, 30, 30, xf); if (c.attach) { const par = cur().objects.find(q => q.id === c.attach.to); if (par) { c.attach = MA.makeAttach(par, c, attachCtx()); attachMemo.set(c, [c.x, c.y]); } else delete c.attach; } cur().objects.push(c); alsoLaterSteps(c); S.oid = c.id; commit(); renderPanels(); }
   function layer(dir) { const a = cur().objects, i = a.findIndex(o => o.id === S.oid); if (i < 0) return; const j = dir === 'front' ? a.length - 1 : dir === 'back' ? 0 : clamp(i + dir, 0, a.length - 1); const [o] = a.splice(i, 1); a.splice(j, 0, o); commit(); }
   function newScene(after) { const sc = E.newScene({ name: 'Scene ' + (S.show.scenes.length + 1), bg: (() => { const b = bgDefaultSpec(); return b ? { type: 'image', asset: b.asset, kenburns: false, fit: b.asset === 'bgdefault' ? 'fill' : undefined } : { type: 'solid', color: '#101820', kenburns: false }; })(), title: { show: false, text: '', sub: '' } }); { const b = bgAll().find(x => x.asset === sc.bg.asset); if (b) S.show.assets[b.asset] = b.data; } S.show.scenes.splice(S.si + 1, 0, sc); S.si++; S.oid = null; commit(); refreshAll(); }
 
@@ -497,17 +499,21 @@
   function stopPlay() { S.mode = 'edit'; S.play = null; if (S.present) exitPresent(); updateTransport(); }
   /* v0.11.5: releasing a playhead on (or close to) a step puts you back in EDITING that step (control points, handles and tools work again).
      Before this, a scrubbed playhead stayed in preview: the front showed its step shape but without its dots, and edits went to the old step. */
+  let scrubKey = false;
   function scrubToEdit() {
-    if (S.mode !== 'scrub') return; const sc = S.show && S.show.scenes[S.si]; if (!sc || !MA.isAnimated(sc)) return;
+    const byKey = scrubKey; scrubKey = false;      // arrow keys on a focused playhead keep previewing (each key press fires `change`)
+    if (S.mode !== 'scrub' || byKey) return; const sc = S.show && S.show.scenes[S.si]; if (!sc || !MA.isAnimated(sc)) return;
     const t = S.T - E.starts(S.show)[S.si]; if (t < -0.001 || t > sc.duration + 0.001) return;
     let best = -1, bd = Infinity; for (let k = 0, n = MA.stepCount(sc); k < n; k++) { const w = MA.stepTimes(sc, k), d = t < w.arrive ? w.arrive - t : t > w.leave ? t - w.leave : 0; if (d < bd) { bd = d; best = k; } }
     if (best < 0 || bd > 0.75) { toast('Between steps - drag the playhead onto a step (or click a step) to edit it'); return; }
     S.stepSid = sc.id; S.step = best; S.mode = 'edit'; S.play = null; if (S.oid && !MA.stepObjects(sc, best).some(o => o.id === S.oid)) S.oid = null;
     updateTransport(); renderStepbar(); renderPanels();
   }
-  function updateTransport() { const tot = E.total(S.show), sc = $('#scrub'); sc.max = tot; const T = S.mode === 'edit' ? E.starts(S.show)[S.si] : S.T; if (document.activeElement !== sc) sc.value = T; $('#tc').textContent = `${T.toFixed(1)} / ${tot.toFixed(1)} s`; if (typeof syncStepbar === 'function') syncStepbar(); }
+  /* v0.11.5: while editing, BOTH playheads sit on the step being edited (scene start + that step's arrival), not on the scene start */
+  function editClock() { const sc = S.show && S.show.scenes[S.si], st = E.starts(S.show)[S.si]; return sc && MA.isAnimated(sc) ? st + MA.stepTimes(sc, stepIdx()).arrive : st; }
+  function updateTransport() { const tot = E.total(S.show), sc = $('#scrub'); sc.max = tot; const T = S.mode === 'edit' ? editClock() : S.T; if (S.mode === 'edit' || document.activeElement !== sc) sc.value = T; $('#tc').textContent = `${T.toFixed(1)} / ${tot.toFixed(1)} s`; if (typeof syncStepbar === 'function') syncStepbar(); }
   $('#scrub').addEventListener('input', e => { S.mode = 'scrub'; S.T = +e.target.value; S.play = null; updateTransport(); });
-  $('#scrub').addEventListener('change', scrubToEdit);
+  $('#scrub').addEventListener('change', scrubToEdit); $('#scrub').addEventListener('keydown', () => { scrubKey = true; }); $('#scrub').addEventListener('pointerdown', () => { scrubKey = false; });
   $('#bPlayScene').onclick = () => { const st = E.starts(S.show)[S.si]; playFrom(st, st + cur().duration); };
   $('#bPlayShow').onclick = () => playFrom(0, E.total(S.show));
   $('#bStop').onclick = stopPlay;
@@ -531,6 +537,7 @@
     const sc = realScene(); if (!MA.isAnimated(sc)) return; const i = stepIdx(), src = (all ? MA.stepObjects(sc, i) : [selObj()]).filter(Boolean);
     if (!src.length) return toast('Select an object first'); backToEdit();
     sc.anim.steps.forEach((st, k) => { if (k === i) return; const arr = MA.stepObjects(sc, k); src.forEach(o => { const c = JSON.parse(JSON.stringify(o)), j = arr.findIndex(q => q.id === o.id); if (j >= 0) arr[j] = c; else arr.push(c); }); });
+    try { MA.sanitizeAttach(sc); } catch (e) { /* ignore */ }   // Follow links: every step's children sit on that step's parents
     commit(); renderStepbar(); toast(all ? 'Copied all graphics of this step to every step' : 'Copied this object to every step');
   }
   function sbNum(label, val, min, max, step, on, dis, title) {
@@ -574,14 +581,14 @@
         h('button', { text: 'Copy object → all steps', title: 'Put the selected object in every step exactly as it is here', on: { click: () => copyToAllSteps(false) } }),
         h('button', { text: 'Remove animation', className: 'dng', title: 'Keep only the selected step as the scene’s graphics', on: { click: animDisable } }),
         sz > SB_WARN ? h('span', { className: 'sbwarn', text: '⚠ animation data ' + kb + ' (cloud limit 8 MB)' }) : h('span', { className: 'mut', text: kb })));
-    const sl = $('#sbScrub'); sl.addEventListener('input', () => { S.mode = 'scrub'; S.play = null; S.T = E.starts(S.show)[S.si] + (+sl.value); updateTransport(); }); sl.addEventListener('change', scrubToEdit);
+    const sl = $('#sbScrub'); sl.addEventListener('input', () => { S.mode = 'scrub'; S.play = null; S.T = E.starts(S.show)[S.si] + (+sl.value); updateTransport(); }); sl.addEventListener('change', scrubToEdit); sl.addEventListener('keydown', () => { scrubKey = true; }); sl.addEventListener('pointerdown', () => { scrubKey = false; });
     syncStepbar();
   }
   /* light per-frame sync (no DOM rebuild): playhead + scrub position */
   function syncStepbar() {
     const sc = S.show && S.show.scenes[S.si]; if (!sc || !MA.isAnimated(sc)) return; const head = $('#sbHead'), sl = $('#sbScrub'), tot = sc.duration || 1;
     const t = S.mode === 'edit' ? MA.stepTimes(sc, stepIdx()).arrive : clamp(S.T - E.starts(S.show)[S.si], 0, tot);
-    if (head) head.style.left = (t / tot * 100) + '%'; if (sl && document.activeElement !== sl) { sl.max = tot; sl.value = t; }
+    if (head) head.style.left = (t / tot * 100) + '%'; if (sl && (S.mode === 'edit' || document.activeElement !== sl)) { sl.max = tot; sl.value = t; }
     const tt = $('#sbTot'); if (tt) { const v = 'Total ' + tot.toFixed(1) + ' s'; if (tt.textContent !== v) tt.textContent = v; }
     document.querySelectorAll('#sbTrack .sbstep').forEach(el => { const k = +el.dataset.step, on = S.mode === 'edit' ? k === stepIdx() : k === MA.stepAt(sc, t); el.classList.toggle('on', on); });
   }
@@ -628,7 +635,7 @@
       // Keep the zoom text synchronized independently of expensive map frames.
       updateZoomBadge();
       if (S.mode === 'edit') {
-        MA.syncAttach(cur().objects, attachMemo);   // v0.11.5: icons / text / H-L attached to a front follow it while you edit
+        MA.syncAttach(cur().objects, attachMemo, attachCtx());   // v0.11.5: icons / text / H-L attached to a front follow it while you edit
         E.renderScene(sctx, S.show, cur(), clock(),
           {editing:true,camT:editT(),liveMap:true});
         // Keep the active map thumbnail current by copying the FINISHED
@@ -751,24 +758,40 @@
     B2(p, o.anim, 'in', 'select', { label: 'Entrance', options: E.ANIMS }); B2(p, o.anim, 'delay', 'range', { min: 0, max: 20, step: 0.1, label: 'Delay (s)' }); B2(p, o.anim, 'dur', 'range', { min: 0.1, max: 5, step: 0.1, label: 'Duration (s)' });
     attachPanel(p, o);
     movePanel(p, o);
-    if (isMap(cur().bg)) p.append(bind(o, 'geo', 'check', { label: 'Pin to map', after: v => { o.geo = !v; E.setGeo(o, cur(), editT(), v); } }), h('div', { className: 'hint', text: 'Pinned objects move and zoom with the map (position only – sizes stay fixed).' }));
+    if (isMap(cur().bg)) p.append(bind(o, 'geo', 'check', { label: 'Pin to map', after: v => { o.geo = !v; E.setGeo(o, cur(), editT(), v); pinFollowers(o, v); } }), h('div', { className: 'hint', text: 'Pinned objects move and zoom with the map (position only – sizes stay fixed).' }));
     p.append(h('div', { className: 'h', text: 'Arrange' }), h('div', { className: 'btnrow' }, h('button', { text: 'Bring front', on: { click: () => layer('front') } }), h('button', { text: 'Send back', on: { click: () => layer('back') } }), h('button', { text: 'Duplicate', on: { click: dupObj } }), h('button', { text: 'Delete', className: 'dng', on: { click: delObj } })));
   }
   /* v0.11.5: "Follow" - a point-like object (icon, text, H/L ...) rides on another object: it keeps its spot along a front and follows it as the front moves, grows, shrinks or bends */
   const hasXY = q => q && typeof q.x === 'number' && typeof q.y === 'number' && !q.pts;
   function objLabel(q) { return q.type === 'front' ? (q.kind || 'front') + ' front' : q.type === 'hl' ? (q.kind === 'L' ? 'Low' : 'High') + (q.value ? ' ' + q.value : '') : q.type === 'text' ? 'Text "' + String(q.text || '').slice(0, 14) + '"' : q.type === 'icon' ? 'Icon ' + (q.icon || '') : q.type + (q.name ? ' ' + q.name : ''); }
+  /* is `q` (directly or through a chain of Follow links) already following `o`?  Then `o` must not follow `q` (it would make a loop). */
+  function followsChain(objs, q, o) { const seen = new Set(); let c = q; while (c && c.attach && !seen.has(c)) { if (c.attach.to === o.id) return true; seen.add(c); c = objs.find(x => x.id === c.attach.to); } return false; }
   function attachPanel(p, o) {
-    if (!hasXY(o)) return; const parents = cur().objects.filter(q => q.id !== o.id && (q.pts ? q.pts.length >= 2 : hasXY(q)) && !(q.attach && q.attach.to === o.id));
-    if (!parents.length && !o.attach) return;
+    if (!hasXY(o)) return; const objs = cur().objects, cand = objs.filter(q => q.id !== o.id && (q.pts ? q.pts.length >= 2 : hasXY(q)) && !followsChain(objs, q, o));
+    /* Follow only works between objects that are positioned the same way - both on the screen, or both pinned to the map */
+    const parents = cand.filter(q => !!q.geo === !!o.geo), skipped = cand.length - parents.length;
+    if (!parents.length && !o.attach && !skipped) return;
     p.append(h('div', { className: 'h', text: 'Follow (stay with another object)' }));
     const sel = h('select', { id: 'attachTo' }, h('option', { value: '', text: 'Nothing - stays where I put it' }), ...parents.map(q => h('option', { value: q.id, text: objLabel(q), selected: !!(o.attach && o.attach.to === q.id) })));
-    sel.addEventListener('change', () => { const par = parents.find(q => q.id === sel.value); if (par) { o.attach = MA.makeAttach(par, o); attachMemo.set(o, [o.x, o.y]); } else { delete o.attach; attachMemo.delete(o); } commit(); renderPanels(); });
+    sel.addEventListener('change', () => { const par = parents.find(q => q.id === sel.value); if (par) { o.attach = MA.makeAttach(par, o, attachCtx()); attachMemo.set(o, [o.x, o.y]); } else { delete o.attach; attachMemo.delete(o); } commit(); renderPanels(); });
     p.append(fld('Follows', sel));
+    if (skipped) p.append(h('div', { className: 'hint', text: skipped + (skipped === 1 ? ' object is' : ' objects are') + ' not listed: ' + (o.geo ? 'this one is pinned to the map and they are not' : 'this one is not pinned to the map and they are') + '. Objects follow each other only when both are pinned or both are not.' }));
     if (o.attach) {
-      const par = cur().objects.find(q => q.id === o.attach.to);
+      const par = objs.find(q => q.id === o.attach.to);
       p.append(h('div', { className: 'hint', text: 'It keeps this spot ' + (par && par.pts ? 'along the line and distance from it' : 'relative to it') + '. Move the ' + (par ? objLabel(par) : 'parent') + ', reshape or lengthen it, or change steps: this follows. Drag it to change its spot.' }));
       if (par && par.pts) { const al = { v: Math.round(o.attach.u * 100) }; p.append(bind(al, 'v', 'range', { min: 0, max: 100, label: 'Along it (%)', after: v => { o.attach.u = v / 100; } })); }
     }
+  }
+  /* "Pin to map" was just switched on `o`: everything connected to it by Follow links changes with it, so the group keeps its shape and the links stay valid.
+     (Objects that cannot be pinned leave the group.) */
+  function pinFollowers(o, on) {
+    const sc = cur(), objs = sc.objects, fam = new Set([o]); let grew = true;
+    while (grew) { grew = false; objs.forEach(q => { if (fam.has(q)) return; const par = q.attach && objs.find(x => x.id === q.attach.to); if ((par && fam.has(par)) || Array.from(fam).some(f => f.attach && f.attach.to === q.id)) { fam.add(q); grew = true; } }); }
+    if (fam.size === 1 && !o.attach) return; let moved = 0, freed = 0;
+    fam.forEach(q => { if (q === o || !!q.geo === !!on) return; if (q.noGeo && on) { delete q.attach; attachMemo.delete(q); freed++; return; } q.geo = !on; E.setGeo(q, sc, editT(), on); moved++; });
+    fam.forEach(q => { if (q === o && !q.attach) return; const par = q.attach && objs.find(x => x.id === q.attach.to);
+      if (par && !!par.geo === !!q.geo) { q.attach = MA.makeAttach(par, q, attachCtx()); attachMemo.set(q, [q.x, q.y]); } else if (q.attach) { delete q.attach; attachMemo.delete(q); freed++; } });
+    if (moved || freed) toast((moved ? moved + (moved === 1 ? ' linked object was' : ' linked objects were') + ' ' + (on ? 'pinned' : 'unpinned') + ' with it. ' : '') + (freed ? freed + (freed === 1 ? ' Follow link was' : ' Follow links were') + ' released.' : ''));
   }
   const MLET = i => String.fromCharCode(65 + i);
   function movePanel(p, o) {

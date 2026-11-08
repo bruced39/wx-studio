@@ -30,7 +30,7 @@ test('moving the parent front moves the attached child by the same amount; a lon
 test('a child the user moves stays where it was put and learns its new place; the next parent move carries that new offset', () => {
   const f = front('f', clone(A)), c = icon('c', ...mid(f.pts)); c.attach = MA.makeAttach(f, c); const memo = new WeakMap(), objs = [f, c]; MA.syncAttach(objs, memo);
   c.x += 0.3; c.y += 0.4; const moved = [c.x, c.y]; MA.syncAttach(objs, memo);
-  assert.ok(dist([c.x, c.y], moved) < 1e-9, 'not pulled back'); assert.ok(Math.abs(c.attach.n) > 0.15, 'offset learned (distance from the front)');
+  assert.ok(dist([c.x, c.y], moved) < 1e-5, 'not pulled back'); assert.ok(Math.abs(c.attach.n) > 0.15, 'offset learned (distance from the front)');
   f.pts = f.pts.map(p => [p[0] + 2, p[1]]); MA.syncAttach(objs, memo);
   assert.ok(dist([c.x, c.y], [moved[0] + 2, moved[1]]) < 0.02, 'follows with the new offset');
 });
@@ -64,4 +64,52 @@ test('attach is carried (not blended) by the step interpolation and survives JSO
   const sc = { id: 's', name: 'm', duration: 6, bg: { type: 'mapbox' }, objects: [front('f', clone(A)), Object.assign(icon('c', -73, 42), { attach: { to: 'f', u: 0.5, t: 0, n: 0 } })] };
   MA.enable(sc); MA.addStep(sc, 0); const tl = MA.timeline(sc), mv = tl.segs.find(s => s.kind === 'move'), o = MA.objectsAt(sc, (mv.t0 + mv.t1) / 2).find(q => q.id === 'c');
   assert.deepEqual(o.attach, { to: 'f', u: 0.5, t: 0, n: 0 }); assert.deepEqual(JSON.parse(JSON.stringify(sc)).anim.steps[1].objects.find(q => q.id === 'c').attach, { to: 'f', u: 0.5, t: 0, n: 0 });
+});
+
+/* ---------------- stabilisation round: compatibility, long cycles, damaged data, idempotence ---------------- */
+test('a link between objects positioned differently (pinned vs screen) is dropped; matching ones are kept', () => {
+  const f = front('f', clone(A)), pinned = icon('p', ...mid(f.pts)), s = icon('s', 10, 10); f.geo = true; pinned.geo = true; s.geo = false;
+  pinned.attach = MA.makeAttach(f, pinned); s.attach = { to: 'f', u: 0.5, t: 0, n: 0 };           // screen icon, pinned front
+  const objs = [f, pinned, s]; MA.syncAttach(objs, new WeakMap(), { lngLat: true });
+  assert.ok(pinned.attach, 'pinned -> pinned stays'); assert.equal(s.attach, undefined, 'screen -> pinned is released');
+  f.geo = false; MA.syncAttach(objs, new WeakMap(), { lngLat: true }); assert.equal(pinned.attach, undefined, 'unpinning one side releases the link');
+});
+
+test('cycles of any length are broken, the last-listed member loses its link, and nothing keeps changing afterwards', () => {
+  for (const n of [2, 3, 5, 9]) {
+    const objs = []; for (let i = 0; i < n; i++) objs.push(icon('c' + i, i * 10, i * 5)); objs.forEach((o, i) => { o.attach = { to: 'c' + ((i + 1) % n), u: 0, t: 1, n: 1 }; });
+    const memo = new WeakMap(); const ch = MA.syncAttach(objs, memo, {}); assert.ok(ch >= 1);
+    assert.equal(objs.filter(o => o.attach).length, n - 1, 'exactly one link removed from a loop of ' + n); assert.equal(objs[n - 1].attach, undefined, 'the last-listed member loses its link');
+    assert.equal(MA.syncAttach(objs, memo, {}), 0, 'second pass is a no-op'); assert.equal(MA.syncAttach(objs, new WeakMap(), {}), 0);
+  }
+});
+
+test('a long valid chain is placed parent-first in one pass and is stable', () => {
+  const f = front('f', clone(A)), objs = [f]; let prev = f.id; for (let i = 0; i < 40; i++) { const c = icon('c' + i, 0, 0); c.attach = { to: prev, u: 0.5, t: 0.01, n: 0.02 }; objs.unshift(c); prev = c.id; }   // children listed BEFORE their parents
+  const memo = new WeakMap(); MA.syncAttach(objs, memo, {}); const before = JSON.stringify(objs);
+  assert.equal(MA.syncAttach(objs, memo, {}), 0); assert.equal(JSON.stringify(objs), before);
+  const last = objs[0], d = Math.hypot(last.x - objs[1].x, last.y - objs[1].y); assert.ok(Math.abs(d - Math.hypot(0.01, 0.02)) < 1e-5, 'each link is one offset from its parent');
+});
+
+test('damaged attach data is removed or repaired, never trusted, never throws', () => {
+  const f = front('f', clone(A)); const mk = (id, att) => Object.assign(icon(id, 1, 2), { attach: att });
+  const bad = [mk('a', 'f'), mk('b', [1, 2]), mk('c', { to: 'f', u: 'x' }), mk('d', { to: 'f', u: NaN }), mk('e', { to: 'f', u: 0.5, t: Infinity }), mk('g', { to: 'nobody' }), mk('h', {}), mk('i', null), mk('j', { to: '' }), mk('k', { to: 'f', u: 7, t: 0, n: 0 })];
+  const fr2 = front('fr2', clone(A)); fr2.attach = { to: 'f', u: 0, t: 0, n: 0 };
+  const objs = [f, fr2].concat(bad); assert.doesNotThrow(() => MA.syncAttach(objs, new WeakMap(), {}));
+  const keep = objs.filter(o => o.attach).map(o => o.id); assert.deepEqual(keep, ['k'], 'only the repairable link (u clamped into 0..1) remains: ' + keep); assert.equal(objs.find(o => o.id === 'k').attach.u, 1);
+});
+
+test('sanitizeAttach cleans the scene objects and every step of an animated scene, and leaves attach-free scenes byte-identical', () => {
+  const sc = { id: 's', name: 's', duration: 9, bg: { type: 'solid' }, objects: [front('f', clone(A)), icon('i', 1, 1)] }; MA.enable(sc); MA.addStep(sc, 0, { hold: 1, dur: 2 });
+  const plain = JSON.stringify(sc); assert.equal(MA.sanitizeAttach(sc), 0); assert.equal(JSON.stringify(sc), plain);
+  sc.anim.steps[1].objects.find(o => o.id === 'i').attach = { to: 'zzz', u: 0, t: 0, n: 0 }; sc.objects.find(o => o.id === 'i').attach = { to: 'f', u: 0.3, t: 0, n: -0.2 };
+  assert.ok(MA.sanitizeAttach(sc) >= 1); assert.equal(sc.anim.steps[1].objects.find(o => o.id === 'i').attach, undefined); assert.ok(sc.objects.find(o => o.id === 'i').attach);
+  MA.normalize(sc); assert.equal(MA.sanitizeAttach(sc), 0, 'idempotent');
+});
+
+test('Mapbox measuring: turning a pinned front keeps the follower the same on-screen distance away (Mapbox-aware beats degree-space)', () => {
+  const f = front('f', [[-72, 42], [-71.5, 42.3], [-71, 42.4], [-70.5, 42.2]]); f.geo = true;
+  const c = icon('c', -71.4, 42.7); c.geo = true; const ctx = { lngLat: true };
+  c.attach = MA.makeAttach(f, c, ctx); const back = MA.attachPos(c.attach, f, ctx); assert.ok(Math.hypot(back[0] - c.x, back[1] - c.y) < 2e-6, 'round trip');
+  const noCtx = MA.makeAttach(f, c, {}); assert.notEqual(noCtx.n, c.attach.n, 'the across-offset really is measured differently on Mapbox scenes');
 });
