@@ -29,11 +29,11 @@ with sync_playwright() as p:
     chk('pin to a basic map and unpin restores the arrow size', abs(lg[1] - 40) < 0.01, lg); ev(SETUP)
     # --- extra arrow looks all draw
     seen = {}
-    for st in ('glossy', 'streak', 'block', 'chevron', 'plain'):
+    for st in ('glossy', 'streak', 'block', 'chevron', 'plain', 'tube', 'comet', 'chrome', 'modern'):
         ev(ADD, ['flow', {'pts': [[1500, 400], [1000, 360], [500, 440]], 'style': st, 'color': '#ffd23f', 'size': 60}])
         seen[st] = ev(RENDER, [1.0, [300, 200, 1400, 400], BG])
-    chk('all five arrow looks draw', all(v > 400 for v in seen.values()), seen)
-    chk('looks are different from one another', len(set(seen.values())) == 5, seen)
+    chk('all nine arrow looks draw (5 originals + 4 ribbon looks)', all(v > 400 for v in seen.values()), seen)
+    chk('looks are different from one another', len(set(seen.values())) == 9, seen)
     # --- jet: edge line + soft edges (straight band so the cross-section is easy to read)
     pts = [[200, 540], [900, 540], [1700, 540]]
     def band(**kw):
