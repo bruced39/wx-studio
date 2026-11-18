@@ -15,6 +15,7 @@ BG = (42, 138, 58)
 
 RENDER = """(spec)=>{
   const WX=window.WX,sc=WX.S.show.scenes[WX.S.si];
+  Sym.hlArrowsEnabled(spec.arrows===true);   // artwork checks sample pixels around the badge: arrows off unless a check asks for them
   sc.bg={type:'solid',color:spec.bg};sc.objects=spec.objs.map(o=>WX.E.newObject('hl',o));sc.dataLoop=null;
   const cv=document.createElement('canvas');cv.width=1920;cv.height=1080;const c=cv.getContext('2d');
   WX.E.renderScene(c,WX.S.show,sc,spec.t,{editing:false});
@@ -80,10 +81,10 @@ with sync_playwright() as p:
     chk('on a light background the image-square corners show no white/grey box (never brighter than the background, close to it)', all(near(x, LIGHT, 40) and sum(x[:3]) <= sum(LIGHT) + 12 for x in r), r)
     open(S + 'hl_light_render.png', 'wb').write(base64.b64decode(pg.evaluate("window.__png").split(',')[1]))
 
-    # --- animation: pulsing ring + bob keep working, the badge stays in place ---
+    # --- animation: bob keeps working, the badge stays in place ---
     a = pg.evaluate(RENDER, dict(bg='#%02x%02x%02x' % BG, t=1.5, objs=[H], pts=[(700, 400)]))[0]
     bb = pg.evaluate(RENDER, dict(bg='#%02x%02x%02x' % BG, t=2.4, objs=[H], pts=[(700, 400)]))[0]
-    chk('badge still renders at another animation time (pulse/bob do not hide it)', bb[2] > 150 and bb[0] < 40, [a, bb])
+    chk('badge still renders at another animation time (bob does not hide it)', bb[2] > 150 and bb[0] < 40, [a, bb])
     # --- small size uses the mip chain and still reads as a badge ---
     r = pg.evaluate(RENDER, dict(bg='#%02x%02x%02x' % BG, t=1.5, objs=[dict(x=700, y=540, size=60, kind='H', value='')], pts=[(700, 540 - 24), (700 - 33, 540 - 33)]))
     chk('small H (size 60): blue inside, background at the corner', r[0][2] > 120 and near(r[1], BG, 30), r)
@@ -92,7 +93,33 @@ with sync_playwright() as p:
     chk('old-style H without a pressure value: badge drawn, no pill', near(r[0], BG, 30) and r[1][2] > 150, r)
     # --- bounds for selection ---
     bnds = pg.evaluate("Sym.hlBounds(100,100,200)")
-    chk('selection bounds cover badge + pill', bnds == {'x': -24, 'y': -24, 'w': 248, 'h': 320}, bnds)
+    chk('selection bounds cover badge + pill + the orbiting arrows', bnds == {'x': -100, 'y': -100, 'w': 400, 'h': 400}, bnds)
+    # --- v0.10.4.5: three circulating arrows replace the pulsing rings (L red counter-clockwise, H blue clockwise) ---
+    import math
+    ang = pg.evaluate("({H0:Sym.hlArrowAngles('H',0),H1:Sym.hlArrowAngles('H',0.5),L0:Sym.hlArrowAngles('L',0),L1:Sym.hlArrowAngles('L',0.5)})")
+    chk('exactly 3 arrows per badge, evenly spaced', len(ang['H0']) == 3 and len(ang['L0']) == 3 and all(abs((ang['H0'][(i + 1) % 3] - ang['H0'][i]) % (2 * math.pi) - 2 * math.pi / 3) < 1e-9 for i in range(3)), ang)
+    chk('H arrows turn CLOCKWISE (screen angle increases with time)', all(b > a for a, b in zip(ang['H0'], ang['H1'])), ang)
+    chk('L arrows turn COUNTER-clockwise (screen angle decreases with time)', all(b < a for a, b in zip(ang['L0'], ang['L1'])), ang)
+    def arrow_px(kind, t, off, k=0):
+        a0 = pg.evaluate("(a)=>Sym.hlArrowAngles(a[0],a[1])[a[2]]", [kind, t, k]); d = 1 if kind == 'H' else -1
+        a = a0 + d * off; R = 0.745 * 300
+        return (round(700 + R * math.cos(a)), round(540 + R * math.sin(a)))
+    for kind, want, name in (('H', lambda p: p[2] > 200 and p[0] < 90, 'blue'), ('L', lambda p: p[0] > 200 and p[1] < 110 and p[2] < 110, 'red')):
+        o = dict(H0, kind=kind, value='')
+        mid = arrow_px(kind, 3.0, 0.5); behind = arrow_px(kind, 3.0, -0.35); head = arrow_px(kind, 3.0, 1.0)
+        r = pg.evaluate(RENDER, dict(bg='#%02x%02x%02x' % BG, t=3.0, arrows=True, objs=[o], pts=[mid, behind, head]))
+        chk('%s: the arrow shaft and head are drawn in %s along the orbit' % (kind, name), want(r[0]) and want(r[2]), r)
+        chk('%s: no arrow behind the tail of the arrow (orbit is background there)' % kind, near(r[1], BG, 40) or sum(r[1][:3]) > 600, r)
+        # exact repeat (frame-exact export): same t -> identical pixels; one spin period later -> the same picture again; a quarter second later -> different
+        def frame(t):
+            pg.evaluate(RENDER, dict(bg='#%02x%02x%02x' % BG, t=t, arrows=True, objs=[o], pts=[(0, 0)])); return pg.evaluate("window.__png")
+        f1, f2, f4 = frame(3.0), frame(3.0), frame(3.25)
+        per = pg.evaluate("(k)=>{const a=Sym.hlArrowAngles(k,3),b=Sym.hlArrowAngles(k,10);return a.every((x,i)=>Math.abs(Math.cos(x)-Math.cos(b[i]))<1e-9&&Math.abs(Math.sin(x)-Math.sin(b[i]))<1e-9)}", kind)
+        chk('%s: same time -> identical frame; one spin period (7 s) later -> same arrow angles; other time -> arrows moved' % kind, f1 == f2 and per and f1 != f4, [f1 == f2, per, f1 != f4])
+    # no pulsing ring / coloured glow any more: with arrows off, the ring area just outside the badge is plain background
+    r = pg.evaluate(RENDER, dict(bg='#%02x%02x%02x' % BG, t=1.0, arrows=False, objs=[dict(H0, value='')], pts=[(700 + int(0.62 * 300 * math.cos(a)), 540 + int(0.62 * 300 * math.sin(a))) for a in (0.3, 1.9, 3.6, 5.2)]))
+    chk('no pulsing blue ring or glow around the badge any more', all(near(x, BG, 25) for x in r), r)
+    open(S + 'hl_arrows_render.png', 'wb').write(base64.b64decode(pg.evaluate("window.__png").split(',')[1]))
     # --- the editor itself: add an H and an L with the real tools and look at the stage ---
     pg.evaluate("(()=>{const WX=window.WX,sc=WX.S.show.scenes[WX.S.si];sc.bg={type:'solid',color:'#16324f'};sc.dataLoop=null;sc.objects=[WX.E.newObject('hl',{x:620,y:520,size:240,kind:'H',value:'1034'}),WX.E.newObject('hl',{x:1250,y:560,size:240,kind:'L',value:'998'})];WX.commit&&WX.commit()})()")
     pg.wait_for_timeout(800); pg.screenshot(path=S + 'hl_editor.png')
