@@ -1,5 +1,34 @@
 # Map scene animation – quick guide (WX Studio v0.11.x)
 
+> **New in v0.11.6 – the master timeline.** Read the next section first. The older "Steps" system (v0.11.0–v0.11.5) is still there and unchanged; every show made with steps keeps working exactly as before.
+
+## Master timeline (v0.11.6) – one timeline per map scene
+Select a map scene and press **Animate** (next to Scene / Show / Steps). A timeline bar appears under the map and an **Animation** tab opens on the right.
+
+* **One total duration.** Type it in *Animation → Total duration* (e.g. 12). It is the scene length. Keys never change it, and it is not computed from steps.
+* **Ruler and playhead.** 1-second ticks with labels, the playhead moves in tenths of a second. Type an exact time in the **Time (s)** box, drag the playhead, or use **Play / Stop**. **◀ Key / Key ▶** jump between keys of the selected object.
+* **Keys are automatic.** Move the playhead to a time, then simply edit: drag an icon, reshape a front, rotate, resize. That edit creates (or updates) a key for *that object at that time*. Every object has its own keys; editing the cold front never touches the Low's keys. Scrubbing alone never creates or changes anything. Editing between two keys inserts a key there and leaves the neighbours alone; editing exactly at an existing key updates it (no duplicates).
+* **Keys on the bar.** The **All objects** row and the optional **Tracks** rows show diamonds. Click one to select it, drag it to retime, **Delete key** to remove it. The first key at 0 s is the start pose and cannot be removed.
+* **Curved paths.** With an object selected the map shows its route in yellow: lettered squares A, B, C… with times. Drag the orange ◆ in the middle of a leg to bend it; then two orange handles shape the curve. Bending never adds keys. **Straight legs / Smooth curve through keys** set the whole route at once.
+* **Speed.** Default is constant speed along the route (route length ÷ leg time): a 1 s leg looks faster than a 4 s leg for the same distance, and moving key B farther away raises the speed unless you also change the time. *Speed (all legs)* offers ease in / out.
+* **Fronts.** Move the playhead and drag the white round **shape dots** to reshape at that time; move, rotate or scale the whole front as usual. Add or remove dots at a later time: earlier shapes stay exactly as they were. Shape dots (white, round) are different from route handles (orange ◆).
+* **Links** (*Animation → Link*): **Independent** (own keys only), **Follow** another object's motion (keeps its offset; unlinking keeps where it visibly is), **Attach to front** (the v0.11.5 behaviour: rides along the front's curve as it moves and reshapes). Moving a linked object at time T keys its *offset* instead of breaking the link. Circular or incompatible links (map-pinned with screen-pinned) are refused.
+* **Pinned to map vs screen.** Map-pinned objects move in map coordinates, so they stay on the geography when the camera moves; screen objects move in screen coordinates.
+* **Undo / Redo, autosave, cloud, version history, .wxshow, MP4 export** all include the timeline. Preview, Present and MP4 draw the same frame for the same time.
+
+### Old step shows
+A scene that uses Steps keeps the step bar and plays exactly as before. Nothing is converted automatically. To use the new timeline on it open the **Animation** tab and press **Convert to master timeline**: the steps become keys at the step times (a copy of the original steps is stored inside the scene). **Back to steps** restores the original steps exactly. If your steps used different styles per step, the conversion warns you (the master timeline has one style per object).
+
+### Limits you should know
+* Fronts that were blended point-by-point between steps are converted to the timeline's shape-morph, so the in-between shapes can differ slightly (the shapes at the key times are identical).
+* Camera (map view start/end) animation is not previewed while scrubbing in the editor; it still runs in Play, Present and MP4.
+* The **Pin to map** switch is disabled for an object that already has keys (unpin before animating).
+* Tested in headless Chromium only; real Firefox and live Mapbox tiles have not been verified for the timeline.
+
+---
+
+# Steps (v0.11.0 – v0.11.5, unchanged)
+
 One map scene can move your weather graphics from step to step, so a 30–60 s forecast needs only a few scenes.
 
 ## Make an animation

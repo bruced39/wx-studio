@@ -106,3 +106,18 @@ Steps live in `scene.anim` of the normal show document: cloud save/open, unchang
 | Frame-accurate export loop (fake encoder inspects every frame) | `tests/browser/map_animation_export_browser_check.py` (7) |
 | Cloud save / open on a second computer, unchanged detection, conflicts (Use cloud / Keep mine / Keep both), offline recovery, version restore – fake Supabase and real SQL (`WX_BACKEND=pg`) | `tests/browser/map_animation_cloud_browser_check.py` (31) |
 | Relative frame cost with 72 objects × 12 steps | `tests/browser/map_animation_perf_browser_check.py` (4) |
+
+
+## 12. Master timeline (v0.11.6, branch `claude/v0.11.6-master-timeline`)
+
+**Goal.** Replace "N steps with per-step holds" by ONE timeline per scene (WSI / Weather Director style) without breaking v0.11.5 shows or the database.
+
+**Data (inside the existing scene JSON, no schema change).** `scene.tl = {v:1, duration, tracks:{[objectId]:{keys:[{id,t,pose…,e,path,h1,h2,att}], vis:{a,b}}}, legacy?}`. `scene.duration` mirrors `tl.duration` (0.5-600 s, typed by the user). Pose = `x,y` or `pts`, `rot`/`rotation`, `size`,`w`,`h`,`scale`. Key at 0 s is created with the track and holds the start pose (`scene.objects` keeps the base pose = key 0). Keys within 0.04 s are the same key. A scene has either `anim` (steps) or `tl`, never both; a converted scene keeps the original steps in `tl.legacy`.
+
+**Evaluation.** `Timeline.objectsAt(scene,t)` is pure. Per object: find the segment, apply ease to the fraction, evaluate the route (straight, auto-Catmull "curve" or explicit Bezier handles `h1` (offset from previous key) / `h2` (offset from this key)) by arc length (32-sample table; longitude scaled by cos(lat) for geographic objects) so speed = length / time. Fronts: route = centroid path; shape = Procrustes (rotation + uniform scale + residual) morph between exact stored arrays; arrays with different point counts are resampled by arc length; at keys the stored array is returned unchanged. Links: `attach {to,u,t,n}` (position keyed through `key.att`) and `follow {to}` (own pose + parent displacement since t=0); `linkPlan` orders parents first and breaks cycles; `bake` freezes visible motion when unlinking. The engine hook dispatches to the timeline when `scene.tl` exists; old step scenes go through the old path.
+
+**Editing.** `beginEdit(scene,T)` gives a working copy of the objects at T. The existing tools (drag, rotate, point edit, add, delete, z-order) mutate it through a Proxy; `flush` diffs against the snapshot and writes keys only for what actually differs (so scrubbing, selecting, hovering write nothing). `liveSync` lets attached/following children ride along while dragging. Overlay: yellow route with lettered key squares, orange ◆ bend grip/handles (hit-test order: curve handles, object body, key squares, bend grips); white round dots stay the front's shape points.
+
+**Compatibility rules.** v0.11.5 scenes are never reinterpreted silently: `fromSteps` is an explicit, reversible action (`toSteps` restores the stored original exactly); `MapAnim.allObjects`, show-file media scanning and export's missing-image scan include `tl.legacy`. Mapbox pinning, H/L ribbon styles and flow arrows are untouched (they live in object style fields).
+
+**Tests.** `tests/master_timeline.test.js` (23, engine), `tests/browser/master_timeline_browser_check.py` (59, real mouse in Chromium), `tests/browser/master_timeline_persistence_browser_check.py` (27: local reload, `.wxshow.json`, `.wxshow`, cloud via fake Supabase or `WX_BACKEND=pg`, damaged data), `tests/browser/build_timeline_demo.py` (12 s demo + stills + MP4; `docs/demo/`).

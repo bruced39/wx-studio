@@ -672,7 +672,7 @@
     guard(() => drawBackground(c, show, scene, t, ct, opts));
     if (scene.dataLoop && scene.dataLoop.on && g.WXData) guard(() => g.WXData.draw(c, scene, t, opts, xf));
     /* v0.11.0: an animated scene draws the objects of the step / in-between state at time t (edit mode draws the selected step as stored) */
-    const objs = (!editing && scene.anim && E.objectsAt) ? E.objectsAt(scene, t) : scene.objects;
+    const objs = (!editing && (scene.anim || scene.tl) && E.objectsAt) ? E.objectsAt(scene, t) : scene.objects;
     objs.forEach(o => { if (!o.hidden) guard(() => drawObjectAnimated(c, o, scene, xf, t, show, editing, objs)); });
     if (scene.dataLoop && scene.dataLoop.on && g.WXData) guard(() => g.WXData.drawBar(c, scene, t, opts));
     guard(() => drawTitle(c, show, scene, t, editing)); guard(() => drawTitle2(c, show, scene, t, editing)); guard(() => drawBug(c, show));

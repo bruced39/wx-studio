@@ -38,7 +38,10 @@
     const st = sc.anim.steps[Math.min(i, sc.anim.steps.length - 1)]; return (st && st.objects) || sc.objects;
   };
   /* every object of every step (media scans: images / icons used by later steps must be saved and uploaded too) */
-  const allObjects = sc => { const out = (sc && sc.objects || []).slice(); if (isAnimated(sc)) sc.anim.steps.forEach(st => { if (st.objects) st.objects.forEach(o => out.push(o)); }); return out; };
+  const allObjects = sc => { const out = (sc && sc.objects || []).slice(); if (isAnimated(sc)) sc.anim.steps.forEach(st => { if (st.objects) st.objects.forEach(o => out.push(o)); });
+    /* v0.11.6: a master timeline made from a step show keeps the original steps (tl.legacy) - their images must be saved / uploaded too */
+    if (sc && sc.tl && sc.tl.legacy) { (sc.tl.legacy.objects || []).forEach(o => out.push(o)); ((sc.tl.legacy.anim && sc.tl.legacy.anim.steps) || []).forEach(st => (st && st.objects || []).forEach(o => out.push(o))); }
+    return out; };
   const speedOf = sc => clamp(+(sc.anim && sc.anim.speed) || 1, LIMITS.speed[0], LIMITS.speed[1]);
 
   /* Make the animation block valid (also used on load, so hand-edited / future files cannot break playback). Returns the scene. */

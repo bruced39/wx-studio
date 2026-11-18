@@ -1,0 +1,491 @@
+{
+ "format": "wx-studio-show",
+ "formatVersion": 2,
+ "savedWith": "0.11.6",
+ "name": "Master timeline demo (v0.11.6)",
+ "accent": "#2f9bff",
+ "scenes": [
+  {
+   "id": "smwm79je38",
+   "name": "12 s master timeline demo",
+   "duration": 12,
+   "transition": {
+    "type": "cut",
+    "dur": 0
+   },
+   "bg": {
+    "type": "map",
+    "mbStyle": "broadcast",
+    "proj": "mercator",
+    "theme": "dark",
+    "region": "eastma",
+    "view": {
+     "cx": 487,
+     "cy": 305,
+     "w": 400
+    },
+    "view2": null,
+    "grad": "sky",
+    "color": "#101820",
+    "asset": null,
+    "dim": 0,
+    "kenburns": false,
+    "cities": false,
+    "counties": false,
+    "cityDensity": 1
+   },
+   "title": {
+    "show": false,
+    "text": "",
+    "sub": "",
+    "pos": "top-left"
+   },
+   "objects": [
+    {
+     "id": "front",
+     "type": "front",
+     "geo": true,
+     "anim": {
+      "in": "none",
+      "delay": 0,
+      "dur": 0.01
+     },
+     "pts": [
+      [
+       350,
+       210
+      ],
+      [
+       365,
+       250
+      ],
+      [
+       368,
+       290
+      ],
+      [
+       355,
+       330
+      ],
+      [
+       345,
+       375
+      ]
+     ],
+     "kind": "cold",
+     "size": 28,
+     "flip": false
+    },
+    {
+     "id": "low",
+     "type": "hl",
+     "geo": true,
+     "anim": {
+      "in": "none",
+      "delay": 0,
+      "dur": 0.01
+     },
+     "x": 372,
+     "y": 262,
+     "size": 110,
+     "kind": "L",
+     "value": "1004",
+     "attach": {
+      "to": "front",
+      "u": 0.325115,
+      "t": 0,
+      "n": -4.668702
+     }
+    },
+    {
+     "id": "label",
+     "type": "text",
+     "geo": true,
+     "anim": {
+      "in": "none",
+      "delay": 0,
+      "dur": 0.01
+     },
+     "x": 410,
+     "y": 236,
+     "text": "DEEPENING LOW",
+     "size": 40,
+     "color": "#ffffff",
+     "weight": 800,
+     "align": "center",
+     "box": true,
+     "boxColor": "rgba(8,20,38,0.75)",
+     "font": "display",
+     "follow": {
+      "to": "low"
+     }
+    },
+    {
+     "id": "rain",
+     "type": "icon",
+     "geo": true,
+     "anim": {
+      "in": "none",
+      "delay": 0,
+      "dur": 0.01
+     },
+     "x": 330,
+     "y": 350,
+     "size": 120,
+     "icon": "rain"
+    },
+    {
+     "id": "sun",
+     "type": "icon",
+     "geo": true,
+     "anim": {
+      "in": "none",
+      "delay": 0,
+      "dur": 0.01
+     },
+     "x": 640,
+     "y": 215,
+     "size": 110,
+     "icon": "sunny"
+    },
+    {
+     "id": "head",
+     "type": "text",
+     "geo": false,
+     "anim": {
+      "in": "none",
+      "delay": 0,
+      "dur": 0.01
+     },
+     "x": 640,
+     "y": 80,
+     "text": "COLD FRONT SWEEPS EAST",
+     "size": 64,
+     "color": "#ffffff",
+     "weight": 800,
+     "align": "center",
+     "box": false,
+     "boxColor": "rgba(8,20,38,0.78)",
+     "font": "display"
+    }
+   ],
+   "title2": {
+    "show": false,
+    "text": "7 DAY FORECAST",
+    "pos": "ul",
+    "width": 1150,
+    "y": 40,
+    "dx": 0,
+    "autoWidth": true,
+    "height": 154,
+    "minW": 0,
+    "logo": true,
+    "logoScale": 1.05,
+    "align": "center",
+    "size": 0,
+    "upper": true,
+    "color": "#07345a",
+    "font": "Roboto Condensed",
+    "weight": 700,
+    "anim": "auto",
+    "delay": 0.2,
+    "fx": {
+     "stroke": {
+      "on": true,
+      "size": 2,
+      "pos": "outside",
+      "color": "#1f2f57",
+      "opacity": 100
+     },
+     "shadow": {
+      "on": true,
+      "color": "#000000",
+      "opacity": 67,
+      "angle": 90,
+      "dist": 3,
+      "size": 6
+     },
+     "coverlay": {
+      "on": false,
+      "color": "#ffffff",
+      "opacity": 100
+     },
+     "goverlay": {
+      "on": false,
+      "c1": "#ffffff",
+      "c2": "#9fb4d6",
+      "angle": 90,
+      "opacity": 100
+     },
+     "glow": {
+      "on": false,
+      "color": "#7fb4ff",
+      "opacity": 75,
+      "size": 12
+     }
+    }
+   },
+   "tl": {
+    "v": 1,
+    "duration": 12,
+    "tracks": {
+     "front": {
+      "keys": [
+       {
+        "id": "qmwm79jehix1",
+        "t": 0,
+        "pts": [
+         [
+          350,
+          210
+         ],
+         [
+          365,
+          250
+         ],
+         [
+          368,
+          290
+         ],
+         [
+          355,
+          330
+         ],
+         [
+          345,
+          375
+         ]
+        ],
+        "size": 28
+       },
+       {
+        "id": "qmwm79jehau9",
+        "t": 3,
+        "pts": [
+         [
+          410,
+          205
+         ],
+         [
+          438,
+          250
+         ],
+         [
+          444,
+          296
+         ],
+         [
+          422,
+          336
+         ],
+         [
+          404,
+          381
+         ]
+        ],
+        "size": 28,
+        "path": "curve"
+       },
+       {
+        "id": "qmwm79jejpp7",
+        "t": 6,
+        "pts": [
+         [
+          468,
+          196
+         ],
+         [
+          506,
+          242
+         ],
+         [
+          518,
+          296
+         ],
+         [
+          492,
+          342
+         ],
+         [
+          470,
+          388
+         ]
+        ],
+        "size": 28,
+        "path": "curve"
+       },
+       {
+        "id": "qmwm79jeke4e",
+        "t": 9,
+        "pts": [
+         [
+          520,
+          190
+         ],
+         [
+          560,
+          226
+         ],
+         [
+          586,
+          264
+         ],
+         [
+          592,
+          302
+         ],
+         [
+          566,
+          342
+         ],
+         [
+          536,
+          386
+         ]
+        ],
+        "size": 28,
+        "path": "curve"
+       },
+       {
+        "id": "qmwm79jeodtv",
+        "t": 12,
+        "pts": [
+         [
+          556,
+          196
+         ],
+         [
+          598,
+          232
+         ],
+         [
+          626,
+          272
+         ],
+         [
+          628,
+          312
+         ],
+         [
+          602,
+          352
+         ],
+         [
+          568,
+          392
+         ]
+        ],
+        "size": 28,
+        "path": "curve"
+       }
+      ]
+     },
+     "low": {
+      "keys": [
+       {
+        "id": "qmwm79jer8j",
+        "t": 0,
+        "x": 372,
+        "y": 262,
+        "size": 110,
+        "att": {
+         "u": 0.325115,
+         "t": 0,
+         "n": -4.668702
+        }
+       },
+       {
+        "id": "qmwm79jerssj",
+        "t": 4.5,
+        "att": {
+         "u": 0.239052,
+         "t": 0,
+         "n": -22.50079
+        }
+       },
+       {
+        "id": "qmwm79jesdnj",
+        "t": 10,
+        "att": {
+         "u": 0.384475,
+         "t": 0,
+         "n": -6.988154
+        }
+       }
+      ]
+     },
+     "rain": {
+      "keys": [
+       {
+        "id": "qmwm79jesqqq",
+        "t": 0,
+        "x": 330,
+        "y": 350,
+        "size": 120
+       },
+       {
+        "id": "qmwm79jeswq7",
+        "t": 2.5,
+        "x": 400,
+        "y": 345,
+        "size": 120,
+        "h1": [
+         0,
+         -70
+        ],
+        "h2": [
+         -20,
+         60
+        ]
+       },
+       {
+        "id": "qmwm79jeuwjq",
+        "t": 6,
+        "x": 470,
+        "y": 300,
+        "size": 120,
+        "path": "curve"
+       },
+       {
+        "id": "qmwm79jevt5w",
+        "t": 11,
+        "x": 600,
+        "y": 300,
+        "size": 120,
+        "path": "curve"
+       }
+      ]
+     },
+     "label": {
+      "keys": [
+       {
+        "id": "qmwm79jewhp5",
+        "t": 0,
+        "x": 410,
+        "y": 236,
+        "size": 40
+       },
+       {
+        "id": "qmwm79jewf5y",
+        "t": 7,
+        "x": 415.99999999999994,
+        "y": 258,
+        "size": 40
+       }
+      ]
+     },
+     "sun": {
+      "keys": [],
+      "vis": {
+       "a": 4
+      }
+     }
+    }
+   }
+  }
+ ],
+ "assets": {},
+ "mbMigrated": 1,
+ "wdBroadcastMapV1": 1,
+ "safe": 48
+}

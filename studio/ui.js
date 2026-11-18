@@ -17,7 +17,8 @@
   const MAP_DEFAULT_KEY = 'wx.studio.defaultMap.v1';
   /* v0.11.0 map animation steps: cur() is the scene being edited. In an animated scene with step 2+ selected it is a write-through view whose `objects` is that step's
      array, so every existing tool (move, restyle, add, delete, undo…) edits the selected step. The real show is never swapped. */
-  const MA = g.MapAnim;
+  const MA = g.MapAnim, TL = g.Timeline;
+  const tlOn = sc => !!(TL && sc && TL.enabled(sc)), tlRev = new WeakMap(); let tlEd = null; S.tlT = 0; S.tlSel = null; S.tlOpen = false;
   const realScene = () => S.show.scenes[S.si];
   const stepIdx = () => { const sc = S.show && S.show.scenes[S.si]; if (!sc || !sc.anim || !MA || !MA.isAnimated(sc)) return 0; if (S.stepSid !== sc.id) { S.stepSid = sc.id; S.step = 0; } S.step = clamp(+S.step || 0, 0, sc.anim.steps.length - 1); return S.step; };
   const viewCache = new WeakMap();
@@ -26,7 +27,7 @@
     const px = new Proxy(sc, { get: (t, k) => k === 'objects' ? st.objects : t[k], set: (t, k, v) => { if (k === 'objects') st.objects = v; else t[k] = v; return true; } });
     viewCache.set(sc, { st, px }); return px;
   }
-  const cur = () => { const sc = S.show.scenes[S.si]; if (!sc || !sc.anim) return sc; const i = stepIdx(); return i > 0 ? stepView(sc, i) : sc; };
+  const cur = () => { const sc = S.show.scenes[S.si]; if (sc && sc.tl && tlOn(sc)) return tlView(sc); if (!sc || !sc.anim) return sc; const i = stepIdx(); return i > 0 ? stepView(sc, i) : sc; };
   const selObj = () => cur().objects.find(o => o.id === S.oid) || null;
   const isMap = bg => bg.type === 'map' || bg.type === 'mapbox';
   const editT = () => (S.editEnd && cur().bg.view2) ? (cur().bg.camDelay || 0) + (cur().bg.camDur || 3) + 0.01 : 0;
@@ -39,7 +40,7 @@
   const snap = () => JSON.stringify({ name: S.show.name, accent: S.show.accent, bugText: S.show.bugText, logo: S.show.logo, scenes: S.show.scenes });
   const attachMemo = new WeakMap();   // v0.11.5: where each attached child was last put (not saved)
   const attachCtx = sc => ({ lngLat: !!(sc || cur()).bg && (sc || cur()).bg.type === 'mapbox' });   // pinned objects are lng/lat on Mapbox scenes
-  function commit() { try { MA.syncAttach(cur().objects, attachMemo, attachCtx()); } catch (e) { /* ignore */ } const s = snap(); if (S.hist[S.hp] === s) return; S.hist = S.hist.slice(0, S.hp + 1); S.hist.push(s); if (S.hist.length > 120) S.hist.shift(); S.hp = S.hist.length - 1; autosave(); thumbSoon(); }
+  function commit() { try { tlFlush(); } catch (e) { console.error(e); } try { if (!tlOn(realScene())) MA.syncAttach(cur().objects, attachMemo, attachCtx()); } catch (e) { /* ignore */ } try { if (tlOn(realScene())) renderMtl(); } catch (e) { console.error(e); } const s = snap(); if (S.hist[S.hp] === s) return; S.hist = S.hist.slice(0, S.hp + 1); S.hist.push(s); if (S.hist.length > 120) S.hist.shift(); S.hp = S.hist.length - 1; autosave(); thumbSoon(); }
   function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
@@ -160,7 +161,7 @@
     const sh=E.newShow(); if(sh.scenes&&sh.scenes[0]&&sh.scenes[0].bg&&sh.scenes[0].bg.type==='mapbox')sh.scenes[0].bg=JSON.parse(JSON.stringify(defaultMapBg()));
     return sh;
   }
-  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); sh.scenes.forEach(x => { if (x && x.anim && MA) MA.normalize(x); if (x && MA) { try { MA.sanitizeAttach(x); } catch (e) { /* bad Follow links are simply dropped */ } } }); S.show = sh; S.si = 0; S.oid = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
+  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); sh.scenes.forEach(x => { if (x && x.tl && TL) { try { TL.normalize(x); TL.sanitize(x); } catch (e) { delete x.tl; } } if (x && x.anim && MA) MA.normalize(x); if (x && MA) { try { MA.sanitizeAttach(x); } catch (e) { /* bad Follow links are simply dropped */ } } }); S.show = sh; S.si = 0; S.oid = null; S.tlT = 0; S.tlSel = null; tlEd = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
@@ -331,6 +332,7 @@
   }
   function backToEdit() {
     if (S.mode !== 'edit') {
+      { const rs = S.show && S.show.scenes[S.si]; if (tlOn(rs)) { const st1 = E.starts(S.show)[S.si]; if (S.T >= st1 - 0.001 && S.T <= st1 + rs.duration + 0.001) S.tlT = tlLocalT(rs); S.mode = 'edit'; S.play = null; updateTransport(); renderMtl(); return; } }
       /* v0.11.0: leaving a preview / scrub inside an animated scene continues editing the step that was on screen */
       const sc = S.show && S.show.scenes[S.si], st0 = sc && MA.isAnimated(sc) ? E.starts(S.show)[S.si] : null;
       if (st0 != null && S.T >= st0 && S.T <= st0 + sc.duration) { S.stepSid = sc.id; S.step = MA.stepAt(sc, S.T - st0); if (S.oid && !MA.stepObjects(sc, S.step).some(o => o.id === S.oid)) S.oid = null; }
@@ -358,6 +360,7 @@
       return;
     }
     if (S.tool === 'select') {
+      if (tlOn(realScene())) { const bh = E.hit(sc, editT(), p[0], p[1]), rh = tlRouteHit(p, xf, !!(bh && bh.id === S.oid)); if (rh) { S.drag = rh; renderMtl(); return; } }
       const so = selObj() ? E.toScreen(selObj(), xf) : null;
       if (so) { const hd = handles(so);
         if (selObj().move && selObj().move.on) { const mb = E.bounds(so), ax = mb.x + mb.w / 2, ay = mb.y + mb.h / 2, i = selObj().move.pts.findIndex(q => Math.hypot(ax + q[0] - p[0], ay + q[1] - p[1]) < 26); if (i >= 0) { S.drag = { k: 'mstop', i }; return; } }
@@ -407,6 +410,7 @@
         const cb = E.bounds(E.toScreen(o, xf)), want = { x: d.b0.x + d.raw[0], y: d.b0.y + d.raw[1], w: d.b0.w, h: d.b0.h }, sn = snapBounds(want, o, xf);
         E.move(o, want.x + sn.dx - cb.x, want.y + sn.dy - cb.y, xf); S.snapLines = sn.lines; }
       d.last = p; d.moved = true; }
+    else if (d.k === 'rkey' || d.k === 'rh' || d.k === 'rbend') { tlRouteDrag(d, p, xf); }
     else if (d.k === 'mstop' && o && o.move) { const mb = E.bounds(E.toScreen(o, xf)); o.move.pts[d.i] = [p[0] - (mb.x + mb.w / 2), p[1] - (mb.y + mb.h / 2)]; }
     else if (d.k === 'vert' && o) { const k = (o.geo && xf.map) ? xf.k : 1, q = o.geo && xf.map ? xf.inv(p[0], p[1]) : p; o.pts[d.i] = [q[0], q[1]]; }
     else if ((d.k === 'rot' || d.k === 'scl') && o) {
@@ -433,7 +437,7 @@
     else if (d.k === 'pen' && S.draft) { const l = S.draft.pts[S.draft.pts.length - 1]; if (Math.hypot(l[0] - p[0], l[1] - p[1]) > 3) S.draft.pts.push(p); }
     else if (d.k === 'shape' && S.draft) { S.draft.x = Math.min(d.o[0], p[0]); S.draft.y = Math.min(d.o[1], p[1]); S.draft.w = Math.abs(p[0] - d.o[0]); S.draft.h = Math.abs(p[1] - d.o[1]); }
   });
-  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; S.snapLines = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); });
+  ov.addEventListener('pointerup', () => { const d = S.drag; S.drag = null; S.snapLines = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if (!d) return; if(d.k==='orbit'||(d.k==='pan'&&cur().bg.type==='mapbox'))g.MB.setInteractive(false); if (d.k === 'pen' || d.k === 'shape') { finishDraft(); if (S.tool === 'rect' || S.tool === 'ellipse') setTool('select'); return; } if (d.k !== 'move' || d.moved) commit(); if (d.k === 'rkey' || d.k === 'rh' || d.k === 'rbend') { renderMtl(); renderPanels(); } });
   ov.addEventListener('pointercancel', () => { const d=S.drag; S.drag = null; ov.style.cursor = (S.tool==='pan'||(S.tool==='select'&&cur().bg.type==='mapbox'))?'grab':''; if(d&&(d.k==='orbit'||d.k==='pan'))g.MB.setInteractive(false); });
   ov.addEventListener('contextmenu', e => { if (cur().bg.type === 'mapbox') e.preventDefault(); });
   /* ---------- v0.10.1.3: double-click text on the stage to edit it in place ----------
@@ -496,13 +500,13 @@
 
   /* ---------- playback ---------- */
   function playFrom(a, b) { S.mode = 'play'; S.play = { a, b, t0: clock() }; }
-  function stopPlay() { S.mode = 'edit'; S.play = null; if (S.present) exitPresent(); updateTransport(); }
+  function stopPlay() { { const rs = S.show && S.show.scenes[S.si]; if (tlOn(rs) && S.mode !== 'edit') { const st1 = E.starts(S.show)[S.si]; if (S.T >= st1 - 0.001 && S.T <= st1 + rs.duration + 0.001) S.tlT = tlLocalT(rs); } } S.mode = 'edit'; S.play = null; if (S.present) exitPresent(); updateTransport(); }
   /* v0.11.5: releasing a playhead on (or close to) a step puts you back in EDITING that step (control points, handles and tools work again).
      Before this, a scrubbed playhead stayed in preview: the front showed its step shape but without its dots, and edits went to the old step. */
   let scrubKey = false;
   function scrubToEdit() {
     const byKey = scrubKey; scrubKey = false;      // arrow keys on a focused playhead keep previewing (each key press fires `change`)
-    if (S.mode !== 'scrub' || byKey) return; const sc = S.show && S.show.scenes[S.si]; if (!sc || !MA.isAnimated(sc)) return;
+    if (S.mode !== 'scrub' || byKey) return; const sc = S.show && S.show.scenes[S.si]; if (tlOn(sc)) { const st1 = E.starts(S.show)[S.si]; if (S.T >= st1 - 0.001 && S.T <= st1 + sc.duration + 0.001) backToEdit(); return; } if (!sc || !MA.isAnimated(sc)) return;
     const t = S.T - E.starts(S.show)[S.si]; if (t < -0.001 || t > sc.duration + 0.001) return;
     let best = -1, bd = Infinity; for (let k = 0, n = MA.stepCount(sc); k < n; k++) { const w = MA.stepTimes(sc, k), d = t < w.arrive ? w.arrive - t : t > w.leave ? t - w.leave : 0; if (d < bd) { bd = d; best = k; } }
     if (best < 0 || bd > 0.75) { toast('Between steps - drag the playhead onto a step (or click a step) to edit it'); return; }
@@ -510,13 +514,214 @@
     updateTransport(); renderStepbar(); renderPanels();
   }
   /* v0.11.5: while editing, BOTH playheads sit on the step being edited (scene start + that step's arrival), not on the scene start */
-  function editClock() { const sc = S.show && S.show.scenes[S.si], st = E.starts(S.show)[S.si]; return sc && MA.isAnimated(sc) ? st + MA.stepTimes(sc, stepIdx()).arrive : st; }
+  function editClock() { const sc = S.show && S.show.scenes[S.si], st = E.starts(S.show)[S.si]; if (tlOn(sc)) return st + clamp(+S.tlT || 0, 0, sc.tl.duration); return sc && MA.isAnimated(sc) ? st + MA.stepTimes(sc, stepIdx()).arrive : st; }
   function updateTransport() { const tot = E.total(S.show), sc = $('#scrub'); sc.max = tot; const T = S.mode === 'edit' ? editClock() : S.T; if (S.mode === 'edit' || document.activeElement !== sc) sc.value = T; $('#tc').textContent = `${T.toFixed(1)} / ${tot.toFixed(1)} s`; if (typeof syncStepbar === 'function') syncStepbar(); }
-  $('#scrub').addEventListener('input', e => { S.mode = 'scrub'; S.T = +e.target.value; S.play = null; updateTransport(); });
+  $('#scrub').addEventListener('input', e => { const sc = S.show.scenes[S.si], st1 = E.starts(S.show)[S.si], v = +e.target.value; if (tlOn(sc) && S.mode !== 'play' && v >= st1 - 1e-6 && v <= st1 + sc.duration + 1e-6) { tlSeek(v - st1); return; } S.mode = 'scrub'; S.T = v; S.play = null; updateTransport(); });
   $('#scrub').addEventListener('change', scrubToEdit); $('#scrub').addEventListener('keydown', () => { scrubKey = true; }); $('#scrub').addEventListener('pointerdown', () => { scrubKey = false; });
-  $('#bPlayScene').onclick = () => { const st = E.starts(S.show)[S.si]; playFrom(st, st + cur().duration); };
+  $('#bPlayScene').onclick = () => { if (tlOn(realScene())) { tlPlay(); return; } const st = E.starts(S.show)[S.si]; playFrom(st, st + cur().duration); };
   $('#bPlayShow').onclick = () => playFrom(0, E.total(S.show));
   $('#bStop').onclick = stopPlay;
+
+  /* ---------- v0.11.6 master timeline (ONE timeline per map scene; keys are written automatically at the playhead) ---------- */
+  function tlTouch(sc) { tlRev.set(sc, (tlRev.get(sc) || 0) + 1); tlEd = null; }
+  /* the working copy of the scene's objects AT THE PLAYHEAD: every existing tool edits it; commit() turns what changed into keys (TL.flush) */
+  function tlSession(sc) {
+    const T = clamp(+S.tlT || 0, 0, sc.tl.duration), rev = tlRev.get(sc) || 0;
+    if (tlEd && tlEd.sc === sc && tlEd.T === T && tlEd.rev === rev) return tlEd;
+    if (tlEd && tlEd.sc !== sc) tlFlush();
+    tlEd = { sc, T, rev, ed: TL.beginEdit(sc, T, attachCtx(sc)), px: null }; return tlEd;
+  }
+  function tlView(sc) {
+    const s = tlSession(sc); if (s.px) return s.px;
+    s.px = new Proxy(sc, { get: (t, k) => k === 'objects' ? s.ed.objs : t[k], set: (t, k, v) => { if (k === 'objects') s.ed.objs = v; else t[k] = v; return true; } }); return s.px;
+  }
+  /* write pending edits of the working copy into the scene as keys. Returns true when something was written. Nothing edited = nothing written (scrubbing is safe). */
+  function tlFlush() {
+    const s = tlEd; if (!s) return false; const sc = s.sc;
+    if (!S.show || S.show.scenes.indexOf(sc) < 0 || !TL.enabled(sc)) { tlEd = null; return false; }
+    if (!TL.dirty(sc, s.ed)) return false;
+    const r = TL.flush(sc, s.ed); tlTouch(sc);
+    if (r.warn.length) toast(r.warn[0]);
+    if (r.keys.length) { const k = r.keys[r.keys.length - 1]; S.tlSel = { oid: k[0], kid: k[1] }; }
+    return r.changed;
+  }
+  const tlLocalT = sc => { const st = E.starts(S.show)[S.si]; return clamp(Math.round((S.T - st) * 10) / 10, 0, sc.tl.duration); };
+  function tlSeek(T, exact) {
+    const sc = realScene(); if (!tlOn(sc)) return; if (S.mode !== 'edit') { S.mode = 'edit'; S.play = null; }
+    if (tlFlush()) commit();
+    S.tlT = clamp(exact ? +T || 0 : Math.round((+T || 0) * 10) / 10, 0, sc.tl.duration); updateTransport(); renderPanelsSoon();
+  }
+  let rpTimer = 0; function renderPanelsSoon() { if (S.tab !== 'anim' && S.tab !== 'object') return; clearTimeout(rpTimer); rpTimer = setTimeout(() => { if (!S.drag) renderPanels(); }, 60); }
+  function tlPlay() { const sc = realScene(); if (!tlOn(sc)) return; if (tlFlush()) commit(); let T = S.tlT; if (T >= sc.tl.duration - 0.05) T = 0; S.tlT = T; const st = E.starts(S.show)[S.si]; playFrom(st + T, st + sc.tl.duration); }
+  function tlStop() { stopPlay(); tlSeek(0); }
+  /* the playhead follows playback of this scene */
+  function tlFollowPlay() { const sc = S.show && S.show.scenes[S.si]; if (!tlOn(sc) || S.mode !== 'play') return; const st = E.starts(S.show)[S.si]; if (S.T >= st && S.T <= st + sc.duration + 0.01) S.tlT = clamp(S.T - st, 0, sc.tl.duration); }
+  function tlEnable() { const sc = realScene(); backToEdit(); TL.enable(sc, { duration: sc.duration >= 3 ? sc.duration : 12 }); S.tlT = 0; tlTouch(sc); commit(); refreshAll(); setTab('anim'); toast('Animation on – move the playhead, then drag anything on the map: keyframes are made for you'); }
+  function tlRemove() {
+    const sc = realScene(); if (!tlOn(sc)) return; backToEdit(); tlFlush(); const T = S.tlT, orig = new Map(sc.objects.map(o => [o.id, o])), here = TL.objectsAt(sc, T).filter(o => !(o.hidden && !(orig.get(o.id) || {}).hidden)).map(o => { const c = JSON.parse(JSON.stringify(o)); delete c._a; return c; });
+    const keep = sc.tl.duration; sc.objects = here; delete sc.tl; sc.duration = keep; tlTouch(sc); S.tlSel = null; commit(); refreshAll(); toast('Animation removed (kept the picture at ' + T.toFixed(1) + ' s). Ctrl+Z brings it back.');
+  }
+  function tlConvert() {
+    const sc = realScene(); if (!MA.isAnimated(sc)) return; backToEdit(); const r = TL.fromSteps(sc); if (!r.ok) return toast(r.why);
+    S.tlT = 0; tlTouch(sc); S.step = 0; commit(); refreshAll(); setTab('anim'); toast('Converted to the master timeline' + (r.warn.length ? ' – ' + r.warn.length + ' style difference(s) between steps were not kept. “Back to steps” restores the original.' : ' – “Back to steps” restores the original.'));
+  }
+  function tlBackToSteps() { const sc = realScene(); backToEdit(); const r = TL.toSteps(sc); if (!r.ok) return toast(r.why); tlTouch(sc); S.step = 0; S.oid = null; commit(); refreshAll(); toast('Back to the original steps'); }
+  /* ---- object helpers for the panels ---- */
+  const tlObj = id => { const sc = realScene(); return sc && TL.objById(sc, id); };
+  const tlKeys = oid => { const tr = TL.trackOf(realScene(), oid); return tr ? tr.keys : []; };
+  function tlSelKey() { const s = S.tlSel; if (!s) return null; const k = TL.getKey(realScene(), s.oid, s.kid); return k ? { oid: s.oid, k } : null; }
+  function tlDelKey(oid, kid) {
+    const sc = realScene(); if (!TL.delKey(sc, oid, kid)) return toast('The start key (0 s) stays – delete the later keys instead'); if (S.tlSel && S.tlSel.kid === kid) S.tlSel = null; tlTouch(sc); commit(); renderMtl(); renderPanels();
+  }
+  /* ---- the timeline bar under the map ---- */
+  const MTL_LAB = 128;
+  function mtlLanes(sc) {
+    const ids = Object.keys(sc.tl.tracks), lanes = [];
+    const named = id => { const o = TL.objById(sc, id); return o ? objLabel(o) : id; };
+    if (S.oid && !ids.includes(S.oid) && TL.objById(sc, S.oid)) lanes.push({ id: S.oid, empty: true });
+    (S.tlOpen ? ids : ids.filter(id => id === S.oid)).forEach(id => lanes.push({ id }));
+    return lanes.map(l => Object.assign(l, { label: named(l.id) }));
+  }
+  function mtlPct(t, D) { return (clamp(t, 0, D) / D * 100).toFixed(3) + '%'; }
+  function renderMtl() {
+    const box = $('#mtl'); if (!box) return; const sc = S.show && S.show.scenes[S.si];
+    if (!sc || !isMap(sc.bg) || !tlOn(sc)) { box.hidden = true; box.textContent = ''; return; }
+    box.hidden = false; box.textContent = ''; const D = sc.tl.duration, st = TL.stats(sc);
+    const stepNum = (id, label, min, max, step, val, on, w) => { const el = h('input', { type: 'number', min, max, step, value: val, id }); if (w) el.style.width = w; el.addEventListener('change', () => on(+el.value)); return h('label', { className: 'sbf' }, h('span', { text: label }), el); };
+    const ctl = h('div', { className: 'mrow' },
+      h('button', { id: 'mtlPlay', className: 'pri', text: '▶ Play', title: 'Play / pause this scene from the playhead (Space)', on: { click: () => { S.mode === 'play' ? stopPlay() : tlPlay(); } } }),
+      h('button', { id: 'mtlStop', text: '■ Stop', title: 'Stop and go back to 0 s', on: { click: tlStop } }),
+      stepNum('mtlTime', 'Time (s)', 0, D, 0.1, (+S.tlT).toFixed(1), v => tlSeek(isFinite(v) ? v : 0), '76px'),
+      h('span', { className: 'mtime', id: 'mtlTimeTxt', text: '' }),
+      h('button', { text: '◀ Key', title: 'Previous key of the selected object (all objects if none)', on: { click: () => mtlStepKey(-1) } }), h('button', { text: 'Key ▶', title: 'Next key', on: { click: () => mtlStepKey(1) } }),
+      h('button', { id: 'mtlDel', className: 'dng', text: '🗑 Delete key', title: 'Delete the selected key (the start key at 0 s stays)', on: { click: () => { const s = tlSelKey(); if (s) tlDelKey(s.oid, s.k.id); else toast('Click a key marker first'); } } }),
+      h('button', { text: S.tlOpen ? '▾ Tracks' : '▸ Tracks', title: 'Show / hide one lane per animated object', on: { click: () => { S.tlOpen = !S.tlOpen; renderMtl(); } } }),
+      h('span', { className: 'mut', text: 'Total ' + D.toFixed(1) + ' s · ' + st.keys + ' keys · edit anything at the playhead = keyframe' }));
+    const grid = h('div', { className: 'mtl-grid' });
+    const ruler = h('div', { className: 'mtl-track mtl-ruler', id: 'mtlRuler', title: 'Click or drag to move the playhead (0.1 s steps)' }), lab0 = h('div', { className: 'mtl-lab', text: 'Time' });
+    const major = D <= 30 ? 1 : D <= 90 ? 5 : 10;
+    for (let i = 0; i <= Math.floor(D + 1e-9); i++) { const big = i % major === 0; ruler.append(h('div', { className: 'mtl-tick' + (big ? '' : ' minor'), style: 'left:' + mtlPct(i, D) }, big ? h('i', { text: i + 's' }) : null)); }
+    grid.append(lab0, ruler);
+    const all = {}; Object.keys(sc.tl.tracks).forEach(id => sc.tl.tracks[id].keys.forEach(k => { all[Math.round(k.t * 10)] = k.t; }));
+    const sum = h('div', { className: 'mtl-track' }); Object.keys(all).forEach(q => sum.append(h('div', { className: 'mtl-key sum', style: 'left:' + mtlPct(all[q], D) }))); grid.append(h('div', { className: 'mtl-lab', text: 'All objects' }), sum);
+    mtlLanes(sc).forEach(l => {
+      const trk = h('div', { className: 'mtl-track', 'data-oid': l.id }), tr = sc.tl.tracks[l.id];
+      if (tr && tr.vis) { const a = tr.vis.a != null ? tr.vis.a : 0, b = tr.vis.b != null ? tr.vis.b : D; trk.append(h('div', { style: 'position:absolute;top:9px;height:4px;border-radius:2px;background:#2a4468;left:' + mtlPct(a, D) + ';width:' + ((clamp(b, 0, D) - clamp(a, 0, D)) / D * 100).toFixed(3) + '%', title: 'Visible from ' + a.toFixed(1) + ' s' })); }
+      (tr ? tr.keys : []).forEach((k, i) => {
+        const sel = S.tlSel && S.tlSel.kid === k.id, b = h('button', { className: 'mtl-key' + (sel ? ' sel' : '') + (i === 0 ? ' start' : '') + (k.t > D + 1e-9 ? ' past' : ''), style: 'left:' + mtlPct(k.t, D), title: (i === 0 ? 'Start pose' : 'Key') + ' at ' + k.t.toFixed(1) + ' s – click to select, drag to retime, Delete removes it', 'data-kid': k.id, 'data-oid': l.id, 'data-t': k.t });
+        b.addEventListener('pointerdown', ev => mtlKeyDown(ev, l.id, k.id, trk)); b.addEventListener('keydown', ev => { if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); ev.stopPropagation(); tlDelKey(l.id, k.id); } });
+        trk.append(b);
+      });
+      if (l.empty) trk.append(h('div', { className: 'mut', style: 'position:absolute;left:8px;top:3px', text: 'no keys yet – move the playhead and edit this object' }));
+      const lb = h('div', { className: 'mtl-lab' + (l.id === S.oid ? ' sel' : ''), text: l.label, title: l.label, on: { click: () => { S.oid = l.id; if (S.tab !== 'object' && S.tab !== 'anim') setTab('object'); else renderPanels(); renderMtl(); } } });
+      grid.append(lb, trk);
+    });
+    grid.append(h('div', { className: 'mtl-headwrap' }, h('div', { className: 'mtl-head', id: 'mtlHead' })));
+    box.append(ctl, grid);
+    ruler.addEventListener('pointerdown', ev => { ev.preventDefault(); backToEdit(); ruler.setPointerCapture(ev.pointerId); const mv = e2 => { const r = ruler.getBoundingClientRect(); tlSeek(((e2.clientX - r.left) / r.width) * D); }; mv(ev); ruler.onpointermove = mv; ruler.onpointerup = () => { ruler.onpointermove = null; ruler.onpointerup = null; }; });
+    syncMtl();
+  }
+  function mtlStepKey(dir) {
+    const sc = realScene(); if (!tlOn(sc)) return; const ts = new Set(); (S.oid && TL.trackOf(sc, S.oid) ? [S.oid] : Object.keys(sc.tl.tracks)).forEach(id => sc.tl.tracks[id].keys.forEach(k => ts.add(Math.round(k.t * 1000) / 1000)));
+    const arr = Array.from(ts).sort((a, b) => a - b), T = S.tlT, nx = dir > 0 ? arr.find(t => t > T + 0.001) : arr.slice().reverse().find(t => t < T - 0.001); if (nx != null) tlSeek(nx, true);
+  }
+  function mtlKeyDown(ev, oid, kid, trk) {
+    ev.preventDefault(); ev.stopPropagation(); backToEdit(); ev.currentTarget.focus(); const sc = realScene(), tr = TL.trackOf(sc, oid), k = tr && tr.keys.find(q => q.id === kid); if (!k) return;
+    if (S.oid !== oid) { S.oid = oid; }
+    S.tlSel = { oid, kid }; tlSeek(k.t, true); const first = tr.keys[0] === k, el = ev.currentTarget; el.setPointerCapture(ev.pointerId); let moved = false;
+    el.onpointermove = e2 => { if (first) return; const r = trk.getBoundingClientRect(), T = clamp(Math.round(((e2.clientX - r.left) / r.width) * sc.tl.duration * 10) / 10, 0, sc.tl.duration); if (Math.abs(T - k.t) > 0.04 && TL.moveKey(sc, oid, kid, T)) { moved = true; tlTouch(sc); el.style.left = mtlPct(k.t, sc.tl.duration); S.tlT = k.t; updateTransport(); } };
+    el.onpointerup = () => { el.onpointermove = null; el.onpointerup = null; if (moved) { commit(); } renderMtl(); renderPanels(); };
+  }
+  /* per-frame light sync */
+  function syncMtl() {
+    const sc = S.show && S.show.scenes[S.si]; if (!tlOn(sc)) return; const head = $('#mtlHead'), D = sc.tl.duration, T = clamp(+S.tlT || 0, 0, D);
+    if (head) head.style.left = (T / D * 100) + '%'; const ti = $('#mtlTime'); if (ti && document.activeElement !== ti) ti.value = T.toFixed(1);
+    const tt = $('#mtlTimeTxt'); if (tt) tt.textContent = T.toFixed(1) + ' / ' + D.toFixed(1) + ' s'; const pb = $('#mtlPlay'); if (pb) { const t = S.mode === 'play' ? '⏸ Pause' : '▶ Play'; if (pb.textContent !== t) pb.textContent = t; }
+  }
+  /* ---- route overlay and its handles ---- */
+  const tlScr = (o, p, xf) => { if (!o.geo || !xf.map) return [p[0], p[1]]; const q = xf.fwd(p[0], p[1]); return [q[0], q[1]]; };
+  const tlInv = (o, p, xf) => (o.geo && xf.map) ? xf.inv(p[0], p[1]) : [p[0], p[1]];
+  function tlRoute(oid) { const rs = realScene(), o = TL.objById(rs, oid); if (!o || o.attach || o.follow) return null; const r = TL.routeOf(rs, oid); return r && r.keys.length >= 2 ? { r, o } : null; }
+  function tlDrawRoutes(sc, xf) {
+    const rs = realScene(); if (!tlOn(rs) || S.mode !== 'edit') return;
+    Object.keys(rs.tl.tracks).forEach(id => { if (id === S.oid) return; const q = tlRoute(id); if (!q) return; octx.save(); octx.strokeStyle = 'rgba(255,225,77,.28)'; octx.lineWidth = 2; octx.setLineDash([8, 8]);
+      q.r.segs.forEach(s => { octx.beginPath(); s.dense.forEach((p, i) => { const sp = tlScr(q.o, p, xf); i ? octx.lineTo(sp[0], sp[1]) : octx.moveTo(sp[0], sp[1]); }); octx.stroke(); }); octx.restore(); });
+    const q = S.oid && tlRoute(S.oid); if (!q) return; const { r, o } = q; octx.save(); octx.lineJoin = 'round';
+    r.segs.forEach(s => { octx.beginPath(); octx.setLineDash(s.curved ? [] : [14, 9]); octx.strokeStyle = '#ffe14d'; octx.lineWidth = 4; s.dense.forEach((p, i) => { const sp = tlScr(o, p, xf); i ? octx.lineTo(sp[0], sp[1]) : octx.moveTo(sp[0], sp[1]); }); octx.stroke(); });
+    octx.setLineDash([]);
+    r.segs.forEach(s => {   // curve handles (orange diamonds on dashed arms) and the bend grip - clearly NOT the round white shape dots
+      const A = tlScr(o, s.ctl.P0, xf), B = tlScr(o, s.ctl.P3, xf), m = tlScr(o, s.mid, xf), dia = (c, fill) => { octx.beginPath(); octx.moveTo(c[0], c[1] - 13); octx.lineTo(c[0] + 13, c[1]); octx.lineTo(c[0], c[1] + 13); octx.lineTo(c[0] - 13, c[1]); octx.closePath(); octx.fillStyle = fill; octx.fill(); octx.strokeStyle = '#08142a'; octx.lineWidth = 3; octx.stroke(); };
+      if (s.curved) { const c1 = tlScr(o, s.ctl.P1, xf), c2 = tlScr(o, s.ctl.P2, xf); octx.save(); octx.strokeStyle = 'rgba(255,150,40,.85)'; octx.lineWidth = 2; octx.setLineDash([5, 5]); octx.beginPath(); octx.moveTo(A[0], A[1]); octx.lineTo(c1[0], c1[1]); octx.moveTo(B[0], B[1]); octx.lineTo(c2[0], c2[1]); octx.stroke(); octx.restore(); dia(c1, '#ff9a28'); dia(c2, '#ff9a28'); }
+      dia(m, s.curved ? 'rgba(255,154,40,.35)' : '#ffb347');
+    });
+    r.keys.forEach((k, i) => { const sp = tlScr(o, k.pos, xf), sel = S.tlSel && S.tlSel.kid === k.id; octx.fillStyle = sel ? '#fff' : (i === 0 ? '#7fb2e6' : '#ffe14d'); octx.strokeStyle = '#08142a'; octx.lineWidth = 3; octx.beginPath(); octx.rect(sp[0] - 18, sp[1] - 18, 36, 36); octx.fill(); octx.stroke(); octx.fillStyle = '#08142a'; octx.font = '800 24px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText(MLET(i), sp[0], sp[1] + 1); octx.font = '700 18px sans-serif'; octx.lineWidth = 4; octx.strokeStyle = '#08142a'; octx.strokeText(k.t.toFixed(1) + 's', sp[0], sp[1] + 34); octx.fillStyle = '#fff'; octx.fillText(k.t.toFixed(1) + 's', sp[0], sp[1] + 34); });
+    octx.restore();
+  }
+  function tlRouteHit(p, xf, onBody) {
+    const q = S.oid && tlRoute(S.oid); if (!q) return null; const { r, o } = q, near = (a, rad) => Math.hypot(a[0] - p[0], a[1] - p[1]) < rad;
+    for (const s of r.segs) if (s.curved) { if (near(tlScr(o, s.ctl.P1, xf), 20)) return { k: 'rh', which: 1, oid: S.oid, kid: s.key }; if (near(tlScr(o, s.ctl.P2, xf), 20)) return { k: 'rh', which: 2, oid: S.oid, kid: s.key }; }
+    if (onBody) return null;   // pressing on the object itself moves the object (= edits the key at the playhead); key squares and grips only grab outside the body
+    for (const k of r.keys) if (near(tlScr(o, k.pos, xf), 24)) { S.tlSel = { oid: S.oid, kid: k.id }; return { k: 'rkey', oid: S.oid, kid: k.id }; }
+    for (const s of r.segs) if (near(tlScr(o, s.mid, xf), 20)) return { k: 'rbend', oid: S.oid, kid: s.key };
+    return null;
+  }
+  function tlRouteDrag(d, p, xf) {
+    const rs = realScene(), o = TL.objById(rs, d.oid), tr = TL.trackOf(rs, d.oid); if (!o || !tr) return; const q = tlInv(o, p, xf), i = tr.keys.findIndex(k => k.id === d.kid), k = tr.keys[i], r = TL.routeOf(rs, d.oid); if (!k || !r) return;
+    if (d.k === 'rkey') { const c = TL.keyPos(k), dx = q[0] - c[0], dy = q[1] - c[1]; if (k.pts) k.pts = k.pts.map(v => [v[0] + dx, v[1] + dy]); else { k.x = q[0]; k.y = q[1]; } if (i === 0) TL.syncBase(rs, d.oid); }
+    else { const s = r.segs.find(z => z.key === d.kid); if (!s) return; const Pa = s.ctl.P0, Pb = s.ctl.P3;
+      if (d.k === 'rh') { const h1 = d.which === 1 ? [q[0] - Pa[0], q[1] - Pa[1]] : [s.ctl.P1[0] - Pa[0], s.ctl.P1[1] - Pa[1]], h2 = d.which === 2 ? [q[0] - Pb[0], q[1] - Pb[1]] : [s.ctl.P2[0] - Pb[0], s.ctl.P2[1] - Pb[1]]; TL.setHandles(rs, d.oid, d.kid, h1, h2); }
+      else { const mx = (Pa[0] + Pb[0]) / 2, my = (Pa[1] + Pb[1]) / 2, dd = [(q[0] - mx) / 0.75, (q[1] - my) / 0.75], t3 = [(Pb[0] - Pa[0]) / 3, (Pb[1] - Pa[1]) / 3]; TL.setHandles(rs, d.oid, d.kid, [t3[0] + dd[0], t3[1] + dd[1]], [-t3[0] + dd[0], -t3[1] + dd[1]]); } }
+    tlTouch(rs); S.tlSel = { oid: d.oid, kid: d.kid };
+  }
+  /* ---- the Animation tab ---- */
+  function animPanel(p) {
+    const sc = realScene(); p.append(h('div', { className: 'h', text: 'Animation' }));
+    if (!isMap(sc.bg)) { p.append(h('div', { className: 'hint', text: 'Animation is available on map scenes. Switch this scene’s background to a map first.' })); return; }
+    if (MA.isAnimated(sc)) {
+      p.append(h('div', { className: 'hint', text: 'This scene uses the v0.11.5 step animation (it still works exactly as before). You can convert it to the new master timeline – the original steps are kept so “Back to steps” restores them.' }),
+        h('div', { className: 'btnrow' }, h('button', { className: 'pri', text: 'Convert to master timeline', on: { click: tlConvert } }))); return;
+    }
+    if (!tlOn(sc)) { p.append(h('div', { className: 'hint', text: 'One master timeline per scene: set the total length, move the playhead, then move / reshape any object – its keyframes are made automatically. Scrubbing alone never changes anything.' }),
+      h('div', { className: 'btnrow' }, h('button', { className: 'pri', text: '🎞 Turn on animation', on: { click: tlEnable } }))); return; }
+    const D = sc.tl.duration, o = selObj(), real = o && TL.objById(sc, o.id), tr = real && TL.trackOf(sc, real.id);
+    p.append(bind({ d: D }, 'd', 'num', { label: 'Total duration (s)', min: 0.5, max: 600, step: 0.5, after: v => { if (isFinite(v) && v >= 0.5) { TL.setDuration(sc, v); tlTouch(sc); renderMtl(); updateTransport(); } } }),
+      h('div', { className: 'tlnote', text: 'The length you type here is the length of the scene. Keys never change it.' }));
+    p.append(h('div', { className: 'h', text: o ? 'Selected: ' + objLabel(o) : 'Selected object' }));
+    if (!o) p.append(h('div', { className: 'hint', text: 'Click an object on the map. Then move the playhead and drag it (or change its numbers) – a key is made at the playhead time. Several objects can have different key times.' }));
+    else {
+      p.append(h('div', { className: 'tlnote', text: tr ? tr.keys.length + ' keys · playhead ' + S.tlT.toFixed(1) + ' s' : 'No motion yet. Move the playhead to a later time and drag the object.' }));
+      if (tr && tr.keys.length > 1 && !(real.attach || real.follow)) {
+        p.append(h('div', { className: 'h', text: 'Route and speed' }), h('div', { className: 'btnrow' },
+          h('button', { id: 'tlStraight', text: 'Straight legs', on: { click: () => { TL.setPathAll(sc, real.id, 'line'); tlTouch(sc); commit(); renderPanels(); } } }),
+          h('button', { id: 'tlSmooth', text: 'Smooth curve through keys', on: { click: () => { TL.setPathAll(sc, real.id, 'curve'); tlTouch(sc); commit(); renderPanels(); } } })),
+          h('div', { className: 'tlnote', text: 'Drag the orange ◆ grip in the middle of a leg to bend it; after that two orange ◆ handles shape the curve. Bending a route never adds keys. Speed = route length ÷ leg time.' }),
+          h('div', { className: 'row' }, h('label', { text: 'Speed (all legs)' }), (() => { const el = h('select', { id: 'tlEaseAll' }, TL.EASES.map(e => h('option', { value: e[0], text: e[1] }))); el.addEventListener('change', () => { TL.setEaseAll(sc, real.id, el.value); tlTouch(sc); commit(); renderPanels(); }); return el; })()));
+      }
+      /* links */
+      const mode = real && real.attach ? 'attach' : real && real.follow ? 'follow' : 'independent', par = real && (real.attach || real.follow) ? (real.attach || real.follow).to : '';
+      p.append(h('div', { className: 'h', text: 'Link' }));
+      const cands = sc.objects.filter(q => q.id !== o.id && TL.canLink(sc.objects, o.id, q.id, 'follow').ok);
+      const setLink = (m, to) => { const w = selObj(); if (!w) return; delete w.attach; delete w.follow; if (m === 'attach') { const pp = cur().objects.find(q => q.id === to); if (!pp || !TL.canLink(cur().objects, w.id, to, 'attach').ok) return toast('Attach works for icons, text and H/L on another object'); w.attach = MA.makeAttach(pp, w, attachCtx()); } else if (m === 'follow') w.follow = { to }; commit(); renderPanels(); };
+      const modeSel = h('select', { id: 'tlMode' }, [['independent', 'Independent'], ['follow', 'Follow another object’s motion'], ['attach', 'Attach to a front / object']].map(([v, l]) => h('option', { value: v, text: l, selected: v === mode })));
+      const parSel = h('select', { id: 'tlParent' }, [h('option', { value: '', text: '– choose –' })].concat(cands.map(q => h('option', { value: q.id, text: objLabel(q), selected: String(q.id) === String(par) }))));
+      modeSel.addEventListener('change', () => { if (modeSel.value === 'independent') setLink('independent'); else if (parSel.value) setLink(modeSel.value, parSel.value); else toast('Now choose which object to ' + (modeSel.value === 'attach' ? 'attach to' : 'follow')); });
+      parSel.addEventListener('change', () => { if (modeSel.value !== 'independent' && parSel.value) setLink(modeSel.value, parSel.value); });
+      p.append(h('div', { className: 'row' }, h('label', { text: 'Mode' }), modeSel), h('div', { className: 'row' }, h('label', { text: 'Object' }), parSel),
+        h('div', { className: 'tlnote', text: mode === 'follow' ? 'Follows the other object’s path and timing and keeps its own offset. Move it at any time to keyframe its offset; choose Independent to unlink (it stays exactly where it is on screen).' : mode === 'attach' ? 'Rides on the other object’s drawn curve. Moving it at a chosen time keyframes its position on the front; the link stays.' : 'Moves only by its own keys.' }));
+    }
+    const ks = tlSelKey();
+    if (ks) {
+      const k = ks.k, tr2 = TL.trackOf(sc, ks.oid), idx = tr2.keys.indexOf(k), kp = TL.keyPos(k);
+      p.append(h('div', { className: 'h', text: 'Selected key' }), h('div', { className: 'tlkey' },
+        h('div', { text: (idx === 0 ? 'Start pose' : 'Key ' + MLET(idx)) + ' at ' + k.t.toFixed(1) + ' s' + (kp ? ' · position ' + kp[0].toFixed(2) + ', ' + kp[1].toFixed(2) : '') }),
+        idx > 0 ? sbNum('Time (s)', k.t, 0.1, sc.tl.duration, 0.1, v => { if (!TL.moveKey(sc, ks.oid, k.id, v)) toast('That time is taken by another key'); tlTouch(sc); commit(); renderMtl(); renderPanels(); }, false, 'Move this key to another time') : h('div', { className: 'tlnote', text: 'The start pose stays at 0 s.' }),
+        idx > 0 ? h('div', { className: 'row' }, h('label', { text: 'Leg into this key' }), (() => { const el = h('select', {}, [['line', 'Straight'], ['curve', 'Smooth curve']].map(([v, l]) => h('option', { value: v, text: l, selected: v === ((k.h1 || k.h2) ? 'curve' : (k.path || 'line')) }))); el.addEventListener('change', () => { TL.setPath(sc, ks.oid, k.id, el.value); tlTouch(sc); commit(); renderPanels(); }); return el; })()) : null,
+        idx > 0 ? h('div', { className: 'row' }, h('label', { text: 'Speed on this leg' }), (() => { const el = h('select', {}, TL.EASES.map(e => h('option', { value: e[0], text: e[1], selected: (k.e || 'linear') === e[0] }))); el.addEventListener('change', () => { TL.setEase(sc, ks.oid, k.id, el.value); tlTouch(sc); commit(); renderPanels(); }); return el; })()) : null,
+        idx > 0 ? h('div', { className: 'btnrow' }, h('button', { className: 'dng', text: '🗑 Delete key', on: { click: () => tlDelKey(ks.oid, k.id) } })) : null));
+    }
+    p.append(h('div', { className: 'h', text: 'Scene animation' }), h('div', { className: 'btnrow' }, sc.tl.legacy ? h('button', { text: 'Back to steps', title: 'Restore the original v0.11.5 step animation', on: { click: tlBackToSteps } }) : null, h('button', { className: 'dng', text: 'Remove animation', title: 'Keep the picture at the playhead', on: { click: tlRemove } })));
+    const st = TL.stats(sc); p.append(h('div', { className: 'tlnote', text: st.tracks + ' animated objects · ' + st.keys + ' keys · ' + (st.bytes / 1024).toFixed(1) + ' KB' }));
+  }
 
   /* ---------- v0.11.0 map animation bar: steps, timing, scrub, play ---------- */
   const sbar = () => $('#stepbar');
@@ -546,9 +751,11 @@
     return h('label', { className: 'sbf' }, h('span', { text: label }), el);
   }
   function renderStepbar() {
-    const box = sbar(); if (!box) return; const sc = S.show && S.show.scenes[S.si];
-    const on0 = $('#bAnimOn'); if (!sc || !isMap(sc.bg)) { box.hidden = true; box.textContent = ''; if (on0) on0.hidden = true; return; }
-    const on = $('#bAnimOn'); if (on) { on.hidden = MA.isAnimated(sc); on.onclick = animEnable; }
+    renderMtl(); const box = sbar(); if (!box) return; const sc = S.show && S.show.scenes[S.si];
+    const on0 = $('#bAnimOn'), tlb = $('#bTlOn'); if (!sc || !isMap(sc.bg)) { box.hidden = true; box.textContent = ''; if (on0) on0.hidden = true; if (tlb) tlb.hidden = true; return; }
+    if (tlb) { tlb.hidden = MA.isAnimated(sc) || tlOn(sc); tlb.onclick = tlEnable; }
+    if (tlOn(sc)) { box.hidden = true; box.textContent = ''; if (on0) on0.hidden = true; return; }
+    const on = $('#bAnimOn'); if (on) { on.hidden = MA.isAnimated(sc); on.onclick = animEnable; on.textContent = '⧉ Steps (v0.11.5)'; on.title = 'Older step-by-step animation (still supported). The master timeline (🎞 Animate) is the recommended way.'; }
     if (!MA.isAnimated(sc)) { box.hidden = true; box.textContent = ''; return; }      // un-animated: just the small "Animate" button in the transport row
     box.hidden = false; box.textContent = '';
     const i = stepIdx(), tl = MA.timeline(sc), st = sc.anim.steps[i], n = sc.anim.steps.length, tot = tl.total || 1;
@@ -586,7 +793,7 @@
   }
   /* light per-frame sync (no DOM rebuild): playhead + scrub position */
   function syncStepbar() {
-    const sc = S.show && S.show.scenes[S.si]; if (!sc || !MA.isAnimated(sc)) return; const head = $('#sbHead'), sl = $('#sbScrub'), tot = sc.duration || 1;
+    const sc = S.show && S.show.scenes[S.si]; syncMtl(); if (!sc || !MA.isAnimated(sc)) return; const head = $('#sbHead'), sl = $('#sbScrub'), tot = sc.duration || 1;
     const t = S.mode === 'edit' ? MA.stepTimes(sc, stepIdx()).arrive : clamp(S.T - E.starts(S.show)[S.si], 0, tot);
     if (head) head.style.left = (t / tot * 100) + '%'; if (sl && (S.mode === 'edit' || document.activeElement !== sl)) { sl.max = tot; sl.value = t; }
     const tt = $('#sbTot'); if (tt) { const v = 'Total ' + tot.toFixed(1) + ' s'; if (tt.textContent !== v) tt.textContent = v; }
@@ -635,7 +842,7 @@
       // Keep the zoom text synchronized independently of expensive map frames.
       updateZoomBadge();
       if (S.mode === 'edit') {
-        MA.syncAttach(cur().objects, attachMemo, attachCtx());   // v0.11.5: icons / text / H-L attached to a front follow it while you edit
+        { const rs = realScene(); if (tlOn(rs)) { const sn = tlSession(rs); TL.liveSync(sn.ed); } else MA.syncAttach(cur().objects, attachMemo, attachCtx()); }   // v0.11.5: icons / text / H-L attached to a front follow it while you edit
         E.renderScene(sctx, S.show, cur(), clock(),
           {editing:true,camT:editT(),liveMap:true});
         // Keep the active map thumbnail current by copying the FINISHED
@@ -647,7 +854,7 @@
         drawOverlay();
       }
       else {
-        if (S.mode === 'play' && S.play) { S.T = S.play.a + (clock() - S.play.t0); if (S.T >= S.play.b) { S.T = S.play.b - 0.001; E.renderShow(sctx, S.show, S.T, { liveMap: true }); stopPlay(); return; } }
+        if (S.mode === 'play' && S.play) { S.T = S.play.a + (clock() - S.play.t0); if (S.T >= S.play.b) { S.T = S.play.b - 0.001; E.renderShow(sctx, S.show, S.T, { liveMap: true }); stopPlay(); return; } tlFollowPlay(); }
         E.renderShow(sctx, S.show, S.T, { liveMap: true }); octx.clearRect(0, 0, W, H); updateTransport();
       }
     } catch (err) { console.error(err); reportDrawErr(err); try { drawOverlay(); } catch (e2) { /* ignore */ } }
@@ -672,6 +879,7 @@
       if (hd.rot) { octx.save(); octx.setLineDash([]); octx.strokeStyle = '#2f9bff'; octx.lineWidth = 3; octx.beginPath(); octx.moveTo(hd.rot[0], hd.rot[1] + 12); octx.lineTo(hd.rot[0], b.y); octx.stroke(); octx.fillStyle = '#2f9bff'; octx.beginPath(); octx.arc(hd.rot[0], hd.rot[1], 14, 0, 6.3); octx.fill(); octx.fillStyle = '#fff'; octx.font = '800 20px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText('↻', hd.rot[0], hd.rot[1] + 1); octx.restore(); }
       if (hd.scale) { octx.fillStyle = '#2f9bff'; octx.fillRect(hd.scale[0] - 12, hd.scale[1] - 12, 24, 24); octx.fillStyle = '#fff'; octx.font = '800 18px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText('⤡', hd.scale[0], hd.scale[1] + 1); }
       if (hd.resize) { octx.fillRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); octx.strokeRect(hd.resize[0] - 9, hd.resize[1] - 9, 18, 18); } }
+    if (!d) tlDrawRoutes(sc, xf);
     if (o && !d && o.move && o.move.on) { const mb = E.bounds(E.toScreen(o, xf)), ax = mb.x + mb.w / 2, ay = mb.y + mb.h / 2, sm = E.moveSamples(o.move); octx.save(); octx.strokeStyle = '#ffe14d'; octx.lineWidth = 4; octx.setLineDash([14, 9]); octx.beginPath(); sm.forEach((q, i) => i ? octx.lineTo(ax + q[0], ay + q[1]) : octx.moveTo(ax + q[0], ay + q[1])); octx.stroke(); octx.setLineDash([]);
       [[0, 0]].concat(o.move.pts).forEach((q, i) => { const x = ax + q[0], y = ay + q[1]; octx.fillStyle = i ? '#ffe14d' : '#2f9bff'; octx.strokeStyle = '#08142a'; octx.lineWidth = 3; octx.beginPath(); octx.arc(x, y, 20, 0, 6.3); octx.fill(); octx.stroke(); octx.fillStyle = '#08142a'; octx.font = '800 24px sans-serif'; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText(MLET(i), x, y + 1); }); octx.restore(); }
     if ((SNAP.guides || (S.drag && S.drag.k === 'move' && S.drag.moved)) && S.mode === 'edit') { const m = SAFE(); octx.save(); octx.setLineDash([14, 10]); octx.lineWidth = 2; octx.strokeStyle = 'rgba(255,255,255,0.35)'; octx.strokeRect(m, m, W - 2 * m, H - 2 * m); octx.strokeStyle = 'rgba(255,255,255,0.18)'; octx.beginPath(); octx.moveTo(W / 2, 0); octx.lineTo(W / 2, H); octx.moveTo(0, H / 2); octx.lineTo(W, H / 2); octx.stroke(); octx.restore(); }
@@ -744,7 +952,7 @@
     if (T === 'legend') { B('kind', 'select', { options: E.LEGEND_KINDS }); B('title', 'text'); B('left', 'text', { label: 'Left label' }); B('right', 'text', { label: 'Right label' }); B('w', 'range', { min: 300, max: 1600, label: 'Width' }); B('h', 'range', { min: 30, max: 100, label: 'Height' }); }
     if (T === 'ticker') { B('text', 'area', { label: 'Message' }); B('label', 'text', { label: 'Tag' }); B('speed', 'range', { min: 40, max: 400, label: 'Speed' }); B('h', 'range', { min: 50, max: 140, label: 'Height' }); }
     if (o.type !== 'text') p.append(h('div', { className: 'h', text: 'Layer style' }), h('div', { className: 'btnrow' }, h('button', { text: 'Layer style… (stroke, shadow, glow, overlay)', on: { click: () => { if (!o.fx) { o.fx = E.fxDefault(); o.fx.stroke.on = false; o.fx.shadow = { on: true, color: '#000000', opacity: 60, angle: 90, dist: 6, size: 10 }; } openFxWindow(o.fx, 'Layer Style – ' + o.type); } } }), o.fx ? h('button', { text: 'Remove layer style', on: { click: () => { delete o.fx; commit(); renderPanels(); } } }) : null));
-    { const sh0 = E.shadowOf(o), sh = (o.shadow && typeof o.shadow === 'object') ? o.shadow : (o.shadow = sh0 || { on: false, blur: 12, dist: 7, alpha: 0.6 }); sh.on = !!sh0;
+    { const sh0 = E.shadowOf(o), sh = (o.shadow && typeof o.shadow === 'object') ? o.shadow : (tlOn(realScene()) ? new Proxy(Object.assign({}, sh0 || { on: false, blur: 12, dist: 7, alpha: 0.6 }), { set: (t, k, v) => { t[k] = v; o.shadow = t; return true; } }) : (o.shadow = sh0 || { on: false, blur: 12, dist: 7, alpha: 0.6 })); if (sh.on !== !!sh0 && (o.shadow || !tlOn(realScene()))) sh.on = !!sh0;
       p.append(h('div', { className: 'h', text: 'Shadow' }), bind(sh, 'on', 'check', { label: 'Drop shadow' }), bind(sh, 'blur', 'range', { min: 0, max: 40, label: 'Softness' }), bind(sh, 'dist', 'range', { min: 0, max: 40, label: 'Distance' }), bind(sh, 'alpha', 'range', { min: 0, max: 1, step: 0.05, label: 'Opacity' })); }
     if (o.pts && o.pts.length) {
       p.append(h('div', { className: 'h', text: 'Shape (drag the ↻ and ⤡ handles, or use these)' }), h('div', { className: 'btnrow' },
@@ -756,9 +964,10 @@
     }
     p.append(h('div', { className: 'h', text: 'Animation' }));
     B2(p, o.anim, 'in', 'select', { label: 'Entrance', options: E.ANIMS }); B2(p, o.anim, 'delay', 'range', { min: 0, max: 20, step: 0.1, label: 'Delay (s)' }); B2(p, o.anim, 'dur', 'range', { min: 0.1, max: 5, step: 0.1, label: 'Duration (s)' });
-    attachPanel(p, o);
-    movePanel(p, o);
-    if (isMap(cur().bg)) p.append(bind(o, 'geo', 'check', { label: 'Pin to map', after: v => { o.geo = !v; E.setGeo(o, cur(), editT(), v); pinFollowers(o, v); } }), h('div', { className: 'hint', text: 'Pinned objects move and zoom with the map (position only – sizes stay fixed).' }));
+    if (tlOn(realScene())) p.append(h('div', { className: 'hint', text: 'Linking, motion routes and keys: see the Animation tab. Every change you make at the playhead becomes a key automatically.' }), h('div', { className: 'btnrow' }, h('button', { text: 'Open Animation tab', on: { click: () => setTab('anim') } })));
+    else { attachPanel(p, o);
+    movePanel(p, o); }
+    if (isMap(cur().bg)) p.append(bind(o, 'geo', 'check', { label: 'Pin to map', after: v => { if (tlOn(realScene()) && TL.trackOf(realScene(), o.id)) { o.geo = !v; toast('This object has keys: pin / unpin it before animating it (or delete its later keys)'); renderPanels(); return; } o.geo = !v; E.setGeo(o, cur(), editT(), v); pinFollowers(o, v); } }), h('div', { className: 'hint', text: 'Pinned objects move and zoom with the map (position only – sizes stay fixed).' }));
     p.append(h('div', { className: 'h', text: 'Arrange' }), h('div', { className: 'btnrow' }, h('button', { text: 'Bring front', on: { click: () => layer('front') } }), h('button', { text: 'Send back', on: { click: () => layer('back') } }), h('button', { text: 'Duplicate', on: { click: dupObj } }), h('button', { text: 'Delete', className: 'dng', on: { click: delObj } })));
   }
   /* v0.11.5: "Follow" - a point-like object (icon, text, H/L ...) rides on another object: it keeps its spot along a front and follows it as the front moves, grows, shrinks or bends */
@@ -816,7 +1025,7 @@
 
     p.append(mapAccordion('sceneSettings','Scene Settings',[
       bind(sc, 'name', 'text', { label: 'Name', after: () => renderSceneList() }),
-      MA.isAnimated(sc) ? fld('Duration', h('div', { className: 'mut', text: sc.duration.toFixed(1) + ' s – set by the animation steps (Animation bar below the map)' })) : bind(sc, 'duration', 'num', { min: 1, max: 120, step: 0.5, label: 'Duration (s)', rerender: false, after: () => updateTransport() }),
+      tlOn(sc) ? fld('Duration', h('div', { className: 'mut', text: sc.duration.toFixed(1) + ' s – set in the Animation tab (master timeline)' })) : MA.isAnimated(sc) ? fld('Duration', h('div', { className: 'mut', text: sc.duration.toFixed(1) + ' s – set by the animation steps (Animation bar below the map)' })) : bind(sc, 'duration', 'num', { min: 1, max: 120, step: 0.5, label: 'Duration (s)', rerender: false, after: () => updateTransport() }),
       bind(sc.transition, 'type', 'select', { label: 'Transition in', options: E.TRANSITIONS }),
       bind(sc.transition, 'dur', 'range', { min: 0.2, max: 3, step: 0.1, label: 'Trans. length' })
     ],false));
@@ -1594,7 +1803,7 @@
   function renderPanels() {
     const p=$('#panels'),sy=p.scrollTop;
     p.innerHTML='';
-    ({ scene: scenePanel, object: objectPanel, library: libraryPanel, media: mediaPanel, bgs: backgroundsPanel })[S.tab](p);
+    ({ scene: scenePanel, object: objectPanel, anim: animPanel, library: libraryPanel, media: mediaPanel, bgs: backgroundsPanel })[S.tab](p);
     // Map styling now lives in the Map Style flyout, not in Scene settings.
     if(S.tab==='scene' && cur().bg.type==='mapbox'){
       const moved=['Map + Camera','Weather Director Base','Land + Water','City + Town Labels','Boundaries','Transportation','Overlays'];
@@ -2007,7 +2216,7 @@
   }
   /* v0.10.4: switching scenes only moves the highlight and refreshes the panels - no card/canvas rebuild, no thumbnail re-render. */
   function selectScene(i) {
-    backToEdit(); S.si = i; S.oid = null; S.editEnd = false;
+    backToEdit(); if (tlFlush()) commit(); S.si = i; S.oid = null; S.editEnd = false; S.tlT = 0; S.tlSel = null; tlEd = null;
     document.querySelectorAll('#sceneList .sc').forEach(c => c.classList.toggle('on', Number(c.dataset.i) === i));
     renderPanels(); renderStepbar(); updateTransport(); const fk = $('#frontKind'); if (fk) fk.value = S.opt.front;   // renderStepbar: the animation step bar belongs to the selected scene
     lastInputAt = performance.now(); last = 0;   // repaint the new scene on the very next frame, even from a throttled idle state
