@@ -1,4 +1,4 @@
-/* WX Studio – master timeline animation (v0.11.6).
+/* WX Studio – master timeline animation (v0.11.6; camera + imported-media clock added in v0.11.7).
  *
  * A map scene can carry ONE master timeline:   scene.tl = { v:1, duration, tracks:{ [objectId]: { keys:[...], vis? } }, legacy? }
  *   - `duration` is typed by the user (seconds). It is NOT computed from steps, and scene.duration always mirrors it.
@@ -11,6 +11,9 @@
  *     Moving a curve handle changes the route only - never the keys. Fronts (pts) are split into a route (their centre) and a shape (rotation + scale + residual).
  *   - Links: obj.attach (v0.11.5, rides ON the parent's drawn curve) and obj.follow = {to} (inherits the parent's movement, keeps its own offset).
  *
+ * v0.11.7: the SAME clock also drives
+ *   - the map camera:  scene.tl.cam = { keys:[{id,t,v,e?}] }   v = {c:[lng,lat],z,b,p} (Mapbox) or {cx,cy,w} (flat map); e = 'linear' | 'inout' (default: smooth, continuous speed)
+ *   - an imported GIF / MP4 background: scene.bg.vidStart / vidEnd / vidSpeed / vidLoop -> mediaTime(bg, mediaDuration, t)
  * Everything is a pure function of (scene, time): objectsAt(scene, t) never modifies the scene, so live playback, scrubbing, edit mode, thumbnails and the
  * frame-by-frame MP4 export draw the same picture. The editor writes keys through beginEdit()/flush(): it edits a working copy of the objects at the playhead and
  * flush() turns the DIFFERENCE into keys at that time. No change = no keys, so scrubbing can never modify the show.
@@ -283,6 +286,7 @@
       else tr.keys[0].t = 0;
       if (tr.vis && !(isNum(tr.vis.a) || isNum(tr.vis.b))) delete tr.vis;
     });
+    camNormalize(sc);
     return sc;
   }
   /* load / import safety: drop links that cannot work, put attached children exactly where their keys say (same objects, nothing else changes) */
@@ -507,12 +511,145 @@
     void me; normalize(sc); return { ok: true };
   }
 
+
+  /* ---------------- v0.11.7: camera keys on the master timeline ---------------- */
+  const CAM_EASES = [['smooth', 'Smooth (keeps moving through keys)'], ['inout', 'Ease in & out (stops at both keys)'], ['linear', 'Constant speed']];
+  const baseViewAt = g.Engine && g.Engine.viewAt ? g.Engine.viewAt : null;     // the pre-v0.11.7 two-view camera (still used by scenes without camera keys)
+  const camKind = sc => sc && sc.bg ? (sc.bg.type === 'mapbox' ? 'mapbox' : sc.bg.type === 'map' ? 'map' : null) : null;
+  const legacyView = (sc, t) => { try { const v = baseViewAt ? baseViewAt(sc, t) : (sc.bg && sc.bg.view); return v ? clone(v) : null; } catch (e) { return null; } };
+  function camClean(kind, v) {
+    if (!v || typeof v !== 'object') return null;
+    if (kind === 'mapbox') {
+      if (!(Array.isArray(v.c) && isNum(v.c[0]) && isNum(v.c[1]) && isNum(v.z))) return null;
+      return { c: [clamp(v.c[0], -540, 540), clamp(v.c[1], -85.05, 85.05)], z: clamp(v.z, 0, 22), b: isNum(v.b) ? v.b : 0, p: isNum(v.p) ? clamp(v.p, 0, 85) : 0 };
+    }
+    if (kind === 'map') { if (!(isNum(v.cx) && isNum(v.cy) && isNum(v.w) && v.w > 0)) return null; return { cx: v.cx, cy: v.cy, w: clamp(v.w, 1, 1e6) }; }
+    return null;
+  }
+  const camVec = (kind, v) => kind === 'mapbox' ? [v.c[0], v.c[1], v.z, v.b || 0, v.p || 0] : [v.cx, v.cy, Math.log(v.w)];
+  const camObj = (kind, a) => kind === 'mapbox' ? { c: [a[0], a[1]], z: a[2], b: ((a[3] + 180) % 360 + 360) % 360 - 180, p: a[4] } : { cx: a[0], cy: a[1], w: Math.exp(a[2]) };
+  const camKeys = sc => (enabled(sc) && sc.tl.cam && Array.isArray(sc.tl.cam.keys)) ? sc.tl.cam.keys : [];
+  const hasCam = sc => !!camKind(sc) && camKeys(sc).length > 0;
+  /* monotone cubic (PCHIP) tangents: continuous speed through the keys, no overshoot, gentle start and stop */
+  function pchip(ts, ys) {
+    const n = ts.length, m = new Array(n).fill(0); if (n < 3) return m;
+    const d = []; for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / Math.max(1e-9, ts[i + 1] - ts[i]));
+    for (let i = 1; i < n - 1; i++) {
+      if (d[i - 1] * d[i] <= 0) { m[i] = 0; continue; }
+      const h0 = ts[i] - ts[i - 1], h1 = ts[i + 1] - ts[i], w1 = 2 * h1 + h0, w2 = h1 + 2 * h0; m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+    }
+    return m;
+  }
+  /* the camera view at scene time t (pure). null when the scene has no camera keys. */
+  function camAt(sc, t) {
+    const kind = camKind(sc), keys = camKeys(sc); if (!kind || !keys.length) return null;
+    const T = clamp(+t || 0, 0, sc.tl.duration);
+    if (T <= keys[0].t + 1e-9) return clone(keys[0].v);
+    const last = keys[keys.length - 1]; if (T >= last.t - 1e-9) return clone(last.v);
+    let i = 1; while (i < keys.length - 1 && keys[i].t <= T) i++;
+    const A = keys.map(k => camVec(kind, k.v));
+    if (kind === 'mapbox') for (let j = 1; j < A.length; j++) { while (A[j][3] - A[j - 1][3] > 180) A[j][3] -= 360; while (A[j][3] - A[j - 1][3] < -180) A[j][3] += 360; }
+    const ts = keys.map(k => k.t), a = keys[i - 1], b = keys[i], h = b.t - a.t, p = h > 0 ? clamp((T - a.t) / h, 0, 1) : 1, dim = A[0].length, out = new Array(dim);
+    for (let d = 0; d < dim; d++) {
+      const y0 = A[i - 1][d], y1 = A[i][d];
+      if (b.e === 'linear') out[d] = y0 + (y1 - y0) * p;
+      else if (b.e === 'inout') out[d] = y0 + (y1 - y0) * easeFn.inout(p);
+      else {
+        const m = pchip(ts, A.map(r => r[d])), p2 = p * p, p3 = p2 * p;
+        out[d] = (2 * p3 - 3 * p2 + 1) * y0 + (p3 - 2 * p2 + p) * h * m[i - 1] + (-2 * p3 + 3 * p2) * y1 + (p3 - p2) * h * m[i];
+      }
+    }
+    return camObj(kind, out);
+  }
+  const camKeyOf = (sc, keyId) => camKeys(sc).find(k => k.id === keyId) || null;
+  const camKeyAt = (sc, T) => camKeys(sc).find(k => Math.abs(k.t - T) < EPS) || null;
+  function camSyncBase(sc) { const k0 = camKeys(sc)[0]; if (k0 && sc.bg) sc.bg.view = clone(k0.v); }
+  /* old two-view camera (bg.view -> bg.view2 over camDelay / camDur) -> keys; the picture does not change (same ease, same interpolation) */
+  function camConvertLegacy(sc) {
+    if (!enabled(sc)) return { ok: false, why: 'No timeline' }; const kind = camKind(sc); if (!kind) return { ok: false, why: 'Not a map scene' };
+    if (hasCam(sc)) return { ok: false, why: 'Already on the timeline' };
+    const b = sc.bg, a = camClean(kind, legacyView(sc, 0)); if (!a) return { ok: false, why: 'No camera' };
+    const z = b.view2 ? camClean(kind, b.view2) : null, dur = +b.camDur > 0 ? +b.camDur : 0, delay = Math.max(0, +b.camDelay || 0), D = sc.tl.duration, keys = [{ id: nid(), t: 0, v: a }];
+    if (z && dur > 0) { if (delay > EPS) keys.push({ id: nid(), t: Math.round(delay * 1000) / 1000, v: clone(a) }); keys.push({ id: nid(), t: Math.round(Math.min(delay + dur, Math.max(D, delay + dur)) * 1000) / 1000, v: z, e: 'inout' }); }
+    delete b.view2; delete b.camDur; delete b.camDelay;
+    sc.tl.cam = { keys }; camSyncBase(sc); normalize(sc); return { ok: true, keys: camKeys(sc).length };
+  }
+  /* write (create / update) the camera key at T. The first key is the start view (t = 0). Returns the key. */
+  function camSetKey(sc, T, view, extra) {
+    if (!enabled(sc)) return null; const kind = camKind(sc); if (!kind) return null;
+    const v = camClean(kind, view); if (!v) return null;
+    if (!hasCam(sc)) { const r = (sc.bg && sc.bg.view2) ? camConvertLegacy(sc) : { ok: false }; if (!r.ok) { const a = camClean(kind, legacyView(sc, 0)) || clone(v); sc.tl.cam = { keys: [{ id: nid(), t: 0, v: a }] }; } }
+    T = clamp(+T || 0, 0, sc.tl.duration); const keys = sc.tl.cam.keys; let k = camKeyAt(sc, T);
+    if (!k) { if (keys.length >= 200) return null; k = { id: nid(), t: T < EPS ? 0 : Math.round(T * 1000) / 1000 }; keys.push(k); keys.sort((x, y) => x.t - y.t); }
+    k.v = v; if (extra) Object.assign(k, extra); camSyncBase(sc); return k;
+  }
+  function camMoveKey(sc, keyId, T) {
+    const keys = camKeys(sc), k = keys.find(q => q.id === keyId); if (!k || k === keys[0]) return false;
+    T = clamp(Math.round((+T || 0) * 10) / 10, 0, sc.tl.duration); if (T < EPS) return false;
+    if (keys.some(q => q !== k && Math.abs(q.t - T) < EPS)) return false; k.t = T; keys.sort((x, y) => x.t - y.t); return true;
+  }
+  function camDelKey(sc, keyId) {
+    const keys = camKeys(sc), k = keys.find(q => q.id === keyId); if (!k || k === keys[0]) return false;
+    keys.splice(keys.indexOf(k), 1); if (keys.length === 1) { camSyncBase(sc); delete sc.tl.cam; } return true;
+  }
+  function camSetEase(sc, keyId, e) { const k = camKeyOf(sc, keyId); if (!k) return false; if (e === 'linear' || e === 'inout') k.e = e; else delete k.e; return true; }
+  function camClear(sc) { if (!enabled(sc) || !sc.tl.cam) return false; camSyncBase(sc); delete sc.tl.cam; return true; }
+  function camNormalize(sc) {
+    const tl = sc.tl; if (tl.cam === undefined) return; const kind = camKind(sc);
+    if (!kind || !tl.cam || typeof tl.cam !== 'object' || !Array.isArray(tl.cam.keys)) { delete tl.cam; return; }
+    const seen = [];
+    let keys = tl.cam.keys.filter(k => k && typeof k === 'object' && isNum(k.t)).map(k => { const v = camClean(kind, k.v); if (!v) return null; k.v = v; k.t = Math.max(0, k.t); if (!k.id) k.id = nid(); if (k.e !== 'linear' && k.e !== 'inout') delete k.e; return k; }).filter(Boolean)
+      .sort((a, b) => a.t - b.t).filter(k => { if (seen.some(t => Math.abs(t - k.t) < EPS)) return false; seen.push(k.t); return true; });
+    if (keys.length > 200) keys.length = 200;
+    if (!keys.length) { delete tl.cam; return; }
+    if (keys[0].t > EPS) keys.unshift({ id: nid(), t: 0, v: clone(keys[0].v) }); else keys[0].t = 0;
+    tl.cam = { keys };
+  }
+  /* the editor works on a COPY of the camera at the playhead (like the object working copy); flush writes a key only when it really differs */
+  const camOv = { cur: null };
+  function camBegin(sc, T) { const v = camAt(sc, T) || legacyView(sc, T); T = clamp(+T || 0, 0, enabled(sc) ? sc.tl.duration : 1e9); if (!v) return null; camOv.cur = { tl: sc.tl, sc, T, v: clone(v), base: clone(v) }; return camOv.cur.v; }
+  function camWork(sc, T) { const o = camOv.cur; return (o && enabled(sc) && o.tl === sc.tl && Math.abs(o.T - T) < 1e-6) ? o.v : null; }
+  function camDiscard() { camOv.cur = null; }
+  function camDirty() { const o = camOv.cur; return !!o && JSON.stringify(o.v) !== JSON.stringify(o.base); }
+  function camFlush() {
+    const o = camOv.cur; camOv.cur = null; if (!o || !enabled(o.sc)) return null;
+    if (JSON.stringify(o.v) === JSON.stringify(o.base)) return null;
+    const kind = camKind(o.sc), a = camClean(kind, o.v), b = camClean(kind, o.base); if (!a) return null;
+    if (b && JSON.stringify(camVec(kind, a).map(x => Math.round(x * 1e9))) === JSON.stringify(camVec(kind, b).map(x => Math.round(x * 1e9)))) return null;
+    return camSetKey(o.sc, o.T, a);
+  }
+  if (g.Engine && baseViewAt) {
+    g.Engine.viewAt = (sc, t) => {
+      if (enabled(sc)) { const w = camOv.cur && camWork(sc, clamp(+t || 0, 0, sc.tl.duration)); if (w) return w; if (hasCam(sc)) return camAt(sc, t); }
+      return baseViewAt(sc, t);
+    };
+  }
+
+  /* ---------------- v0.11.7: imported GIF / MP4 media clock ---------------- */
+  /* source time (seconds into the media file) shown at scene time t.  bg.vidStart = in point, bg.vidEnd = out point (optional trim), bg.vidSpeed (default 1), bg.vidLoop.
+     With no vidEnd and speed 1 this is EXACTLY the pre-v0.11.7 rule (so every older show plays the same). */
+  function mediaTime(b, dur, t) {
+    const d = Math.max(0.1, +dur || 0.1), s = clamp(+b.vidStart || 0, 0, d); t = Math.max(0, +t || 0);
+    const sp = (+b.vidSpeed > 0) ? clamp(+b.vidSpeed, 0.1, 8) : 1, hasEnd = isNum(+b.vidEnd) && +b.vidEnd > 0;
+    if (!hasEnd && sp === 1) { const x = s + t; return b.vidLoop ? x % d : Math.min(x, d - 0.04); }
+    const e = clamp(hasEnd ? +b.vidEnd : d, s + 0.04, d), len = e - s, x = t * sp;
+    return b.vidLoop ? s + (x % len) : s + Math.min(x, len - 0.04);
+  }
+  /* how long one pass of the clip lasts on the timeline (trim and speed applied) */
+  const mediaSpan = (b, dur) => { const d = Math.max(0.1, +dur || 0.1), s = clamp(+b.vidStart || 0, 0, d), sp = (+b.vidSpeed > 0) ? clamp(+b.vidSpeed, 0.1, 8) : 1, e = clamp((isNum(+b.vidEnd) && +b.vidEnd > 0) ? +b.vidEnd : d, s + 0.04, d); return (e - s) / sp; };
+  /* make the scene exactly as long as one pass of the clip (the default when media is imported) */
+  function fitToMedia(sc, dur) {
+    if (!sc || !sc.bg || sc.bg.type !== 'video' || !(dur > 0)) return false;
+    const L = clamp(Math.round(mediaSpan(sc.bg, dur) * 10) / 10, LIM.minDur, LIM.maxDur); if (enabled(sc)) setDuration(sc, L); else sc.duration = L; return true;
+  }
+
   /* ---------------- v0.11.5 step shows <-> master timeline ---------------- */
   /* explicit, lossless conversion: the original step show is kept inside tl.legacy so "Back to steps" restores it exactly */
   function fromSteps(sc) {
     if (!sc || !MA.isAnimated(sc)) return { ok: false, why: 'This scene has no steps' };
     if (enabled(sc)) return { ok: false, why: 'Already a master timeline' };
     const legacy = { anim: clone(sc.anim), objects: clone(sc.objects || []), duration: sc.duration };
+    if (sc.bg && sc.bg.view2) legacy.cam = { view: clone(sc.bg.view || null), view2: clone(sc.bg.view2), camDur: sc.bg.camDur, camDelay: sc.bg.camDelay };
     const tl = MA.timeline(sc), n = sc.anim.steps.length, warn = [], ctx = ctxOf(sc);
     const stepObjs = k => MA.stepObjects(sc, k);
     const first = new Map(), lastIdx = new Map(), appears = new Map(), order = [];
@@ -541,18 +678,21 @@
     delete sc.anim; sc.objects = objects;
     sc.tl = { v: 1, duration: Math.max(LIM.minDur, Math.round(tl.total * 100) / 100), tracks, legacy };
     normalize(sc); sc.duration = sc.tl.duration; void ctx;
+    if (camKind(sc) && sc.bg.view2 && +sc.bg.camDur > 0) { const r = camConvertLegacy(sc); if (r.ok) warn.push('The start / end camera became camera keys on the timeline'); }
     return { ok: true, warn, keys: Object.keys(tracks).reduce((s, id) => s + tracks[id].keys.length, 0) };
   }
   /* put the original step show back (anything done on the master timeline since the conversion is dropped) */
   function toSteps(sc) {
     if (!enabled(sc) || !sc.tl.legacy || !sc.tl.legacy.anim) return { ok: false, why: 'This timeline was not made from a step show' };
-    const l = sc.tl.legacy; sc.anim = clone(l.anim); sc.objects = clone(l.objects); sc.duration = l.duration; delete sc.tl; MA.normalize(sc); return { ok: true };
+    const l = sc.tl.legacy; sc.anim = clone(l.anim); sc.objects = clone(l.objects); sc.duration = l.duration; delete sc.tl;
+    if (l.cam && sc.bg) { sc.bg.view = clone(l.cam.view); sc.bg.view2 = clone(l.cam.view2); sc.bg.camDur = l.cam.camDur; sc.bg.camDelay = l.cam.camDelay; }
+    MA.normalize(sc); return { ok: true };
   }
   const allObjects = sc => (sc && sc.tl && sc.tl.legacy) ? (sc.tl.legacy.objects || []).concat(...((sc.tl.legacy.anim && sc.tl.legacy.anim.steps) || []).map(st => st.objects || [])) : [];
   const stats = sc => { if (!enabled(sc)) return { tracks: 0, keys: 0, bytes: 0 }; const t = Object.keys(sc.tl.tracks); return { tracks: t.length, keys: t.reduce((s, id) => s + sc.tl.tracks[id].keys.length, 0), bytes: JSON.stringify(sc.tl).length }; };
 
   const API = { EPS, LIM, EASES, POSE, enabled, enable, normalize, sanitize, setDuration, duration, objectsAt, resolvedPose, poseAt, trackOf, ensureTrack, setKey, getKey, moveKey, delKey, setEase, setPath, setHandles, setPathAll, setEaseAll, routeOf, segSpeed,
-    beginEdit, flush, dirty, liveSync, syncBase, sortKeys, link, canLink, linkPlan, bake, fromSteps, toSteps, allObjects, stats, poseOf, morphShape, atFraction, segCtl, keyPos, objById };
+    beginEdit, flush, dirty, liveSync, CAM_EASES, camKind, hasCam, camAt, camKeys, camKeyOf, camKeyAt, camSetKey, camMoveKey, camDelKey, camSetEase, camClear, camConvertLegacy, camBegin, camWork, camDirty, camFlush, camDiscard, mediaTime, mediaSpan, fitToMedia, syncBase, sortKeys, link, canLink, linkPlan, bake, fromSteps, toSteps, allObjects, stats, poseOf, morphShape, atFraction, segCtl, keyPos, objById };
   g.Timeline = API;
   if (g.Engine) {
     const base = g.Engine.objectsAt; g.Engine.tlObjectsAt = objectsAt;

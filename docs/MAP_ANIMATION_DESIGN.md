@@ -121,3 +121,22 @@ Steps live in `scene.anim` of the normal show document: cloud save/open, unchang
 **Compatibility rules.** v0.11.5 scenes are never reinterpreted silently: `fromSteps` is an explicit, reversible action (`toSteps` restores the stored original exactly); `MapAnim.allObjects`, show-file media scanning and export's missing-image scan include `tl.legacy`. Mapbox pinning, H/L ribbon styles and flow arrows are untouched (they live in object style fields).
 
 **Tests.** `tests/master_timeline.test.js` (23, engine), `tests/browser/master_timeline_browser_check.py` (59, real mouse in Chromium), `tests/browser/master_timeline_persistence_browser_check.py` (27: local reload, `.wxshow.json`, `.wxshow`, cloud via fake Supabase or `WX_BACKEND=pg`, damaged data), `tests/browser/build_timeline_demo.py` (12 s demo + stills + MP4; `docs/demo/`).
+
+
+## 13. Unified timeline: camera + imported media (v0.11.7, branch `claude/v0.11.7-unified-timeline`)
+
+**Goal.** One scene clock (`scene.tl`, one playhead) drives graphics, the map camera and an imported GIF / MP4 background. No new database structure.
+
+**Data.**
+* `scene.tl.cam = { keys:[{ id, t, v, e? }] }`: `v` = `{c:[lng,lat], z, b, p}` (Mapbox) or `{cx, cy, w}` (flat map); `e` = `'linear' | 'inout'` for the move INTO the key, absent = smooth. First key at t = 0 (start view; mirrored into `bg.view` so older code and thumbnails still see the start view). Absent `cam` = the v0.11.6 behaviour (two-view `bg.view` / `bg.view2` blend) – nothing is reinterpreted silently; `camConvertLegacy` is explicit and lossless (same `inout` ease, same linear interpolation).
+* Media clock stays in the existing background fields: `bg.vid` (clip id), `vidStart` (in point), `vidEnd` (out point, optional), `vidSpeed` (default 1), `vidLoop`. `Timeline.mediaTime(bg, clipDuration, t)` maps scene time to clip time; with no `vidEnd` and speed 1 it is exactly the pre-v0.11.7 rule, so every existing video scene plays unchanged. `Timeline.fitToMedia` sets duration = (end − start) ÷ speed.
+
+**Evaluation (pure, no DOM).** `Timeline.camAt(scene, t)`: monotone cubic Hermite (PCHIP) per component on keys (zero velocity at the ends, continuous velocity through keys, no overshoot); `linear` / `inout` segments are exact linear / ease. Bearing is unwrapped to the shortest way; flat-map width is interpolated in log space. `Engine.viewAt` is wrapped by timeline.js: a scene with camera keys (or an open editor working copy at that time) uses `camAt`, otherwise the old logic – so rendering, Mapbox frame requests, export `prepareFrame`, thumbnails and pointer maths all see the same camera.
+
+**Editing.** The editor now looks at the playhead (`editT()` = playhead on a timeline scene). `mapView()` hands every camera tool (pan, wheel, orbit, sliders) a working copy of the camera at the playhead (`camBegin / camWork`); `commit()` → `tlFlush()` → `camFlush()` writes a camera key only if the working copy really differs (no change = nothing written). Undo / redo / scene switch / load discard the working copy. Render options carry `sceneT` so the editor draws the media frame at the playhead; play and export pass scene-local time as before.
+
+**Media seeking.** GIFs are decoded frames (deterministic). For HTML video the seek target is aimed 1 ms into the frame (a frame starts exactly at its timestamp, and seeking to the exact timestamp can show the previous frame) and the editor re-seeks after playback so a paused playhead shows its own frame.
+
+**UI.** Timeline bar rows: *All objects*, *📷 Camera* (map scenes), *🎞 Media* (video scenes; clip bars, repeats when looping, hatched hold bar), object tracks. The timeline works on any background; the older step system stays map-only.
+
+**Not in this version.** Camera on non-map scenes (clips are not georeferenced); fly-to style zoom-out between distant keys; per-key bearing direction override; weather-data (NOAA) loops on the playhead; audio.

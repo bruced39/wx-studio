@@ -2,6 +2,26 @@
 
 > **New in v0.11.6 – the master timeline.** Read the next section first. The older "Steps" system (v0.11.0–v0.11.5) is still there and unchanged; every show made with steps keeps working exactly as before.
 
+> **New in v0.11.7 – one clock for graphics, camera and imported media.** The same playhead now also drives the **map camera** and an imported **GIF / MP4 background**. See "One timeline for everything" below.
+
+## One timeline for everything (v0.11.7)
+Select a scene and press **Animate**. The timeline now works on **any** background (map, imported video / GIF, image, solid). The older Steps button stays map-only.
+
+### Camera (map scenes)
+* A **📷 Camera** row appears on the timeline bar. Move the playhead, then **pan (drag the empty map), zoom (wheel), rotate / tilt (right-drag or the Zoom / Rotate / Tilt sliders in the Animation tab)**. That creates a **camera key** at the playhead (a start key at 0 s is made automatically from the current view). Scrubbing never changes the camera.
+* Editing between two camera keys inserts a key; editing exactly on one updates it. Select a camera key to **retime** it (drag the teal diamond or type the time), choose how the move **into** it behaves (*Smooth – keeps moving through keys* (default), *Ease in & out – stops at both keys*, *Constant speed*) or **delete** it. The start key at 0 s stays.
+* Smooth = continuous speed through the keys with no overshoot; bearing takes the short way round (170° → −170° passes through 180°). Speed is set by the time between keys: move a key closer in time = faster camera.
+* Graphics and camera share the clock: pinned (geo) graphics stay on the geography while the camera moves; screen-pinned graphics stay on the screen. Dragging a graphic at time T places it under the mouse for the camera **at T**.
+* **Old start / end camera** (Scene → Camera Move, v0.11.6): scenes keep playing exactly as before. Press **Convert start / end camera to keys** in the Animation tab (also done automatically when you turn Animate on) – the picture does not change.
+* **Remove camera animation** keeps the start view and deletes all camera keys.
+
+### Imported GIF / MP4 (media scenes)
+* Import the clip (Backgrounds tab → Videos → *Use as this scene's background*). The scene length is matched to the clip (e.g. 4.0 s). If the scene is already animated the timeline length follows.
+* On the timeline a **🎞 Media** row shows the clip: playhead **0 s = the first frame** (after the start trim), the playhead at *t* shows the clip frame for *t*. Scrubbing, Play, Pause and Stop keep clip and graphics in step; the exported MP4 uses the same time → frame mapping.
+* Animation tab → **Imported media**: *Start trim*, *End trim* (0 = to the end), *Speed* (1 = normal; 2 = twice as fast), *Loop the clip if the scene is longer* (loops inside the trim window; otherwise the last frame is held and the row shows a hatched "holds last frame" bar) and **Match scene length to the clip** (one pass = (end − start) ÷ speed).
+* Graphics on top (fronts, H/L, text, icons, arrows) keyframe exactly as on a map scene. Imported clips are **not georeferenced** yet: graphics are screen graphics on the clip, and there is no map camera on these scenes (camera controls are hidden).
+* The clip itself stays in your browser (and in a `.wxshow` package); it is not in the cloud database – other computers show "not available" until the clip is added there.
+
 ## Master timeline (v0.11.6) – one timeline per map scene
 Select a map scene and press **Animate** (next to Scene / Show / Steps). A timeline bar appears under the map and an **Animation** tab opens on the right.
 
@@ -20,8 +40,9 @@ Select a map scene and press **Animate** (next to Scene / Show / Steps). A timel
 A scene that uses Steps keeps the step bar and plays exactly as before. Nothing is converted automatically. To use the new timeline on it open the **Animation** tab and press **Convert to master timeline**: the steps become keys at the step times (a copy of the original steps is stored inside the scene). **Back to steps** restores the original steps exactly. If your steps used different styles per step, the conversion warns you (the master timeline has one style per object).
 
 ### Limits you should know
+* Weather-data loops (native NOAA frames) keep their own clock; only imported GIF / MP4 clips follow the playhead in this version.
 * Fronts that were blended point-by-point between steps are converted to the timeline's shape-morph, so the in-between shapes can differ slightly (the shapes at the key times are identical).
-* Camera (map view start/end) animation is not previewed while scrubbing in the editor; it still runs in Play, Present and MP4.
+* (v0.11.6 only) Camera was not previewed while scrubbing; since v0.11.7 the camera is part of the timeline and previews while scrubbing.
 * The **Pin to map** switch is disabled for an object that already has keys (unpin before animating).
 * Tested in headless Chromium only; real Firefox and live Mapbox tiles have not been verified for the timeline.
 

@@ -141,15 +141,18 @@
   };
   const gifFrame = (v, tt) => { tt = tt * 1000 + 0.5; let lo = 0, hi = v.starts.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (v.starts[m] <= tt) lo = m; else hi = m - 1; } return v.frames[lo]; };
   E.vid = id => (id && E.videos[id] && E.videos[id].ok && E.videos[id].w) ? E.videos[id] : null;
-  const vidTime = (b, v, t) => { const d = Math.max(0.1, v.dur), s = clamp(+b.vidStart || 0, 0, d), x = s + Math.max(0, t); return b.vidLoop ? x % d : Math.min(x, d - 0.04); };
+  /* v0.11.7: the media clock lives in Timeline.mediaTime (trim, speed, loop; identical to the old rule when none of them is set) */
+  const vidTime = (b, v, t) => { if (g.Timeline && g.Timeline.mediaTime) return g.Timeline.mediaTime(b, v.dur, t); const d = Math.max(0.1, v.dur), s = clamp(+b.vidStart || 0, 0, d), x = s + Math.max(0, t); return b.vidLoop ? x % d : Math.min(x, d - 0.04); };
+  /* v0.11.7: an HTML video frame starts exactly at its timestamp; seeking to that exact time can still show the previous frame, so aim 1 ms into the frame */
+  const vseek = (v, tt) => Math.min(tt + 0.001, Math.max(0, v.dur - 0.001));
   E.seekVideo = function (b, t) {
-    const v = E.vid(b.vid); if (!v || v.gif) return Promise.resolve(); const tt = vidTime(b, v, t), el = v.el;
+    const v = E.vid(b.vid); if (!v || v.gif) return Promise.resolve(); const tt = vseek(v, vidTime(b, v, t)), el = v.el;
     return new Promise(res => { let fin = false; const done = () => { if (fin) return; fin = true; el.removeEventListener('seeked', done); res(); }; el.addEventListener('seeked', done); if (!el.paused) el.pause(); el.currentTime = tt; setTimeout(done, 1500); });
   };
   function syncVideo(b, v, t, opts) {
     if ((opts && opts.thumb) || E.exporting) return;
-    const el = v.el, tt = vidTime(b, v, t), atEnd = !b.vidLoop && tt >= v.dur - 0.05;
-    if (opts && opts.editing) { if (!el.paused) el.pause(); if (!el.seeking && Math.abs(el.currentTime - tt) > 0.04) el.currentTime = tt; }
+    const el = v.el, tt0 = vidTime(b, v, t), tt = vseek(v, tt0), atEnd = !b.vidLoop && tt0 >= v.dur - 0.05;
+    if (opts && opts.editing) { if (!el.paused) el.pause(); if (!el.seeking && (v.lastTT == null || Math.abs(v.lastTT - tt) > 0.0005 || Math.abs(el.currentTime - tt) > 0.04)) { v.lastTT = tt; el.currentTime = tt; } }   // v0.11.7: also re-seek after playback so the paused frame is the frame of the playhead
     else if (atEnd) { if (!el.paused) el.pause(); if (!el.seeking && Math.abs(el.currentTime - tt) > 0.1) el.currentTime = tt; }
     else if (el.paused) { el.currentTime = tt; el.play().catch(() => { /* needs a user gesture */ }); }
     else if (Math.abs(el.currentTime - tt) > 0.35) el.currentTime = tt;
@@ -528,9 +531,9 @@
           const s = Math.min(W / im.width, H / im.height) * kb, w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h);
         } else { const s = Math.max(W / im.width, H / im.height) * kb; const w = im.width * s, h = im.height * s; c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h); } }
     } else if (b.type === 'video') {
-      c.fillStyle = '#000'; c.fillRect(0, 0, W, H); const v = E.vid(b.vid);
-      if (v && v.gif) { try { drawVideoFit(c, gifFrame(v, vidTime(b, v, t)), v.w, v.h, b); } catch (err2) { /* ignore */ } }
-      else if (v) { syncVideo(b, v, t, opts); try { drawVideoFit(c, v.el, v.w, v.h, b); } catch (err2) { /* frame not ready yet */ } }
+      c.fillStyle = '#000'; c.fillRect(0, 0, W, H); const v = E.vid(b.vid), mt = (opts && opts.sceneT != null) ? opts.sceneT : t;   // v0.11.7: editing a master-timeline scene shows the media frame AT THE PLAYHEAD
+      if (v && v.gif) { try { drawVideoFit(c, gifFrame(v, vidTime(b, v, mt)), v.w, v.h, b); } catch (err2) { /* ignore */ } }
+      else if (v) { syncVideo(b, v, mt, opts); try { drawVideoFit(c, v.el, v.w, v.h, b); } catch (err2) { /* frame not ready yet */ } }
       else { c.save(); c.fillStyle = 'rgba(255,255,255,0.7)'; c.font = `600 28px ${SANS}`; c.textAlign = 'center'; c.fillText(E.videos[b.vid] ? (E.videos[b.vid].err ? 'GIF could not be read: ' + E.videos[b.vid].err : 'Loading video…') : 'Video not found in this browser – add it again in Assets → Videos', W / 2, H / 2); c.restore(); }
     } else if (b.type === 'solid') { c.fillStyle = b.color || '#101820'; c.fillRect(0, 0, W, H); }
     else {

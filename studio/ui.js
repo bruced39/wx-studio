@@ -30,7 +30,8 @@
   const cur = () => { const sc = S.show.scenes[S.si]; if (sc && sc.tl && tlOn(sc)) return tlView(sc); if (!sc || !sc.anim) return sc; const i = stepIdx(); return i > 0 ? stepView(sc, i) : sc; };
   const selObj = () => cur().objects.find(o => o.id === S.oid) || null;
   const isMap = bg => bg.type === 'map' || bg.type === 'mapbox';
-  const editT = () => (S.editEnd && cur().bg.view2) ? (cur().bg.camDelay || 0) + (cur().bg.camDur || 3) + 0.01 : 0;
+  /* the scene time the editor looks at: the playhead on a master-timeline scene (camera + media + graphics), otherwise the old START / END camera view */
+  const editT = () => { const rs = S.show && S.show.scenes[S.si]; if (rs && rs.tl && tlOn(rs)) return clamp(+S.tlT || 0, 0, rs.tl.duration); return (S.editEnd && cur().bg.view2) ? (cur().bg.camDelay || 0) + (cur().bg.camDur || 3) + 0.01 : 0; };
   const clock = () => performance.now() / 1000;
   function h(tag, a, ...kids) { const e = document.createElement(tag); Object.keys(a || {}).forEach(k => { if (k === 'on') Object.keys(a.on).forEach(ev => e.addEventListener(ev, a.on[ev])); else if (k === 'text') e.textContent = a[k]; else if (k === 'style') e.style.cssText = a[k]; else if (k in e && k !== 'list') e[k] = a[k]; else e.setAttribute(k, a[k]); }); kids.flat().forEach(c => { if (c != null) e.append(c.nodeType ? c : document.createTextNode(c)); }); return e; }
   function toast(m) { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(toast.k); toast.k = setTimeout(() => t.style.display = 'none', 2600); }
@@ -41,7 +42,7 @@
   const attachMemo = new WeakMap();   // v0.11.5: where each attached child was last put (not saved)
   const attachCtx = sc => ({ lngLat: !!(sc || cur()).bg && (sc || cur()).bg.type === 'mapbox' });   // pinned objects are lng/lat on Mapbox scenes
   function commit() { try { tlFlush(); } catch (e) { console.error(e); } try { if (!tlOn(realScene())) MA.syncAttach(cur().objects, attachMemo, attachCtx()); } catch (e) { /* ignore */ } try { if (tlOn(realScene())) renderMtl(); } catch (e) { console.error(e); } const s = snap(); if (S.hist[S.hp] === s) return; S.hist = S.hist.slice(0, S.hp + 1); S.hist.push(s); if (S.hist.length > 120) S.hist.shift(); S.hp = S.hist.length - 1; autosave(); thumbSoon(); }
-  function restore(s) { const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
+  function restore(s) { try { TL && TL.camDiscard(); } catch (e) { /* ignore */ } const o = JSON.parse(s); Object.assign(S.show, { name: o.name, accent: o.accent, bugText: o.bugText, logo: o.logo, scenes: o.scenes }); S.si = clamp(S.si, 0, S.show.scenes.length - 1); if (!selObj()) S.oid = null; refreshAll(); autosave(); }
   const undo = () => { if (S.hp > 0) { S.hp--; restore(S.hist[S.hp]); } };
   const redo = () => { if (S.hp < S.hist.length - 1) { S.hp++; restore(S.hist[S.hp]); } };
   /* Bundled artwork that ships inside the app (default sky, 7-day template, headline / storm backgrounds). v0.10.2: also the list the cloud client uses to
@@ -161,7 +162,7 @@
     const sh=E.newShow(); if(sh.scenes&&sh.scenes[0]&&sh.scenes[0].bg&&sh.scenes[0].bg.type==='mapbox')sh.scenes[0].bg=JSON.parse(JSON.stringify(defaultMapBg()));
     return sh;
   }
-  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); sh.scenes.forEach(x => { if (x && x.tl && TL) { try { TL.normalize(x); TL.sanitize(x); } catch (e) { delete x.tl; } } if (x && x.anim && MA) MA.normalize(x); if (x && MA) { try { MA.sanitizeAttach(x); } catch (e) { /* bad Follow links are simply dropped */ } } }); S.show = sh; S.si = 0; S.oid = null; S.tlT = 0; S.tlSel = null; tlEd = null; S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
+  function loadShow(sh, opt) { if (!sh || !Array.isArray(sh.scenes) || !sh.scenes.length) throw new Error('not a show file'); if (booted) markTouched(); sh.assets = sh.assets || {}; ensureBG(sh, opt); sh.accent = sh.accent || '#2f9bff'; migrateMB(sh); migrateWDBroadcast(sh); sh.scenes.forEach(x => { if (x && x.tl && TL) { try { TL.normalize(x); TL.sanitize(x); } catch (e) { delete x.tl; } } if (x && x.anim && MA) MA.normalize(x); if (x && MA) { try { MA.sanitizeAttach(x); } catch (e) { /* bad Follow links are simply dropped */ } } }); S.show = sh; S.si = 0; S.oid = null; S.tlT = 0; S.tlSel = null; tlEd = null; try { TL && TL.camDiscard(); } catch (e) { /* ignore */ } S.hist = []; S.hp = -1; commit(); refreshAll(); E.preload(sh).then(thumbSoon); }
 
   /* ---------- thumbnails ---------- */
   const tb = document.createElement('canvas'); tb.width = W; tb.height = H; const tbc = tb.getContext('2d'); let tk = null;
@@ -339,7 +340,10 @@
       S.mode = 'edit'; S.play = null; updateTransport(); if (st0 != null) { renderStepbar(); renderPanels(); }
     }
   }
-  function mapView(sc) { const k = (S.editEnd && sc.bg.view2) ? 'view2' : 'view'; if (!sc.bg[k]) sc.bg[k] = JSON.parse(JSON.stringify(E.viewAt(sc, editT()))); return sc.bg[k]; }
+  function mapView(sc) {
+    const rs = S.show && S.show.scenes[S.si];
+    if (rs && tlOn(rs) && TL.camKind(rs)) { const T = editT(); return TL.camWork(rs, T) || TL.camBegin(rs, T); }   // v0.11.7: the camera is edited AT THE PLAYHEAD; commit() turns it into a camera key
+    const k = (S.editEnd && sc.bg.view2) ? 'view2' : 'view'; if (!sc.bg[k]) sc.bg[k] = JSON.parse(JSON.stringify(E.viewAt(sc, editT()))); return sc.bg[k]; }
   ov.addEventListener('pointerdown', e => {
     if (S.present) return;
     const p = pt(e), sc = cur();
@@ -537,13 +541,15 @@
   }
   /* write pending edits of the working copy into the scene as keys. Returns true when something was written. Nothing edited = nothing written (scrubbing is safe). */
   function tlFlush() {
-    const s = tlEd; if (!s) return false; const sc = s.sc;
-    if (!S.show || S.show.scenes.indexOf(sc) < 0 || !TL.enabled(sc)) { tlEd = null; return false; }
-    if (!TL.dirty(sc, s.ed)) return false;
+    let camWrote = false;
+    try { const ck = TL.camFlush(); if (ck) { S.tlSel = { oid: '@cam', kid: ck.id }; camWrote = true; } } catch (e) { console.error(e); }
+    const s = tlEd; if (!s) return camWrote; const sc = s.sc;
+    if (!S.show || S.show.scenes.indexOf(sc) < 0 || !TL.enabled(sc)) { tlEd = null; return camWrote; }
+    if (!TL.dirty(sc, s.ed)) return camWrote;
     const r = TL.flush(sc, s.ed); tlTouch(sc);
     if (r.warn.length) toast(r.warn[0]);
     if (r.keys.length) { const k = r.keys[r.keys.length - 1]; S.tlSel = { oid: k[0], kid: k[1] }; }
-    return r.changed;
+    return r.changed || camWrote;
   }
   const tlLocalT = sc => { const st = E.starts(S.show)[S.si]; return clamp(Math.round((S.T - st) * 10) / 10, 0, sc.tl.duration); };
   function tlSeek(T, exact) {
@@ -556,10 +562,11 @@
   function tlStop() { stopPlay(); tlSeek(0); }
   /* the playhead follows playback of this scene */
   function tlFollowPlay() { const sc = S.show && S.show.scenes[S.si]; if (!tlOn(sc) || S.mode !== 'play') return; const st = E.starts(S.show)[S.si]; if (S.T >= st && S.T <= st + sc.duration + 0.01) S.tlT = clamp(S.T - st, 0, sc.tl.duration); }
-  function tlEnable() { const sc = realScene(); backToEdit(); TL.enable(sc, { duration: sc.duration >= 3 ? sc.duration : 12 }); S.tlT = 0; tlTouch(sc); commit(); refreshAll(); setTab('anim'); toast('Animation on – move the playhead, then drag anything on the map: keyframes are made for you'); }
+  function tlEnable() { const sc = realScene(); backToEdit(); TL.enable(sc, { duration: sc.duration >= 3 ? sc.duration : 12 }); if (TL.camKind(sc) && sc.bg.view2 && +sc.bg.camDur > 0) TL.camConvertLegacy(sc); S.tlT = 0; tlTouch(sc); commit(); refreshAll(); setTab('anim'); toast('Animation on – move the playhead, then drag anything on the map: keyframes are made for you'); }
   function tlRemove() {
     const sc = realScene(); if (!tlOn(sc)) return; backToEdit(); tlFlush(); const T = S.tlT, orig = new Map(sc.objects.map(o => [o.id, o])), here = TL.objectsAt(sc, T).filter(o => !(o.hidden && !(orig.get(o.id) || {}).hidden)).map(o => { const c = JSON.parse(JSON.stringify(o)); delete c._a; return c; });
-    const keep = sc.tl.duration; sc.objects = here; delete sc.tl; sc.duration = keep; tlTouch(sc); S.tlSel = null; commit(); refreshAll(); toast('Animation removed (kept the picture at ' + T.toFixed(1) + ' s). Ctrl+Z brings it back.');
+    const keep = sc.tl.duration, camNow = TL.hasCam(sc) ? TL.camAt(sc, T) : null; if (camNow) { sc.bg.view = camNow; delete sc.bg.view2; }
+    sc.objects = here; delete sc.tl; sc.duration = keep; tlTouch(sc); S.tlSel = null; commit(); refreshAll(); toast('Animation removed (kept the picture at ' + T.toFixed(1) + ' s). Ctrl+Z brings it back.');
   }
   function tlConvert() {
     const sc = realScene(); if (!MA.isAnimated(sc)) return; backToEdit(); const r = TL.fromSteps(sc); if (!r.ok) return toast(r.why);
@@ -569,9 +576,10 @@
   /* ---- object helpers for the panels ---- */
   const tlObj = id => { const sc = realScene(); return sc && TL.objById(sc, id); };
   const tlKeys = oid => { const tr = TL.trackOf(realScene(), oid); return tr ? tr.keys : []; };
-  function tlSelKey() { const s = S.tlSel; if (!s) return null; const k = TL.getKey(realScene(), s.oid, s.kid); return k ? { oid: s.oid, k } : null; }
+  const CAM = '@cam';
+  function tlSelKey() { const s = S.tlSel; if (!s) return null; const sc = realScene(); const k = s.oid === CAM ? TL.camKeyOf(sc, s.kid) : TL.getKey(sc, s.oid, s.kid); return k ? { oid: s.oid, k } : null; }
   function tlDelKey(oid, kid) {
-    const sc = realScene(); if (!TL.delKey(sc, oid, kid)) return toast('The start key (0 s) stays – delete the later keys instead'); if (S.tlSel && S.tlSel.kid === kid) S.tlSel = null; tlTouch(sc); commit(); renderMtl(); renderPanels();
+    const sc = realScene(); if (!(oid === CAM ? TL.camDelKey(sc, kid) : TL.delKey(sc, oid, kid))) return toast('The start key (0 s) stays – delete the later keys instead'); if (S.tlSel && S.tlSel.kid === kid) S.tlSel = null; tlTouch(sc); commit(); renderMtl(); renderPanels();
   }
   /* ---- the timeline bar under the map ---- */
   const MTL_LAB = 128;
@@ -585,7 +593,7 @@
   function mtlPct(t, D) { return (clamp(t, 0, D) / D * 100).toFixed(3) + '%'; }
   function renderMtl() {
     const box = $('#mtl'); if (!box) return; const sc = S.show && S.show.scenes[S.si];
-    if (!sc || !isMap(sc.bg) || !tlOn(sc)) { box.hidden = true; box.textContent = ''; return; }
+    if (!sc || !tlOn(sc)) { box.hidden = true; box.textContent = ''; return; }
     box.hidden = false; box.textContent = ''; const D = sc.tl.duration, st = TL.stats(sc);
     const stepNum = (id, label, min, max, step, val, on, w) => { const el = h('input', { type: 'number', min, max, step, value: val, id }); if (w) el.style.width = w; el.addEventListener('change', () => on(+el.value)); return h('label', { className: 'sbf' }, h('span', { text: label }), el); };
     const ctl = h('div', { className: 'mrow' },
@@ -593,10 +601,10 @@
       h('button', { id: 'mtlStop', text: '■ Stop', title: 'Stop and go back to 0 s', on: { click: tlStop } }),
       stepNum('mtlTime', 'Time (s)', 0, D, 0.1, (+S.tlT).toFixed(1), v => tlSeek(isFinite(v) ? v : 0), '76px'),
       h('span', { className: 'mtime', id: 'mtlTimeTxt', text: '' }),
-      h('button', { text: '◀ Key', title: 'Previous key of the selected object (all objects if none)', on: { click: () => mtlStepKey(-1) } }), h('button', { text: 'Key ▶', title: 'Next key', on: { click: () => mtlStepKey(1) } }),
+      h('button', { text: '◀ Key', title: 'Previous key of the selected object (all keys if none)', on: { click: () => mtlStepKey(-1) } }), h('button', { text: 'Key ▶', title: 'Next key', on: { click: () => mtlStepKey(1) } }),
       h('button', { id: 'mtlDel', className: 'dng', text: '🗑 Delete key', title: 'Delete the selected key (the start key at 0 s stays)', on: { click: () => { const s = tlSelKey(); if (s) tlDelKey(s.oid, s.k.id); else toast('Click a key marker first'); } } }),
       h('button', { text: S.tlOpen ? '▾ Tracks' : '▸ Tracks', title: 'Show / hide one lane per animated object', on: { click: () => { S.tlOpen = !S.tlOpen; renderMtl(); } } }),
-      h('span', { className: 'mut', text: 'Total ' + D.toFixed(1) + ' s · ' + st.keys + ' keys · edit anything at the playhead = keyframe' }));
+      h('span', { className: 'mut', text: 'Total ' + D.toFixed(1) + ' s · ' + (st.keys + TL.camKeys(sc).length) + ' keys · edit anything at the playhead = keyframe' }));
     const grid = h('div', { className: 'mtl-grid' });
     const ruler = h('div', { className: 'mtl-track mtl-ruler', id: 'mtlRuler', title: 'Click or drag to move the playhead (0.1 s steps)' }), lab0 = h('div', { className: 'mtl-lab', text: 'Time' });
     const major = D <= 30 ? 1 : D <= 90 ? 5 : 10;
@@ -604,6 +612,25 @@
     grid.append(lab0, ruler);
     const all = {}; Object.keys(sc.tl.tracks).forEach(id => sc.tl.tracks[id].keys.forEach(k => { all[Math.round(k.t * 10)] = k.t; }));
     const sum = h('div', { className: 'mtl-track' }); Object.keys(all).forEach(q => sum.append(h('div', { className: 'mtl-key sum', style: 'left:' + mtlPct(all[q], D) }))); grid.append(h('div', { className: 'mtl-lab', text: 'All objects' }), sum);
+    if (TL.camKind(sc)) {                                                           // v0.11.7: the camera is a lane of the SAME timeline
+      const ctrk = h('div', { className: 'mtl-track mtl-cam', id: 'mtlCamTrack', 'data-oid': CAM }), ck = TL.camKeys(sc);
+      ck.forEach((k, i) => {
+        const sel = S.tlSel && S.tlSel.kid === k.id, b = h('button', { className: 'mtl-key cam' + (sel ? ' sel' : '') + (i === 0 ? ' start' : '') + (k.t > D + 1e-9 ? ' past' : ''), style: 'left:' + mtlPct(k.t, D), title: (i === 0 ? 'Camera start view' : 'Camera key') + ' at ' + k.t.toFixed(1) + ' s – click to select, drag to retime, Delete removes it', 'data-kid': k.id, 'data-cam': '1' });
+        b.addEventListener('pointerdown', ev => mtlKeyDown(ev, CAM, k.id, ctrk)); b.addEventListener('keydown', ev => { if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); ev.stopPropagation(); tlDelKey(CAM, k.id); } });
+        ctrk.append(b);
+      });
+      if (!ck.length) ctrk.append(h('div', { className: 'mut', style: 'position:absolute;left:8px;top:3px', text: 'no camera keys yet – move the playhead, then pan / zoom / rotate / tilt the map' }));
+      grid.append(h('div', { className: 'mtl-lab' + (S.tlSel && S.tlSel.oid === CAM ? ' sel' : ''), text: '📷 Camera', title: 'Map camera keys (zoom, position, rotation, tilt)', on: { click: () => { setTab('anim'); renderMtl(); } } }), ctrk);
+    }
+    if (sc.bg.type === 'video') {                                                    // v0.11.7: the imported GIF / MP4 clip on the same clock
+      const v = E.videos[sc.bg.vid], mtrk = h('div', { className: 'mtl-track mtl-media', id: 'mtlMediaTrack' });
+      if (v && v.dur) {
+        const span = Math.max(0.04, TL.mediaSpan(sc.bg, v.dur)), loop = !!sc.bg.vidLoop; let a = 0, n = 0;
+        while (a < D - 1e-9 && n < 60) { const w = Math.min(span, D - a); mtrk.append(h('div', { className: 'mtl-clip' + (n ? ' rep' : ''), style: 'left:' + mtlPct(a, D) + ';width:' + (w / D * 100).toFixed(3) + '%', title: (n ? 'Loop ' + (n + 1) + ': ' : '') + v.name + ' – ' + span.toFixed(2) + ' s per pass' }, n ? null : h('i', { text: v.name + ' · ' + span.toFixed(1) + ' s' }))); a += span; n++; if (!loop) break; }
+        if (!loop && span < D - 1e-9) mtrk.append(h('div', { className: 'mtl-clip hold', style: 'left:' + mtlPct(span, D) + ';width:' + ((D - span) / D * 100).toFixed(3) + '%', title: 'The clip has ended: the last frame is held' }, h('i', { text: 'holds last frame' })));
+      } else mtrk.append(h('div', { className: 'mut', style: 'position:absolute;left:8px;top:3px', text: v && v.err ? 'This clip could not be read' : 'Loading media…' }));
+      grid.append(h('div', { className: 'mtl-lab', text: '🎞 Media', title: 'Imported GIF / MP4 clip: playhead 0 = its first frame (trim / speed in the Animation tab)', on: { click: () => { setTab('anim'); } } }), mtrk);
+    }
     mtlLanes(sc).forEach(l => {
       const trk = h('div', { className: 'mtl-track', 'data-oid': l.id }), tr = sc.tl.tracks[l.id];
       if (tr && tr.vis) { const a = tr.vis.a != null ? tr.vis.a : 0, b = tr.vis.b != null ? tr.vis.b : D; trk.append(h('div', { style: 'position:absolute;top:9px;height:4px;border-radius:2px;background:#2a4468;left:' + mtlPct(a, D) + ';width:' + ((clamp(b, 0, D) - clamp(a, 0, D)) / D * 100).toFixed(3) + '%', title: 'Visible from ' + a.toFixed(1) + ' s' })); }
@@ -622,14 +649,14 @@
     syncMtl();
   }
   function mtlStepKey(dir) {
-    const sc = realScene(); if (!tlOn(sc)) return; const ts = new Set(); (S.oid && TL.trackOf(sc, S.oid) ? [S.oid] : Object.keys(sc.tl.tracks)).forEach(id => sc.tl.tracks[id].keys.forEach(k => ts.add(Math.round(k.t * 1000) / 1000)));
+    const sc = realScene(); if (!tlOn(sc)) return; const ts = new Set(); const camSel = S.tlSel && S.tlSel.oid === CAM && !S.oid; if (camSel) TL.camKeys(sc).forEach(k => ts.add(Math.round(k.t * 1000) / 1000)); else { (S.oid && TL.trackOf(sc, S.oid) ? [S.oid] : Object.keys(sc.tl.tracks)).forEach(id => sc.tl.tracks[id].keys.forEach(k => ts.add(Math.round(k.t * 1000) / 1000))); if (!S.oid) TL.camKeys(sc).forEach(k => ts.add(Math.round(k.t * 1000) / 1000)); }
     const arr = Array.from(ts).sort((a, b) => a - b), T = S.tlT, nx = dir > 0 ? arr.find(t => t > T + 0.001) : arr.slice().reverse().find(t => t < T - 0.001); if (nx != null) tlSeek(nx, true);
   }
   function mtlKeyDown(ev, oid, kid, trk) {
-    ev.preventDefault(); ev.stopPropagation(); backToEdit(); ev.currentTarget.focus(); const sc = realScene(), tr = TL.trackOf(sc, oid), k = tr && tr.keys.find(q => q.id === kid); if (!k) return;
-    if (S.oid !== oid) { S.oid = oid; }
-    S.tlSel = { oid, kid }; tlSeek(k.t, true); const first = tr.keys[0] === k, el = ev.currentTarget; el.setPointerCapture(ev.pointerId); let moved = false;
-    el.onpointermove = e2 => { if (first) return; const r = trk.getBoundingClientRect(), T = clamp(Math.round(((e2.clientX - r.left) / r.width) * sc.tl.duration * 10) / 10, 0, sc.tl.duration); if (Math.abs(T - k.t) > 0.04 && TL.moveKey(sc, oid, kid, T)) { moved = true; tlTouch(sc); el.style.left = mtlPct(k.t, sc.tl.duration); S.tlT = k.t; updateTransport(); } };
+    ev.preventDefault(); ev.stopPropagation(); backToEdit(); ev.currentTarget.focus(); const sc = realScene(), isCam = oid === CAM, keys = isCam ? TL.camKeys(sc) : ((TL.trackOf(sc, oid) || {}).keys || []), k = keys.find(q => q.id === kid); if (!k) return;
+    if (!isCam && S.oid !== oid) { S.oid = oid; }
+    S.tlSel = { oid, kid }; tlSeek(k.t, true); const first = keys[0] === k, el = ev.currentTarget; el.setPointerCapture(ev.pointerId); let moved = false;
+    el.onpointermove = e2 => { if (first) return; const r = trk.getBoundingClientRect(), T = clamp(Math.round(((e2.clientX - r.left) / r.width) * sc.tl.duration * 10) / 10, 0, sc.tl.duration); if (Math.abs(T - k.t) > 0.04 && (isCam ? TL.camMoveKey(sc, kid, T) : TL.moveKey(sc, oid, kid, T))) { moved = true; tlTouch(sc); el.style.left = mtlPct(k.t, sc.tl.duration); S.tlT = k.t; updateTransport(); } };
     el.onpointerup = () => { el.onpointermove = null; el.onpointerup = null; if (moved) { commit(); } renderMtl(); renderPanels(); };
   }
   /* per-frame light sync */
@@ -673,10 +700,35 @@
       else { const mx = (Pa[0] + Pb[0]) / 2, my = (Pa[1] + Pb[1]) / 2, dd = [(q[0] - mx) / 0.75, (q[1] - my) / 0.75], t3 = [(Pb[0] - Pa[0]) / 3, (Pb[1] - Pa[1]) / 3]; TL.setHandles(rs, d.oid, d.kid, [t3[0] + dd[0], t3[1] + dd[1]], [-t3[0] + dd[0], -t3[1] + dd[1]]); } }
     tlTouch(rs); S.tlSel = { oid: d.oid, kid: d.kid };
   }
+  /* ---- v0.11.7: camera + imported media sections of the Animation tab ---- */
+  /* a live view of the map camera AT THE PLAYHEAD (sliders read / write it; commit() turns an edit into a camera key) */
+  const camProxy = () => new Proxy({}, { get: (_, k) => mapView(realScene())[k], set: (_, k, v) => { mapView(realScene())[k] = v; return true; } });
+  function camReset() { const rs = realScene(); if (rs && tlOn(rs)) { try { TL.camDiscard(); TL.camClear(rs); } catch (e) { /* ignore */ } } }
+  function camSection(p, sc) {
+    const ck = TL.camKeys(sc), T = clamp(+S.tlT || 0, 0, sc.tl.duration), here = TL.camKeyAt(sc, T), mb2 = sc.bg.type === 'mapbox';
+    p.append(h('div', { className: 'h', text: '📷 Camera (same timeline)' }));
+    const legacy = !TL.hasCam(sc) && sc.bg.view2 && +sc.bg.camDur > 0;
+    p.append(h('div', { className: 'tlnote', id: 'tlCamNote', text: legacy ? 'This scene still has the older start / end camera move. Convert it to keys to edit it on the timeline (the picture does not change).' : ck.length ? ck.length + ' camera keys · ' + (here ? 'key at the playhead (' + T.toFixed(1) + ' s)' : 'between keys at ' + T.toFixed(1) + ' s – changing the map here inserts a key') : 'No camera motion yet. Move the playhead, then drag / scroll / right-drag the map – a camera key is made for you. Scrubbing never changes the camera.' }));
+    if (mb2) { const mvp = camProxy(); p.append(bind(mvp, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom', after: updateZoomBadge }), bind(mvp, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }), bind(mvp, 'p', 'range', { min: 0, max: 70, step: 1, label: 'Tilt' })); }
+    p.append(h('div', { className: 'btnrow' },
+      legacy ? h('button', { id: 'tlCamConv', className: 'pri', text: 'Convert start / end camera to keys', on: { click: () => { backToEdit(); tlFlush(); const r = TL.camConvertLegacy(sc); if (!r.ok) return toast(r.why); tlTouch(sc); commit(); refreshAll(); setTab('anim'); } } }) : null,
+      h('button', { id: 'tlCamKey', text: '◆ Key camera here', title: 'Make a camera key at the playhead from what the map shows now', on: { click: () => { backToEdit(); tlFlush(); const v = TL.camAt(sc, T) || E.viewAt(sc, T); const k = TL.camSetKey(sc, T, v); if (k) { S.tlSel = { oid: CAM, kid: k.id }; tlTouch(sc); commit(); renderMtl(); renderPanels(); } } } }),
+      TL.hasCam(sc) ? h('button', { className: 'dng', id: 'tlCamClear', text: 'Remove camera animation', title: 'Keep the start view, delete all camera keys', on: { click: () => { backToEdit(); tlFlush(); TL.camClear(sc); tlTouch(sc); commit(); renderMtl(); renderPanels(); } } }) : null));
+  }
+  function mediaSection(p, sc) {
+    const b = sc.bg, v = E.videos[b.vid], D = sc.tl.duration; p.append(h('div', { className: 'h', text: '🎞 Imported media (same timeline)' }));
+    if (!v || !v.dur) { p.append(h('div', { className: 'hint', text: v && v.err ? 'This clip could not be read: ' + v.err : 'The clip is not available in this browser yet (import it again from the Backgrounds tab).' })); return; }
+    const span = TL.mediaSpan(b, v.dur), re = () => { tlTouch(sc); renderMtl(); };
+    p.append(h('div', { className: 'tlnote', id: 'tlMediaNote', text: v.name + ' · ' + v.dur.toFixed(2) + ' s · ' + v.w + '×' + v.h + (v.gif ? ' · GIF' : ' · video') + '. Playhead 0 s = the first frame of the clip (after the start trim). One pass lasts ' + span.toFixed(2) + ' s on the timeline' + (span < D - 0.05 ? (b.vidLoop ? ' and then repeats.' : '; after that the last frame is held.') : '.') }),
+      bind(b, 'vidStart', 'num', { label: 'Start trim (clip s)', min: 0, max: Math.max(0, v.dur - 0.1), step: 0.1, after: re }),
+      bind(b, 'vidEnd', 'num', { label: 'End trim (clip s, 0 = to the end)', min: 0, max: v.dur, step: 0.1, after: re }),
+      bind(b, 'vidSpeed', 'num', { label: 'Speed (1 = normal)', min: 0.1, max: 8, step: 0.05, after: re }),
+      bind(b, 'vidLoop', 'check', { label: 'Loop the clip if the scene is longer', after: re }),
+      h('div', { className: 'btnrow' }, h('button', { id: 'tlMediaFit', text: 'Match scene length to the clip', title: 'Set the total duration to one pass of the clip (trim and speed applied)', on: { click: () => { backToEdit(); tlFlush(); if (TL.fitToMedia(sc, v.dur)) { tlTouch(sc); S.tlT = clamp(S.tlT, 0, sc.tl.duration); commit(); refreshAll(); setTab('anim'); } } } })));
+  }
   /* ---- the Animation tab ---- */
   function animPanel(p) {
     const sc = realScene(); p.append(h('div', { className: 'h', text: 'Animation' }));
-    if (!isMap(sc.bg)) { p.append(h('div', { className: 'hint', text: 'Animation is available on map scenes. Switch this scene’s background to a map first.' })); return; }
     if (MA.isAnimated(sc)) {
       p.append(h('div', { className: 'hint', text: 'This scene uses the v0.11.5 step animation (it still works exactly as before). You can convert it to the new master timeline – the original steps are kept so “Back to steps” restores them.' }),
         h('div', { className: 'btnrow' }, h('button', { className: 'pri', text: 'Convert to master timeline', on: { click: tlConvert } }))); return;
@@ -686,6 +738,8 @@
     const D = sc.tl.duration, o = selObj(), real = o && TL.objById(sc, o.id), tr = real && TL.trackOf(sc, real.id);
     p.append(bind({ d: D }, 'd', 'num', { label: 'Total duration (s)', min: 0.5, max: 600, step: 0.5, after: v => { if (isFinite(v) && v >= 0.5) { TL.setDuration(sc, v); tlTouch(sc); renderMtl(); updateTransport(); } } }),
       h('div', { className: 'tlnote', text: 'The length you type here is the length of the scene. Keys never change it.' }));
+    if (TL.camKind(sc)) camSection(p, sc);
+    if (sc.bg.type === 'video') mediaSection(p, sc);
     p.append(h('div', { className: 'h', text: o ? 'Selected: ' + objLabel(o) : 'Selected object' }));
     if (!o) p.append(h('div', { className: 'hint', text: 'Click an object on the map. Then move the playhead and drag it (or change its numbers) – a key is made at the playhead time. Several objects can have different key times.' }));
     else {
@@ -710,7 +764,14 @@
         h('div', { className: 'tlnote', text: mode === 'follow' ? 'Follows the other object’s path and timing and keeps its own offset. Move it at any time to keyframe its offset; choose Independent to unlink (it stays exactly where it is on screen).' : mode === 'attach' ? 'Rides on the other object’s drawn curve. Moving it at a chosen time keyframes its position on the front; the link stays.' : 'Moves only by its own keys.' }));
     }
     const ks = tlSelKey();
-    if (ks) {
+    if (ks && ks.oid === CAM) {
+      const k = ks.k, keys = TL.camKeys(sc), idx = keys.indexOf(k), zz = k.v.z != null ? ' · zoom ' + k.v.z.toFixed(2) : '';
+      p.append(h('div', { className: 'h', text: 'Selected camera key' }), h('div', { className: 'tlkey', id: 'tlCamKeyBox' },
+        h('div', { text: (idx === 0 ? 'Start view' : 'Camera key ' + idx) + ' at ' + k.t.toFixed(1) + ' s' + zz }),
+        idx > 0 ? sbNum('Time (s)', k.t, 0.1, sc.tl.duration, 0.1, v => { if (!TL.camMoveKey(sc, k.id, v)) toast('That time is taken by another key'); tlTouch(sc); commit(); renderMtl(); renderPanels(); }, false, 'Move this camera key to another time') : h('div', { className: 'tlnote', text: 'The start view stays at 0 s.' }),
+        idx > 0 ? h('div', { className: 'row' }, h('label', { text: 'Move into this key' }), (() => { const el = h('select', { id: 'tlCamEase' }, TL.CAM_EASES.map(e => h('option', { value: e[0], text: e[1], selected: (k.e || 'smooth') === e[0] }))); el.addEventListener('change', () => { TL.camSetEase(sc, k.id, el.value); tlTouch(sc); commit(); renderPanels(); }); return el; })()) : null,
+        idx > 0 ? h('div', { className: 'btnrow' }, h('button', { className: 'dng', text: '🗑 Delete key', on: { click: () => tlDelKey(CAM, k.id) } })) : null));
+    } else if (ks) {
       const k = ks.k, tr2 = TL.trackOf(sc, ks.oid), idx = tr2.keys.indexOf(k), kp = TL.keyPos(k);
       p.append(h('div', { className: 'h', text: 'Selected key' }), h('div', { className: 'tlkey' },
         h('div', { text: (idx === 0 ? 'Start pose' : 'Key ' + MLET(idx)) + ' at ' + k.t.toFixed(1) + ' s' + (kp ? ' · position ' + kp[0].toFixed(2) + ', ' + kp[1].toFixed(2) : '') }),
@@ -752,8 +813,9 @@
   }
   function renderStepbar() {
     renderMtl(); const box = sbar(); if (!box) return; const sc = S.show && S.show.scenes[S.si];
-    const on0 = $('#bAnimOn'), tlb = $('#bTlOn'); if (!sc || !isMap(sc.bg)) { box.hidden = true; box.textContent = ''; if (on0) on0.hidden = true; if (tlb) tlb.hidden = true; return; }
+    const on0 = $('#bAnimOn'), tlb = $('#bTlOn'); if (!sc) { box.hidden = true; box.textContent = ''; if (on0) on0.hidden = true; if (tlb) tlb.hidden = true; return; }
     if (tlb) { tlb.hidden = MA.isAnimated(sc) || tlOn(sc); tlb.onclick = tlEnable; }
+    if (!isMap(sc.bg)) { box.hidden = true; box.textContent = ''; if (on0) on0.hidden = true; return; }       // the older step system stays map-only
     if (tlOn(sc)) { box.hidden = true; box.textContent = ''; if (on0) on0.hidden = true; return; }
     const on = $('#bAnimOn'); if (on) { on.hidden = MA.isAnimated(sc); on.onclick = animEnable; on.textContent = '⧉ Steps (v0.11.5)'; on.title = 'Older step-by-step animation (still supported). The master timeline (🎞 Animate) is the recommended way.'; }
     if (!MA.isAnimated(sc)) { box.hidden = true; box.textContent = ''; return; }      // un-animated: just the small "Animate" button in the transport row
@@ -844,7 +906,7 @@
       if (S.mode === 'edit') {
         { const rs = realScene(); if (tlOn(rs)) { const sn = tlSession(rs); TL.liveSync(sn.ed); } else MA.syncAttach(cur().objects, attachMemo, attachCtx()); }   // v0.11.5: icons / text / H-L attached to a front follow it while you edit
         E.renderScene(sctx, S.show, cur(), clock(),
-          {editing:true,camT:editT(),liveMap:true});
+          {editing:true,camT:editT(),liveMap:true,sceneT:tlOn(realScene())?editT():null});
         // Keep the active map thumbnail current by copying the FINISHED
         // editor stage, not by rendering a second Mapbox camera. This is
         // intentionally independent of asynchronous MB.onUpdate events.
@@ -1031,7 +1093,7 @@
     ],false));
 
     const bgNodes=[
-      bind(b, 'type', 'select', { label: 'Type', rerender: true, after: () => { b.view = null; b.view2 = null; S.editEnd = false; if (b.type === 'mapbox') g.MB.init().then(() => { refreshAll(); }).catch(() => { refreshAll(); }); }, options: [['mapbox', 'Mapbox map'], ['map', 'US map (basic, offline)'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] })
+      bind(b, 'type', 'select', { label: 'Type', rerender: true, after: () => { camReset(); b.view = null; b.view2 = null; S.editEnd = false; if (b.type === 'mapbox') g.MB.init().then(() => { refreshAll(); }).catch(() => { refreshAll(); }); }, options: [['mapbox', 'Mapbox map'], ['map', 'US map (basic, offline)'], ['gradient', 'Gradient'], ['solid', 'Solid colour'], ['image', 'Your image']] })
     ];
     if (b.type === 'map') {
       if (b.counties == null) b.counties = true;
@@ -1039,7 +1101,7 @@
       if (b.cities == null) b.cities = true;
       bgNodes.push(
         bind(b, 'theme', 'select', { label: 'Style', options: [['dark', 'Dark blue'], ['radar', 'Radar grey'], ['slate', 'Slate'], ['light', 'Light']] }),
-        bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; } }),
+        bind(b, 'region', 'select', { label: 'Region', options: g.WDMap.regionList, after: () => { camReset(); b.view = null; b.view2 = null; S.editEnd = false; } }),
         bind(b, 'cities', 'check', { label: 'City labels', after: v => { b.cities = v; } }),
         bind(b, 'counties', 'check', { label: 'County lines (zoomed in)', after: v => { b.counties = v; } }),
         bind(b, 'cityDensity', 'range', { min: 0.3, max: 4, step: 0.1, label: 'Label density' }),
@@ -1065,11 +1127,11 @@
 
     if (b.type === 'mapbox') {
       g.MB.ensureConfig(b);
-      const mv = (S.editEnd && b.view2) ? b.view2 : (b.view || (b.view = JSON.parse(JSON.stringify(E.viewAt(sc, 0)))));
+      const mv = (tlOn(realScene()) && TL.camKind(realScene())) ? camProxy() : (S.editEnd && b.view2) ? b.view2 : (b.view || (b.view = JSON.parse(JSON.stringify(E.viewAt(sc, 0)))));
       const basic = [
         bind(b, 'mbStyle', 'select', { label: 'Map style', rerender:true, options: g.MB.STYLES, after:()=>g.MB.ensureConfig(b) }),
         bind(b, 'proj', 'select', { label: 'Projection', options: g.MB.PROJ }),
-        bind(b, 'region', 'select', { label: 'Camera view', options: g.MB.regionList, after: () => { b.view = null; b.view2 = null; S.editEnd = false; renderPanels(); } }),
+        bind(b, 'region', 'select', { label: 'Camera view', options: g.MB.regionList, after: () => { camReset(); b.view = null; b.view2 = null; S.editEnd = false; renderPanels(); } }),
         bind(mv, 'z', 'range', { min: 0, max: 18, step: 0.05, label: 'Zoom', after:updateZoomBadge }),
         bind(b, 'showZoomBadge', 'check', { label: 'Show zoom level', after:updateZoomBadge }),
         bind(mv, 'b', 'range', { min: -180, max: 180, step: 1, label: 'Rotate' }),
@@ -1406,7 +1468,9 @@
       }
     }
 
-    if (b.type === 'map' || b.type === 'mapbox') {
+    if ((b.type === 'map' || b.type === 'mapbox') && tlOn(realScene())) {
+      p.append(mapAccordion('cameraMove', 'Camera Move', [h('div', { className: 'hint', text: 'The camera is part of the master timeline: move the playhead, then pan / zoom / rotate / tilt the map to make camera keys (see the Animation tab).' }), h('div', { className: 'btnrow' }, h('button', { text: 'Open camera in Animation tab', on: { click: () => setTab('anim') } }))], false));
+    } else if (b.type === 'map' || b.type === 'mapbox') {
       const cameraNodes=[h('div', { className: 'btnrow' },
         h('button', { text: 'Edit START view', className: S.editEnd ? '' : 'on', on: { click: () => { S.editEnd = false; renderPanels(); } } }),
         h('button', { text: 'Edit END view', className: S.editEnd ? 'on' : '', on: { click: () => { if (!b.view2) { b.view2 = JSON.parse(JSON.stringify(E.viewAt(sc, 0))); b.camDur = 3; b.camDelay = 0.5; } S.editEnd = true; renderPanels(); } } }),
@@ -1712,7 +1776,7 @@
     renderPanels();
   }
   function useVideo(rec) {
-    const sc = cur(), v = E.videos[rec.id]; if (v.err) { toast('This GIF could not be read: ' + v.err); return; } const go = () => { const asp = v.w / v.h; sc.bg = Object.assign({}, sc.bg, { type: 'video', vid: rec.id, vidStart: 0, vidLoop: !!v.gif, fit: Math.abs(asp - 16 / 9) < 0.04 ? 'fill' : 'blur', kenburns: false }); if (v.dur > 0) sc.duration = Math.max(1, Math.round(v.dur * 10) / 10); commit(); refreshAll(); toast('Video set as this scene’s background (scene length matched to the video)'); };
+    const sc = cur(), v = E.videos[rec.id]; if (v.err) { toast('This GIF could not be read: ' + v.err); return; } const go = () => { const asp = v.w / v.h; sc.bg = Object.assign({}, sc.bg, { type: 'video', vid: rec.id, vidStart: 0, vidLoop: !!v.gif, fit: Math.abs(asp - 16 / 9) < 0.04 ? 'fill' : 'blur', kenburns: false }); if (v.dur > 0) { const rs = realScene(); if (rs.tl && tlOn(rs)) { delete rs.bg.vidEnd; delete rs.bg.vidSpeed; TL.fitToMedia(rs, v.dur); S.tlT = 0; tlTouch(rs); } else sc.duration = Math.max(1, Math.round(v.dur * 10) / 10); } commit(); refreshAll(); toast('Video set as this scene’s background (scene length matched to the video)'); };
     if (v.ok) go(); else if (v.gif) { toast('Reading GIF frames…'); const iv = setInterval(() => { if (v.ok) { clearInterval(iv); go(); } else if (v.err) { clearInterval(iv); toast('This GIF could not be read: ' + v.err); } }, 150); } else { toast('Loading video…'); v.el.addEventListener('loadedmetadata', () => setTimeout(go, 50), { once: true }); }
   }
   function videosPanel(p) {
@@ -1727,8 +1791,8 @@
       const v = E.videos[b.vid]; p.append(h('div', { className: 'h', text: 'This scene’s video' }), h('div', { className: 'hint', text: (v ? v.name + (v.dur ? ' – ' + v.dur.toFixed(1) + ' s, ' + v.w + '×' + v.h : '') : 'Video not found in this browser') }),
         bind(b, 'fit', 'select', { label: 'Video fit', rerender: true, options: [['fill', 'Fill (crop edges)'], ['blur', 'Fit whole video + blurred fill'], ['solid', 'Fit whole video + solid color'], ['stretch', 'Stretch to frame']] }),
         ...((b.fit === 'solid') ? [bind(b, 'fitColor', 'color', { label: 'Bar color' })] : []),
-        bind(b, 'vidStart', 'num', { label: 'Start at (seconds)', min: 0, max: 600, step: 0.1 }), bind(b, 'vidLoop', 'check', { label: 'Loop if the scene is longer' }),
-        h('div', { className: 'btnrow' }, h('button', { text: 'Match scene length to video', on: { click: () => { if (v && v.dur) { sc.duration = Math.max(1, Math.round((v.dur - (+b.vidStart || 0)) * 10) / 10); commit(); refreshAll(); } } } })));
+        bind(b, 'vidStart', 'num', { label: 'Start at (seconds)', min: 0, max: 600, step: 0.1 }), bind(b, 'vidEnd', 'num', { label: 'End at (seconds, 0 = end of clip)', min: 0, max: 600, step: 0.1 }), bind(b, 'vidSpeed', 'num', { label: 'Speed (1 = normal)', min: 0.1, max: 8, step: 0.05 }), bind(b, 'vidLoop', 'check', { label: 'Loop if the scene is longer' }),
+        h('div', { className: 'btnrow' }, h('button', { text: 'Match scene length to video', on: { click: () => { if (v && v.dur) { const rs = realScene(); if (!TL.fitToMedia(rs, v.dur)) rs.duration = Math.max(1, Math.round((v.dur - (+b.vidStart || 0)) * 10) / 10); tlTouch(rs); commit(); refreshAll(); } } } })));
     }
     if (!vidList.length) { p.append(h('div', { className: 'hint', text: 'No videos yet.' })); return; }
     const list = h('div', { style: 'display:grid;gap:8px;margin-top:10px' });

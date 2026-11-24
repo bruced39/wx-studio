@@ -65,9 +65,17 @@ BUILD = r"""(name)=>{const E=WX.E,MA=MapAnim,TL=Timeline;
   const ik=A.tl.tracks.i1.keys; TL.setHandles(A,'i1',ik[1].id,[0.1,0.3],[-0.1,0.1]); TL.setPath(A,'i1',ik[2].id,'curve'); TL.setEase(A,'i1',ik[2].id,'inout');
   edit(4,o=>{const q=o.find(x=>x.id==='s1');q.x=900;q.y=500}); edit(8,o=>{const q=o.find(x=>x.id==='l1');q.x+=0.05;q.y+=0.02});
   [C,D].forEach(s=>{MA.enable(s); MA.setStep(s,0,{hold:1}); MA.addStep(s,0,{hold:1,dur:2}); const q=s.anim.steps[1].objects.find(o=>o.id==='lf'); q.pts=q.pts.map(p=>[p[0]+100,p[1]-40]); s.anim.steps[1].objects.find(o=>o.id==='li').x=1100; MA.normalize(s)});
+  /* v0.11.7: camera keys on the same timeline (smooth, one eased) */
+  TL.camSetKey(A,0,{c:[-71.5,42.3],z:6,b:0,p:0}); TL.camSetKey(A,4,{c:[-71.0,42.6],z:7.5,b:20,p:35}); const ck=TL.camSetKey(A,9,{c:[-70.6,42.4],z:8.5,b:-30,p:20}); TL.camSetEase(A,ck.id,'inout');
   const r=TL.fromSteps(D); WX.commit(); return r;}"""
+ADDM = r"""async(b64)=>{const E=WX.E,TL=Timeline,bin=atob(b64),u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+  const v=E.registerGif('vidPersist',new Blob([u8],{type:'image/gif'}),'persist-clip'); for(let i=0;i<100&&!v.ok;i++)await new Promise(r=>setTimeout(r,50));
+  const sc=E.newScene({id:'scM',name:'Media',duration:4,bg:{type:'video',vid:'vidPersist',vidStart:0,vidLoop:false,fit:'fill',kenburns:false},title:{show:false,text:'',sub:''},transition:{type:'cut',dur:0},objects:[E.newObject('icon',{id:'mi',x:300,y:900,icon:'sunny',size:110})]});
+  sc.objects.forEach(o=>{o.anim={in:'none',delay:0,dur:0.01}}); WX.S.show.scenes.push(sc); TL.enable(sc,{duration:4}); TL.fitToMedia(sc,v.dur); sc.bg.vidStart=0.4; sc.bg.vidEnd=3.6; sc.bg.vidSpeed=1.5; TL.fitToMedia(sc,v.dur);
+  const ed=TL.beginEdit(sc,1.5); ed.objs[0].x=1200; ed.objs[0].y=500; TL.flush(sc,ed); WX.commit(); return {ok:v.ok,dur:sc.tl.duration,keys:sc.tl.tracks.mi.keys.length};}"""
 SNAP = r"""()=>{const r=v=>typeof v==='number'?Math.round(v*1e5)/1e5:v;const clean=o=>JSON.parse(JSON.stringify(o,(k,v)=>typeof v==="number"?Math.round(v*1e5)/1e5:v));
   return JSON.stringify(WX.S.show.scenes.map(sc=>({id:sc.id,d:sc.duration,tl:sc.tl?clean(sc.tl):null,anim:sc.anim?clean(sc.anim):null,o:clean(sc.objects.map(o=>({id:o.id,x:o.x,y:o.y,pts:o.pts,attach:o.attach&&[o.attach.to,o.attach.u,o.attach.t,o.attach.n],follow:o.follow&&o.follow.to}))),
+    cam:sc.tl?[0,1.5,3,4.4,6,7.7,9,10.5,12].map(t=>clean(Timeline.camAt(sc,t))):null, media:sc.bg.type==='video'?clean([sc.bg.vid,sc.bg.vidStart,sc.bg.vidEnd,sc.bg.vidSpeed,sc.bg.vidLoop,[0,.7,1.4,2.1].map(t=>Timeline.mediaTime(sc.bg,4,t))]):null,
     at:sc.tl?[0,1.5,3,4.4,6,7.7,9,10.5,12].map(t=>clean(Timeline.objectsAt(sc,t).map(o=>({id:o.id,x:o.x,y:o.y,pts:o.pts,h:o.hidden||false})))):null})))}"""
 def _canon(x): return json.dumps(json.loads(x), sort_keys=True)   # PostgreSQL jsonb does not keep key order
 def snap(pg): return _canon(pg.evaluate(SNAP))
@@ -77,6 +85,11 @@ with sync_playwright() as p:
     br = p.chromium.launch(args=['--no-sandbox'])
     c1, a = new_computer(br)
     r = a.evaluate(BUILD, 'Timeline persistence'); a.wait_for_timeout(500)
+    import io as _io, base64 as _b64
+    from PIL import Image as _Im
+    _fr = [_Im.new('RGB', (320, 180), (i * 12, 255 - i * 12, 64)) for i in range(20)]; _bio = _io.BytesIO(); _fr[0].save(_bio, format='GIF', save_all=True, append_images=_fr[1:], duration=200, loop=0, optimize=False, disposal=1)
+    GIFB64 = _b64.b64encode(_bio.getvalue()).decode(); mres = a.evaluate(ADDM, GIFB64); a.wait_for_timeout(500)
+    chk('v0.11.7 test content: 3 camera keys on the map scene; a GIF scene with trim 0.4-3.6 s, speed 1.5 and a graphics key', mres['ok'] and mres['keys'] == 2 and abs(mres['dur'] - (3.2 / 1.5)) < 0.06 and a.evaluate("WX.S.show.scenes[0].tl.cam.keys.length") == 3, mres)
     S0 = snap(a); K0 = keyct(a)
     chk('test show built: pinned master timeline scene with links, a v0.11.5 step scene and a converted scene', r['ok'] and K0 >= 10, (r, K0))
     chk('scene 1 is a master timeline, scene 2 a step show, scene 3 converted (tl + legacy copy)', a.evaluate("(()=>{const s=WX.S.show.scenes;return !!s[0].tl&&!s[0].anim&&!!s[1].anim&&!s[1].tl&&!!s[2].tl&&!s[2].anim&&!!s[2].tl.legacy})()"))
@@ -95,10 +108,13 @@ with sync_playwright() as p:
     chk('scene.duration equals tl.duration in the file', abs(sc0['duration'] - sc0['tl']['duration']) < 1e-9 and sc0['tl']['duration'] == 12)
     c2, b = new_computer(br); b.set_input_files('#fileOpen', jpath); b.wait_for_timeout(1800)
     chk('Open of the .wxshow.json in a brand-new browser: identical', snap(b) == S0)
-    pk = b.evaluate("""async()=>{const r=await WXShowFile.pack(WX.S.show,{videos:{},appVersion:'test'});const buf=new Uint8Array(await r.blob.arrayBuffer());let s='';for(let i=0;i<buf.length;i+=8192)s+=String.fromCharCode.apply(null,buf.subarray(i,i+8192));return btoa(s)}""")
+    a.evaluate("""async(b64)=>{const bin=atob(b64),u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);const v=WX.E.registerGif('vidPersist',new Blob([u8],{type:'image/gif'}),'persist-clip');for(let i=0;i<100&&!v.ok;i++)await new Promise(r=>setTimeout(r,50))}""", GIFB64)   # the reload above dropped the (browser-only) clip
+    pk = a.evaluate("""async()=>{const r=await WXShowFile.pack(WX.S.show,{videos:WX.E.videos,appVersion:'test'});const buf=new Uint8Array(await r.blob.arrayBuffer());let s='';for(let i=0;i<buf.length;i+=8192)s+=String.fromCharCode.apply(null,buf.subarray(i,i+8192));return btoa(s)}""")
     ppath = TMP + '/pkg.wxshow'; open(ppath, 'wb').write(base64.b64decode(pk)); chk('the .wxshow package is a zip', open(ppath, 'rb').read(2) == b'PK')
     c3, c = new_computer(br); c.set_input_files('#fileOpen', ppath); c.wait_for_timeout(2000)
     chk('Open of the .wxshow package in a third fresh browser: identical', snap(c) == S0)
+    wait(c, "()=>{const s=WX.S.show.scenes.find(x=>x.bg&&x.bg.type==='video');const v=s&&WX.E.videos[s.bg.vid];return !!(v&&v.ok)}", 15000)
+    chk('the .wxshow package carries the GIF: it is registered again in the fresh browser and the media clock + camera sample the same', c.evaluate("(()=>{const s=WX.S.show.scenes.find(x=>x.bg&&x.bg.type==='video');const v=s&&WX.E.videos[s.bg.vid];return !!(v&&v.gif&&v.ok&&Math.abs(v.dur-4)<0.05)})()"), c.evaluate("JSON.stringify(Object.keys(WX.E.videos))"))
     c3.close()
     # ---------- 3. cloud ----------
     sign_in(a, 'a@x.test'); click_btn(a, 'Continue'); a.wait_for_timeout(2500)
@@ -142,7 +158,7 @@ with sync_playwright() as p:
     h0 = dd.evaluate("WX.S.hist.length"); j0 = dd.evaluate("JSON.stringify(WX.S.show.scenes)"); dd.wait_for_timeout(1200)
     chk('nothing changes (no history entries) while the damaged show sits open', dd.evaluate("WX.S.hist.length") == h0 and dd.evaluate("JSON.stringify(WX.S.show.scenes)") == j0)
     chk('no page errors opening the damaged file', not dd.errs, dd.errs[:2]); c7.close()
-    chk('no page errors anywhere', not (a.errs or b.errs or c.errs), (a.errs + b.errs)[:2])
+    chk('no page errors anywhere', not (a.errs or b.errs or c.errs), (a.errs + b.errs + c.errs)[:3])
     br.close()
 srv.terminate()
 bad_ = [r for r in res if not r[1]]
